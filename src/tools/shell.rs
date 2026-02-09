@@ -2,28 +2,187 @@
 
 use anyhow::Result;
 use serde_json::{json, Value};
-use std::path::PathBuf;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 use tokio::process::Command;
 
+use crate::tools::truncation::smart_truncate_streams;
 use crate::tools::DynTool;
 
 const MAX_OUTPUT: usize = 10_000;
 
-const BLOCKED_PATTERNS: &[&str] = &[
-    "rm -rf /", "mkfs", "dd if=", "format", "shutdown", "reboot",
-    ":(){", "fork bomb",
-];
+// ---------------------------------------------------------------------------
+// CommandPolicy – configurable deny/allow pattern matching
+// ---------------------------------------------------------------------------
+
+/// Command security policy that validates commands against configurable
+/// deny and allow pattern lists before execution.
+#[derive(Debug, Clone)]
+pub struct CommandPolicy {
+    pub deny_patterns: Vec<String>,
+    pub allow_patterns: Option<Vec<String>>,
+}
+
+impl CommandPolicy {
+    /// Create a new `CommandPolicy` from the given deny and allow patterns.
+    pub fn new(deny_patterns: Vec<String>, allow_patterns: Option<Vec<String>>) -> Self {
+        Self {
+            deny_patterns,
+            allow_patterns,
+        }
+    }
+
+    /// Validate whether a command is allowed to execute.
+    ///
+    /// Checks deny patterns first – if any deny pattern matches (case-insensitive
+    /// substring), the command is rejected.  Then, if an allow list is configured,
+    /// the command must match at least one allow pattern to be accepted.
+    pub fn validate(&self, command: &str) -> std::result::Result<(), String> {
+        let lower = command.to_lowercase();
+
+        // 1. Check deny patterns – reject if any match
+        for pat in &self.deny_patterns {
+            if lower.contains(&pat.to_lowercase()) {
+                return Err(format!(
+                    "Command rejected: matches deny pattern '{}'. Command: {}",
+                    pat, command
+                ));
+            }
+        }
+
+        // 2. Check allow patterns – if set, command must match at least one
+        if let Some(ref allow) = self.allow_patterns {
+            let allowed = allow
+                .iter()
+                .any(|pat| lower.contains(&pat.to_lowercase()));
+            if !allowed {
+                return Err(format!(
+                    "Command rejected: does not match any allow pattern. Command: {}",
+                    command
+                ));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl Default for CommandPolicy {
+    fn default() -> Self {
+        Self {
+            deny_patterns: vec![
+                "rm -rf /".to_string(),
+                "mkfs".to_string(),
+                "dd if=".to_string(),
+                "format".to_string(),
+                "shutdown".to_string(),
+                "reboot".to_string(),
+                ":(){".to_string(),
+                "fork bomb".to_string(),
+            ],
+            allow_patterns: None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ExecResult – enhanced execution result with full context
+// ---------------------------------------------------------------------------
+
+/// Enhanced execution result containing full execution context.
+#[derive(Debug, Clone)]
+pub struct ExecResult {
+    pub exit_code: i32,
+    pub stdout: String,
+    pub stderr: String,
+    pub duration_ms: u64,
+    pub working_dir: String,
+    pub truncated: bool,
+    pub original_size: Option<usize>,
+}
+
+impl ExecResult {
+    /// Format the result as a human-readable string for the LLM.
+    pub fn to_display_string(&self) -> String {
+        let mut result = format!(
+            "exit code: {}\nworking_dir: {}\nduration: {}ms\n",
+            self.exit_code, self.working_dir, self.duration_ms
+        );
+        if !self.stdout.is_empty() {
+            result.push_str(&self.stdout);
+        }
+        if !self.stderr.is_empty() {
+            result.push_str("\n[stderr]\n");
+            result.push_str(&self.stderr);
+        }
+        if self.truncated {
+            if let Some(orig) = self.original_size {
+                result.push_str(&format!(
+                    "\n...[truncated, original size: {} bytes]",
+                    orig
+                ));
+            } else {
+                result.push_str("\n...[truncated]");
+            }
+        }
+        result
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Workspace path validation
+// ---------------------------------------------------------------------------
+
+/// Verify that `target` resolves to a path within `workspace`.
+/// Returns `Ok(resolved)` on success, or an error message on failure.
+fn validate_workspace_path(
+    workspace: &Path,
+    target: &Path,
+) -> std::result::Result<PathBuf, String> {
+    // Resolve both paths to canonicalize symlinks / ".." etc.
+    // If the target doesn't exist yet we fall back to lexical resolution.
+    let ws_canon = workspace
+        .canonicalize()
+        .unwrap_or_else(|_| workspace.to_path_buf());
+
+    let target_canon = target
+        .canonicalize()
+        .unwrap_or_else(|_| {
+            // For non-existent paths, do a best-effort absolute resolution
+            if target.is_absolute() {
+                target.to_path_buf()
+            } else {
+                ws_canon.join(target)
+            }
+        });
+
+    if target_canon.starts_with(&ws_canon) {
+        Ok(target_canon)
+    } else {
+        Err(format!(
+            "Working directory '{}' is outside the workspace '{}'",
+            target.display(),
+            workspace.display()
+        ))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ExecTool
+// ---------------------------------------------------------------------------
 
 pub struct ExecTool {
     pub workspace: PathBuf,
     pub timeout_secs: u64,
     pub restrict_to_workspace: bool,
+    pub policy: CommandPolicy,
 }
 
 #[async_trait::async_trait]
 impl DynTool for ExecTool {
-    fn name(&self) -> &str { "exec" }
+    fn name(&self) -> &str {
+        "exec"
+    }
     fn description(&self) -> &str {
         "Execute a shell command and return output. Dangerous commands are blocked."
     }
@@ -39,42 +198,267 @@ impl DynTool for ExecTool {
     }
     async fn call(&self, args: Value) -> Result<String> {
         let cmd_str = args["command"].as_str().unwrap_or("");
-        let lower = cmd_str.to_lowercase();
-        for pat in BLOCKED_PATTERNS {
-            if lower.contains(pat) {
-                anyhow::bail!("Blocked dangerous command: {}", cmd_str);
-            }
-        }
 
+        // Validate command against policy
+        self.policy
+            .validate(cmd_str)
+            .map_err(|e| anyhow::anyhow!(e))?;
+
+        // Resolve working directory
         let cwd = args["working_dir"]
             .as_str()
             .map(PathBuf::from)
             .unwrap_or_else(|| self.workspace.clone());
 
+        // Validate working directory if restrict_to_workspace is enabled
+        if self.restrict_to_workspace {
+            validate_workspace_path(&self.workspace, &cwd)
+                .map_err(|e| anyhow::anyhow!(e))?;
+        }
+
+        let start = Instant::now();
+
         let output = tokio::time::timeout(
             Duration::from_secs(self.timeout_secs),
             Command::new(if cfg!(windows) { "cmd" } else { "sh" })
-                .args(if cfg!(windows) { vec!["/C", cmd_str] } else { vec!["-c", cmd_str] })
+                .args(if cfg!(windows) {
+                    vec!["/C", cmd_str]
+                } else {
+                    vec!["-c", cmd_str]
+                })
                 .current_dir(&cwd)
                 .output(),
         )
         .await
         .map_err(|_| anyhow::anyhow!("Command timed out after {}s", self.timeout_secs))??;
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let mut result = format!("exit code: {}\n", output.status.code().unwrap_or(-1));
-        if !stdout.is_empty() {
-            result.push_str(&stdout);
-        }
-        if !stderr.is_empty() {
-            result.push_str("\n[stderr]\n");
-            result.push_str(&stderr);
-        }
-        if result.len() > MAX_OUTPUT {
-            result.truncate(MAX_OUTPUT);
-            result.push_str("\n...[truncated]");
-        }
-        Ok(result)
+        let duration_ms = start.elapsed().as_millis() as u64;
+
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let working_dir = cwd.display().to_string();
+
+        let total_size = stdout.len() + stderr.len();
+        let needs_truncation = total_size > MAX_OUTPUT;
+
+        // Apply smart truncation if the combined output exceeds the limit.
+        // smart_truncate_streams handles proportional budget allocation and
+        // preserves the head + tail of each stream.
+        let (truncated_stdout, truncated_stderr, original_size) = if needs_truncation {
+            let (out_r, err_r) =
+                smart_truncate_streams(&stdout, &stderr, MAX_OUTPUT);
+            (out_r.content, err_r.content, Some(total_size))
+        } else {
+            (stdout, stderr, None)
+        };
+
+        let exec_result = ExecResult {
+            exit_code: output.status.code().unwrap_or(-1),
+            stdout: truncated_stdout,
+            stderr: truncated_stderr,
+            duration_ms,
+            working_dir,
+            truncated: needs_truncation,
+            original_size,
+        };
+
+        Ok(exec_result.to_display_string())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---- CommandPolicy tests ----
+
+    #[test]
+    fn policy_default_blocks_dangerous_commands() {
+        let policy = CommandPolicy::default();
+        assert!(policy.validate("rm -rf /").is_err());
+        assert!(policy.validate("sudo mkfs /dev/sda").is_err());
+        assert!(policy.validate("dd if=/dev/zero of=/dev/sda").is_err());
+        assert!(policy.validate("shutdown -h now").is_err());
+        assert!(policy.validate("reboot").is_err());
+    }
+
+    #[test]
+    fn policy_default_allows_safe_commands() {
+        let policy = CommandPolicy::default();
+        assert!(policy.validate("ls -la").is_ok());
+        assert!(policy.validate("echo hello").is_ok());
+        assert!(policy.validate("cargo build").is_ok());
+        assert!(policy.validate("git status").is_ok());
+    }
+
+    #[test]
+    fn policy_deny_is_case_insensitive() {
+        let policy = CommandPolicy::new(vec!["dangerous".to_string()], None);
+        assert!(policy.validate("DANGEROUS command").is_err());
+        assert!(policy.validate("Dangerous Command").is_err());
+        assert!(policy.validate("dangerous").is_err());
+    }
+
+    #[test]
+    fn policy_deny_pattern_match_returns_descriptive_error() {
+        let policy = CommandPolicy::new(vec!["rm -rf /".to_string()], None);
+        let err = policy.validate("rm -rf /").unwrap_err();
+        assert!(err.contains("deny pattern"));
+        assert!(err.contains("rm -rf /"));
+    }
+
+    #[test]
+    fn policy_allow_patterns_restrict_commands() {
+        let policy = CommandPolicy::new(
+            vec![],
+            Some(vec!["cargo".to_string(), "git".to_string()]),
+        );
+        assert!(policy.validate("cargo build").is_ok());
+        assert!(policy.validate("git status").is_ok());
+        assert!(policy.validate("rm -rf /tmp").is_err());
+        assert!(policy.validate("ls -la").is_err());
+    }
+
+    #[test]
+    fn policy_allow_patterns_none_allows_all_non_denied() {
+        let policy = CommandPolicy::new(vec!["bad".to_string()], None);
+        assert!(policy.validate("ls").is_ok());
+        assert!(policy.validate("echo hello").is_ok());
+        assert!(policy.validate("bad command").is_err());
+    }
+
+    #[test]
+    fn policy_deny_checked_before_allow() {
+        // Even if "cargo" is in allow list, deny takes precedence
+        let policy = CommandPolicy::new(
+            vec!["cargo test --dangerous".to_string()],
+            Some(vec!["cargo".to_string()]),
+        );
+        assert!(policy.validate("cargo build").is_ok());
+        assert!(policy.validate("cargo test --dangerous").is_err());
+    }
+
+    #[test]
+    fn policy_empty_deny_and_no_allow_allows_everything() {
+        let policy = CommandPolicy::new(vec![], None);
+        assert!(policy.validate("anything").is_ok());
+        assert!(policy.validate("rm -rf /").is_ok());
+    }
+
+    #[test]
+    fn policy_empty_deny_with_empty_allow_rejects_everything() {
+        let policy = CommandPolicy::new(vec![], Some(vec![]));
+        assert!(policy.validate("ls").is_err());
+        assert!(policy.validate("echo hello").is_err());
+    }
+
+    #[test]
+    fn policy_allow_not_matched_returns_descriptive_error() {
+        let policy = CommandPolicy::new(vec![], Some(vec!["cargo".to_string()]));
+        let err = policy.validate("ls -la").unwrap_err();
+        assert!(err.contains("does not match any allow pattern"));
+    }
+
+    // ---- ExecResult tests ----
+
+    #[test]
+    fn exec_result_display_basic() {
+        let result = ExecResult {
+            exit_code: 0,
+            stdout: "hello\n".to_string(),
+            stderr: String::new(),
+            duration_ms: 42,
+            working_dir: "/tmp".to_string(),
+            truncated: false,
+            original_size: None,
+        };
+        let display = result.to_display_string();
+        assert!(display.contains("exit code: 0"));
+        assert!(display.contains("working_dir: /tmp"));
+        assert!(display.contains("duration: 42ms"));
+        assert!(display.contains("hello"));
+        assert!(!display.contains("[truncated"));
+    }
+
+    #[test]
+    fn exec_result_display_with_stderr() {
+        let result = ExecResult {
+            exit_code: 1,
+            stdout: "out\n".to_string(),
+            stderr: "err\n".to_string(),
+            duration_ms: 100,
+            working_dir: "/home".to_string(),
+            truncated: false,
+            original_size: None,
+        };
+        let display = result.to_display_string();
+        assert!(display.contains("exit code: 1"));
+        assert!(display.contains("out\n"));
+        assert!(display.contains("[stderr]"));
+        assert!(display.contains("err\n"));
+    }
+
+    #[test]
+    fn exec_result_display_truncated_with_original_size() {
+        let result = ExecResult {
+            exit_code: 0,
+            stdout: "data".to_string(),
+            stderr: String::new(),
+            duration_ms: 10,
+            working_dir: "/tmp".to_string(),
+            truncated: true,
+            original_size: Some(50000),
+        };
+        let display = result.to_display_string();
+        assert!(display.contains("[truncated, original size: 50000 bytes]"));
+    }
+
+    #[test]
+    fn exec_result_display_truncated_without_original_size() {
+        let result = ExecResult {
+            exit_code: 0,
+            stdout: "data".to_string(),
+            stderr: String::new(),
+            duration_ms: 10,
+            working_dir: "/tmp".to_string(),
+            truncated: true,
+            original_size: None,
+        };
+        let display = result.to_display_string();
+        assert!(display.contains("[truncated]"));
+        assert!(!display.contains("original size"));
+    }
+
+    // ---- Workspace path validation tests ----
+
+    #[test]
+    fn validate_workspace_path_inside() {
+        let ws = PathBuf::from("/tmp/workspace");
+        let target = PathBuf::from("/tmp/workspace/subdir");
+        // This may fail on systems where /tmp/workspace doesn't exist,
+        // but the fallback logic handles it
+        let result = validate_workspace_path(&ws, &target);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn validate_workspace_path_outside() {
+        let ws = PathBuf::from("/tmp/workspace");
+        let target = PathBuf::from("/etc/passwd");
+        let result = validate_workspace_path(&ws, &target);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("outside the workspace"));
+    }
+
+    #[test]
+    fn validate_workspace_path_relative_stays_inside() {
+        let ws = PathBuf::from("/tmp/workspace");
+        let target = PathBuf::from("subdir");
+        let result = validate_workspace_path(&ws, &target);
+        assert!(result.is_ok());
     }
 }

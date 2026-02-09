@@ -4,6 +4,11 @@
 //! connection with Feishu, receiving messages via event subscription and
 //! sending replies through the IM v1 message API.
 //!
+//! Integrates `RetryPolicy` / `RetryState` for resilient WebSocket
+//! reconnection with exponential backoff on transient errors and immediate
+//! abort + system notification on unrecoverable errors (e.g. invalid
+//! credentials).
+//!
 //! Note: `EventDispatcherHandler` from open-lark is `!Send`, so the
 //! WebSocket event loop runs on a dedicated single-threaded tokio runtime.
 
@@ -17,7 +22,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use tracing::{error, info, warn};
 
 use crate::bus::{InboundMessage, OutboundMessage};
-use crate::channels::Channel;
+use crate::channels::{Channel, RetryPolicy, RetryState};
 use crate::config::FeishuConfig;
 
 pub struct FeishuChannel {
@@ -25,6 +30,45 @@ pub struct FeishuChannel {
     inbound_tx: mpsc::Sender<InboundMessage>,
     outbound_rx: Option<broadcast::Receiver<OutboundMessage>>,
     running: bool,
+}
+
+/// Internal error type to distinguish transient from unrecoverable WS errors.
+#[derive(Debug)]
+enum FeishuWsError {
+    /// Transient error — should be retried with backoff.
+    Transient(String),
+    /// Unrecoverable error — should stop retrying and notify the Agent.
+    Unrecoverable(String),
+}
+
+impl std::fmt::Display for FeishuWsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Transient(msg) => write!(f, "transient: {msg}"),
+            Self::Unrecoverable(msg) => write!(f, "unrecoverable: {msg}"),
+        }
+    }
+}
+
+/// Classify a Feishu WebSocket / API error string as transient or unrecoverable.
+///
+/// Errors containing authentication-related keywords (401, 403, "invalid",
+/// "unauthorized", "forbidden", "credential") are treated as unrecoverable.
+fn classify_feishu_error(error_msg: &str) -> FeishuWsError {
+    let lower = error_msg.to_lowercase();
+    if lower.contains("401")
+        || lower.contains("403")
+        || lower.contains("unauthorized")
+        || lower.contains("forbidden")
+        || lower.contains("invalid app")
+        || lower.contains("invalid credential")
+        || lower.contains("app_id")
+        || lower.contains("app_secret")
+    {
+        FeishuWsError::Unrecoverable(error_msg.to_string())
+    } else {
+        FeishuWsError::Transient(error_msg.to_string())
+    }
 }
 
 impl FeishuChannel {
@@ -81,64 +125,38 @@ impl FeishuChannel {
         }
         Ok(())
     }
-}
 
-#[async_trait]
-impl Channel for FeishuChannel {
-    fn name(&self) -> &str {
-        "feishu"
+    /// Send a system notification to the Agent via the MessageBus.
+    async fn notify_system_error(&self, error_msg: &str) {
+        let notification = InboundMessage {
+            channel: "system".into(),
+            sender_id: "feishu".into(),
+            chat_id: "system".into(),
+            content: format!("[Feishu] Unrecoverable error: {error_msg}"),
+            timestamp: chrono::Utc::now(),
+            media: vec![],
+            metadata: serde_json::json!({
+                "error_kind": "unrecoverable",
+                "source_channel": "feishu",
+            }),
+        };
+        if let Err(e) = self.inbound_tx.send(notification).await {
+            error!("Failed to send system notification for Feishu error: {e}");
+        }
     }
 
-    async fn start(&mut self) -> Result<()> {
-        info!("Feishu channel starting (WebSocket long-connection)");
-        self.running = true;
-
-        let client = self.build_lark_client();
-
-        // --- Verify bot credentials ---
-        match client.bot.v3.info.get(None).await {
-            Ok(response) => {
-                if let Some(data) = response.data {
-                    info!("Feishu bot connected successfully");
-                    if let Some(name) = &data.bot.app_name {
-                        info!("  Bot name: {name}");
-                    }
-                    if let Some(open_id) = &data.bot.open_id {
-                        info!("  Open ID: {open_id}");
-                    }
-                } else {
-                    warn!("Feishu bot info response contained no data");
-                }
-            }
-            Err(e) => {
-                error!("Failed to fetch Feishu bot info: {e:?}");
-            }
-        }
-
-        // --- Spawn outbound message dispatcher ---
-        let mut outbound_rx = self.outbound_rx.take().unwrap();
-        let outbound_client = self.build_lark_client();
-        tokio::spawn(async move {
-            while let Ok(msg) = outbound_rx.recv().await {
-                if msg.channel != "feishu" {
-                    continue;
-                }
-                if let Err(e) =
-                    FeishuChannel::send_text(&outbound_client, &msg.chat_id, &msg.content).await
-                {
-                    error!("Feishu outbound send error: {e:#}");
-                }
-            }
-        });
-
-        // --- Start WebSocket on a dedicated thread ---
-        // EventDispatcherHandler is !Send, so we run the WS event loop
-        // on a single-threaded tokio runtime in a separate OS thread.
-        let inbound_tx = self.inbound_tx.clone();
-        let allow_from = self.config.allow_from.clone();
-        let app_id = self.config.app_id.clone();
-        let app_secret = self.config.app_secret.clone();
-
+    /// Attempt a single WebSocket connection cycle.
+    ///
+    /// This spawns a dedicated OS thread (because `EventDispatcherHandler`
+    /// is `!Send`) and blocks until the connection closes or errors out.
+    /// Returns `Ok(())` if the connection closed normally, or a classified
+    /// error for the retry loop to handle.
+    async fn attempt_ws_connection(
+        inbound_tx: mpsc::Sender<InboundMessage>,
+        allow_from: Vec<String>,
+        app_id: String,
+        app_secret: String,
+    ) -> std::result::Result<(), FeishuWsError> {
         let (result_tx, result_rx) = oneshot::channel::<Result<(), String>>();
 
         std::thread::spawn(move || {
@@ -180,7 +198,8 @@ impl Channel for FeishuChannel {
                             serde_json::from_str::<serde_json::Value>(&msg.content)
                                 .ok()
                                 .and_then(|v| {
-                                    v.get("text").and_then(|t| t.as_str().map(String::from))
+                                    v.get("text")
+                                        .and_then(|t| t.as_str().map(String::from))
                                 })
                                 .unwrap_or_default()
                         } else {
@@ -211,7 +230,9 @@ impl Channel for FeishuChannel {
                         // should not fail under normal conditions.
                         match inbound_tx.try_send(inbound) {
                             Ok(()) => info!("Feishu inbound message forwarded to bus"),
-                            Err(e) => error!("Failed to forward Feishu inbound message: {e}"),
+                            Err(e) => {
+                                error!("Failed to forward Feishu inbound message: {e}")
+                            }
                         }
                     })
                     .expect("Failed to register im.message.receive_v1 handler")
@@ -243,9 +264,152 @@ impl Channel for FeishuChannel {
         // Wait for the WS connection to finish (it blocks until disconnect)
         match result_rx.await {
             Ok(Ok(())) => Ok(()),
-            Ok(Err(e)) => Err(anyhow::anyhow!("Feishu WebSocket error: {e}")),
-            Err(_) => Err(anyhow::anyhow!("Feishu WebSocket thread terminated unexpectedly")),
+            Ok(Err(e)) => Err(classify_feishu_error(&e)),
+            Err(_) => Err(FeishuWsError::Transient(
+                "Feishu WebSocket thread terminated unexpectedly".into(),
+            )),
         }
+    }
+}
+
+#[async_trait]
+impl Channel for FeishuChannel {
+    fn name(&self) -> &str {
+        "feishu"
+    }
+
+    async fn start(&mut self) -> Result<()> {
+        info!("Feishu channel starting (WebSocket long-connection)");
+        self.running = true;
+
+        let client = self.build_lark_client();
+
+        // --- Verify bot credentials ---
+        match client.bot.v3.info.get(None).await {
+            Ok(response) => {
+                if let Some(data) = response.data {
+                    info!("Feishu bot connected successfully");
+                    if let Some(name) = &data.bot.app_name {
+                        info!("  Bot name: {name}");
+                    }
+                    if let Some(open_id) = &data.bot.open_id {
+                        info!("  Open ID: {open_id}");
+                    }
+                } else {
+                    warn!("Feishu bot info response contained no data");
+                }
+            }
+            Err(e) => {
+                // If credential verification fails, treat as unrecoverable
+                let err_str = format!("{e:?}");
+                let classified = classify_feishu_error(&err_str);
+                if matches!(classified, FeishuWsError::Unrecoverable(_)) {
+                    error!("Feishu credential verification failed: {e:?}");
+                    self.notify_system_error(&format!(
+                        "Credential verification failed: {e:?}"
+                    ))
+                    .await;
+                    return Err(anyhow::anyhow!(
+                        "Feishu channel stopped: credential verification failed: {e:?}"
+                    ));
+                }
+                // Transient error during verification — log and continue
+                warn!("Failed to fetch Feishu bot info (transient): {e:?}");
+            }
+        }
+
+        // --- Spawn outbound message dispatcher ---
+        let mut outbound_rx = self.outbound_rx.take().unwrap();
+        let outbound_client = self.build_lark_client();
+        tokio::spawn(async move {
+            while let Ok(msg) = outbound_rx.recv().await {
+                if msg.channel != "feishu" {
+                    continue;
+                }
+                if let Err(e) =
+                    FeishuChannel::send_text(&outbound_client, &msg.chat_id, &msg.content).await
+                {
+                    error!("Feishu outbound send error: {e:#}");
+                }
+            }
+        });
+
+        // --- WebSocket connection loop with retry logic ---
+        let retry_policy = RetryPolicy::default();
+        let mut retry_state = RetryState::new();
+
+        while self.running {
+            let result = FeishuChannel::attempt_ws_connection(
+                self.inbound_tx.clone(),
+                self.config.allow_from.clone(),
+                self.config.app_id.clone(),
+                self.config.app_secret.clone(),
+            )
+            .await;
+
+            match result {
+                Ok(()) => {
+                    // Connection closed normally — reset state and reconnect
+                    if retry_state.attempts > 0 {
+                        info!(
+                            attempts = retry_state.attempts,
+                            "Feishu WebSocket recovered, resetting retry state"
+                        );
+                    }
+                    retry_state.reset();
+                    info!("Feishu WebSocket closed normally, reconnecting...");
+                    // Brief pause before reconnecting to avoid tight loop
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                }
+                Err(FeishuWsError::Unrecoverable(msg)) => {
+                    error!(
+                        error = %msg,
+                        "Feishu encountered unrecoverable error, stopping channel"
+                    );
+                    self.notify_system_error(&msg).await;
+                    self.running = false;
+                    return Err(anyhow::anyhow!(
+                        "Feishu channel stopped: unrecoverable error: {msg}"
+                    ));
+                }
+                Err(FeishuWsError::Transient(msg)) => {
+                    let should_retry =
+                        retry_state.record_failure(&retry_policy, msg.clone());
+
+                    if should_retry {
+                        let delay = retry_state.next_delay(&retry_policy);
+                        warn!(
+                            error = %msg,
+                            attempt = retry_state.attempts,
+                            max_retries = retry_policy.max_retries,
+                            delay_ms = delay.as_millis() as u64,
+                            "Feishu WebSocket error, retrying after backoff"
+                        );
+                        tokio::time::sleep(delay).await;
+                    } else {
+                        // Retries exhausted — enter cooldown
+                        error!(
+                            error = %msg,
+                            attempts = retry_state.attempts,
+                            "Feishu retries exhausted, entering cooldown"
+                        );
+
+                        let cooldown = retry_policy.max_delay;
+                        warn!(
+                            cooldown_secs = cooldown.as_secs(),
+                            "Feishu entering cooldown before reconnection attempt"
+                        );
+                        tokio::time::sleep(cooldown).await;
+
+                        // Reset state and resume connection attempts
+                        retry_state.reset();
+                        info!("Feishu cooldown complete, resuming connection attempts");
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     async fn stop(&mut self) -> Result<()> {

@@ -154,8 +154,17 @@ async fn cmd_agent(message: Option<String>, model: Option<String>) -> Result<()>
     let model = extract_model(&model_name);
     let completion_model = client.completion_model(model.as_str()).await;
 
-    // Build tools
-    let tools = build_default_tools(&cfg, &ws);
+    // Subagent manager (shared via Arc<Mutex<>>)
+    let subagent_mgr = std::sync::Arc::new(
+        tokio::sync::Mutex::new(
+            crate::agent::subagent::SubagentManager::new(
+                cfg.agent.max_concurrent_subagents,
+            ),
+        ),
+    );
+
+    // Build tools (pass subagent manager to SpawnTool)
+    let tools = build_default_tools(&cfg, &ws, std::sync::Arc::clone(&subagent_mgr));
     let tools = std::sync::Arc::new(tools);
 
     // Set up bus
@@ -171,7 +180,8 @@ async fn cmd_agent(message: Option<String>, model: Option<String>) -> Result<()>
         cfg.agent.max_tool_iterations,
         inbound_rx,
         bus.outbound_tx_clone(),
-    );
+    )
+    .await;
 
     // If one-shot message, inject it and collect response
     if let Some(msg) = message {
@@ -255,7 +265,16 @@ async fn cmd_start() -> Result<()> {
     let model = extract_model(&model_name);
     let completion_model = client.completion_model(&model).await;
 
-    let tools = std::sync::Arc::new(build_default_tools(&cfg, &ws));
+    // Subagent manager (shared via Arc<Mutex<>>)
+    let subagent_mgr = std::sync::Arc::new(
+        tokio::sync::Mutex::new(
+            crate::agent::subagent::SubagentManager::new(
+                cfg.agent.max_concurrent_subagents,
+            ),
+        ),
+    );
+
+    let tools = std::sync::Arc::new(build_default_tools(&cfg, &ws, std::sync::Arc::clone(&subagent_mgr)));
 
     let mut bus = crate::bus::MessageBus::new();
     let inbound_tx = bus.inbound_sender();
@@ -269,7 +288,8 @@ async fn cmd_start() -> Result<()> {
         cfg.agent.max_tool_iterations,
         inbound_rx,
         bus.outbound_tx_clone(),
-    );
+    )
+    .await;
     tokio::spawn(async move {
         if let Err(e) = agent_loop.run().await {
             tracing::error!("Agent loop error: {e:#}");
@@ -296,6 +316,21 @@ async fn cmd_start() -> Result<()> {
             );
             if let Err(e) = ch.start().await {
                 tracing::error!("Feishu channel error: {e:#}");
+            }
+        });
+    }
+
+    // Start Discord channel if enabled
+    if cfg.channels.discord.enabled {
+        let dc_inbound = inbound_tx.clone();
+        let dc_outbound = bus.subscribe_outbound();
+        let dc_cfg = cfg.channels.discord.clone();
+        tokio::spawn(async move {
+            let mut ch = crate::channels::discord::DiscordChannel::new(
+                dc_cfg, dc_inbound, dc_outbound,
+            );
+            if let Err(e) = ch.start().await {
+                tracing::error!("Discord channel error: {e:#}");
             }
         });
     }
@@ -423,27 +458,37 @@ fn extract_model(model: &str) -> String {
         model.to_string()
     }
 }
-fn build_default_tools(cfg: &config::Config, ws: &std::path::Path) -> crate::tools::ToolRegistry {
+fn build_default_tools(
+    cfg: &config::Config,
+    ws: &std::path::Path,
+    subagent_mgr: std::sync::Arc<tokio::sync::Mutex<crate::agent::subagent::SubagentManager>>,
+) -> crate::tools::ToolRegistry {
     use crate::tools::*;
     let restrict = cfg.tools.exec.restrict_to_workspace;
     let ws = ws.to_path_buf();
 
     let mut reg = ToolRegistry::new();
-    reg.register(std::sync::Arc::new(filesystem::ReadFileTool { workspace: ws.clone(), restrict }));
-    reg.register(std::sync::Arc::new(filesystem::WriteFileTool { workspace: ws.clone(), restrict }));
-    reg.register(std::sync::Arc::new(filesystem::EditFileTool { workspace: ws.clone(), restrict }));
-    reg.register(std::sync::Arc::new(filesystem::ListDirTool { workspace: ws.clone(), restrict }));
+    reg.register(std::sync::Arc::new(filesystem::ReadFileTool { workspace: ws.clone(), restrict })).expect("register ReadFileTool");
+    reg.register(std::sync::Arc::new(filesystem::WriteFileTool { workspace: ws.clone(), restrict })).expect("register WriteFileTool");
+    reg.register(std::sync::Arc::new(filesystem::EditFileTool { workspace: ws.clone(), restrict })).expect("register EditFileTool");
+    reg.register(std::sync::Arc::new(filesystem::ListDirTool { workspace: ws.clone(), restrict })).expect("register ListDirTool");
     reg.register(std::sync::Arc::new(shell::ExecTool {
         workspace: ws.clone(),
         timeout_secs: cfg.tools.exec.timeout_secs,
         restrict_to_workspace: restrict,
-    }));
+        policy: shell::CommandPolicy::new(
+            cfg.tools.exec.deny_patterns.clone(),
+            cfg.tools.exec.allow_patterns.clone(),
+        ),
+    })).expect("register ExecTool");
     if !cfg.tools.web.brave_api_key.is_empty() {
         reg.register(std::sync::Arc::new(web::WebSearchTool {
             api_key: cfg.tools.web.brave_api_key.clone(),
-        }));
+        })).expect("register WebSearchTool");
     }
-    reg.register(std::sync::Arc::new(web::WebFetchTool));
-    reg.register(std::sync::Arc::new(spawn::SpawnTool));
+    reg.register(std::sync::Arc::new(web::WebFetchTool)).expect("register WebFetchTool");
+    reg.register(std::sync::Arc::new(spawn::SpawnTool {
+        manager: subagent_mgr,
+    })).expect("register SpawnTool");
     reg
 }

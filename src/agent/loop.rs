@@ -8,9 +8,10 @@ use rig_dyn::CompletionModel;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
-use tracing::{error, info, warn};
+use tracing::{error, info, warn, Instrument};
 
 use crate::agent::context::ContextBuilder;
+use crate::agent::session::SessionStore;
 use crate::bus::{InboundMessage, OutboundMessage};
 use crate::tools::ToolRegistry;
 
@@ -22,10 +23,11 @@ pub struct AgentLoop {
     inbound_rx: mpsc::Receiver<InboundMessage>,
     outbound_tx: broadcast::Sender<OutboundMessage>,
     sessions: std::collections::HashMap<String, Vec<Message>>,
+    session_store: SessionStore,
 }
 
 impl AgentLoop {
-    pub fn new(
+    pub async fn new(
         model: Box<dyn CompletionModel>,
         workspace: PathBuf,
         tools: Arc<ToolRegistry>,
@@ -33,6 +35,22 @@ impl AgentLoop {
         inbound_rx: mpsc::Receiver<InboundMessage>,
         outbound_tx: broadcast::Sender<OutboundMessage>,
     ) -> Self {
+        let session_store = SessionStore::new(&workspace);
+
+        // Restore previously persisted sessions from disk
+        let sessions = match session_store.load_all_sessions().await {
+            Ok(s) => {
+                if !s.is_empty() {
+                    info!(count = s.len(), "Restored persisted sessions");
+                }
+                s
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to load persisted sessions, starting fresh");
+                std::collections::HashMap::new()
+            }
+        };
+
         Self {
             context: ContextBuilder::new(&workspace),
             model,
@@ -40,7 +58,8 @@ impl AgentLoop {
             max_iterations,
             inbound_rx,
             outbound_tx,
-            sessions: std::collections::HashMap::new(),
+            sessions,
+            session_store,
         }
     }
 
@@ -56,80 +75,111 @@ impl AgentLoop {
 
     async fn handle_message(&mut self, msg: InboundMessage) -> Result<()> {
         let session_key = msg.session_key();
-        info!(channel = %msg.channel, chat = %msg.chat_id, "Processing message");
+        let span = tracing::info_span!(
+            "handle_message",
+            session_key = %session_key,
+            channel = %msg.channel,
+            message_length = msg.content.len(),
+        );
 
-        let system_prompt = self.context.build_system_prompt();
-        let tool_defs = self.tools.rig_definitions();
+        async {
+            let start = std::time::Instant::now();
+            info!(chat = %msg.chat_id, "Processing message");
 
-        let history = self.sessions.entry(session_key.clone()).or_default();
-        history.push(Message::user(&msg.content));
+            let system_prompt = self.context.build_system_prompt();
+            let tool_defs = self.tools.rig_definitions();
 
-        let mut iterations = 0u32;
+            let history = self.sessions.entry(session_key.clone()).or_default();
+            history.push(Message::user(&msg.content));
 
-        loop {
-            iterations += 1;
-            if iterations > self.max_iterations {
-                warn!("Max iterations ({}) reached", self.max_iterations);
-                break;
-            }
+            let mut iterations = 0u32;
 
-            let request = CompletionRequest {
-                preamble: Some(system_prompt.clone()),
-                chat_history: history.clone(),
-                prompt: Message::user(""),
-                tools: tool_defs.clone(),
-                documents: vec![],
-                temperature: None,
-                max_tokens: None,
-                additional_params: None,
-            };
+            loop {
+                iterations += 1;
+                if iterations > self.max_iterations {
+                    warn!("Max iterations ({}) reached", self.max_iterations);
+                    break;
+                }
 
-            let response = self.model.completion(request).await?;
+                let request = CompletionRequest {
+                    preamble: Some(system_prompt.clone()),
+                    chat_history: history.clone(),
+                    prompt: Message::user(""),
+                    tools: tool_defs.clone(),
+                    documents: vec![],
+                    temperature: None,
+                    max_tokens: None,
+                    additional_params: None,
+                };
 
-            let mut has_tool_calls = false;
-            let mut text_parts = Vec::new();
+                let response = self.model.completion(request).await?;
 
-            for content in response.iter() {
-                match content {
-                    AssistantContent::Text(t) => {
-                        text_parts.push(t.text.clone());
+                let mut has_tool_calls = false;
+                let mut text_parts = Vec::new();
+
+                for content in response.iter() {
+                    match content {
+                        AssistantContent::Text(t) => {
+                            text_parts.push(t.text.clone());
+                        }
+                        AssistantContent::ToolCall(tc) => {
+                            has_tool_calls = true;
+                            // tc.function.arguments is already a Value, not a string
+                            let args = tc.function.arguments.clone();
+                            let result = self.tools.execute(&tc.function.name, args).await;
+                            let result_str = match result {
+                                Ok(s) => s,
+                                Err(e) => format!("Error: {e}"),
+                            };
+                            // Tool results are sent as User messages with ToolResult content
+                            history.push(Message::User {
+                                content: OneOrMany::one(UserContent::tool_result(
+                                    tc.id.clone(),
+                                    OneOrMany::one(ToolResultContent::text(result_str)),
+                                )),
+                            });
+                        }
                     }
-                    AssistantContent::ToolCall(tc) => {
-                        has_tool_calls = true;
-                        // tc.function.arguments is already a Value, not a string
-                        let args = tc.function.arguments.clone();
-                        let result = self.tools.execute(&tc.function.name, args).await;
-                        let result_str = match result {
-                            Ok(s) => s,
-                            Err(e) => format!("Error: {e}"),
-                        };
-                        // Tool results are sent as User messages with ToolResult content
-                        history.push(Message::User {
-                            content: OneOrMany::one(UserContent::tool_result(
-                                tc.id.clone(),
-                                OneOrMany::one(ToolResultContent::text(result_str)),
-                            )),
+                }
+
+                if !has_tool_calls {
+                    let reply = text_parts.join("");
+                    if !reply.is_empty() {
+                        history.push(Message::assistant(&reply));
+                        let _ = self.outbound_tx.send(OutboundMessage {
+                            channel: msg.channel.clone(),
+                            chat_id: msg.chat_id.clone(),
+                            content: reply,
+                            reply_to: None,
+                            media: vec![],
                         });
                     }
+                    break;
                 }
             }
 
-            if !has_tool_calls {
-                let reply = text_parts.join("");
-                if !reply.is_empty() {
-                    history.push(Message::assistant(&reply));
-                    let _ = self.outbound_tx.send(OutboundMessage {
-                        channel: msg.channel.clone(),
-                        chat_id: msg.chat_id.clone(),
-                        content: reply,
-                        reply_to: None,
-                        media: vec![],
-                    });
+            let duration_ms = start.elapsed().as_millis() as u64;
+            info!(
+                iteration_count = iterations,
+                duration_ms = duration_ms,
+                "Message processing complete"
+            );
+
+            // Persist the updated session to disk.
+            // Failures are logged as warnings but do not crash the agent.
+            if let Some(messages) = self.sessions.get(&session_key) {
+                if let Err(e) = self.session_store.save_session(&session_key, messages).await {
+                    warn!(
+                        session_key = %session_key,
+                        error = %e,
+                        "Failed to persist session, will retry on next message"
+                    );
                 }
-                break;
             }
+
+            Ok(())
         }
-
-        Ok(())
+        .instrument(span)
+        .await
     }
 }
