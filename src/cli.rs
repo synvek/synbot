@@ -67,7 +67,7 @@ pub async fn run() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "synbot=info,open_lark=debug".into()),
+                .unwrap_or_else(|_| "synbot=debug,open_lark=debug".into()),
         )
         .init();
 
@@ -450,7 +450,7 @@ fn extract_model(model: &str) -> String {
     } else if lower.contains("openai") || lower.contains("gpt") {
         model.to_string()
     } else if lower.contains("deepseek") {
-        model.to_string()
+        model.split_once('/').unwrap().1.to_string()
     } else if lower.contains("ollama") {
         model.split_once('/').unwrap().1.to_string()
     } else {

@@ -224,27 +224,42 @@ async fn run_subagent_task(
 
         let mut has_tool_calls = false;
         let mut text_parts = Vec::new();
+        let mut assistant_contents = Vec::new();
+        let mut tool_results = Vec::new();
 
         for content in response.iter() {
             match content {
                 AssistantContent::Text(t) => {
                     text_parts.push(t.text.clone());
+                    assistant_contents.push(content.clone());
                 }
                 AssistantContent::ToolCall(tc) => {
                     has_tool_calls = true;
+                    assistant_contents.push(content.clone());
                     let args = tc.function.arguments.clone();
                     let result = tools.execute(&tc.function.name, args).await;
                     let result_str = match result {
                         Ok(s) => s,
                         Err(e) => format!("Error: {e}"),
                     };
-                    history.push(Message::User {
-                        content: OneOrMany::one(UserContent::tool_result(
-                            tc.id.clone(),
-                            OneOrMany::one(ToolResultContent::text(result_str)),
-                        )),
-                    });
+                    tool_results.push((tc.id.clone(), result_str));
                 }
+            }
+        }
+
+        if has_tool_calls && !assistant_contents.is_empty() {
+            let content = match assistant_contents.len() {
+                1 => OneOrMany::one(assistant_contents.into_iter().next().unwrap()),
+                _ => OneOrMany::many(assistant_contents).expect("non-empty"),
+            };
+            history.push(Message::Assistant { content });
+            for (id, result_str) in tool_results {
+                history.push(Message::User {
+                    content: OneOrMany::one(UserContent::tool_result(
+                        id,
+                        OneOrMany::one(ToolResultContent::text(result_str)),
+                    )),
+                });
             }
         }
 

@@ -2,7 +2,7 @@
 
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-
+use tracing::{debug, info};
 use crate::tools::DynTool;
 
 fn resolve_path(path: &str, workspace: &Path, restrict: bool) -> anyhow::Result<PathBuf> {
@@ -106,6 +106,7 @@ impl DynTool for ListDirTool {
     }
     async fn call(&self, args: Value) -> anyhow::Result<String> {
         let path = resolve_path(args["path"].as_str().unwrap_or("."), &self.workspace, self.restrict)?;
+        info!("Listing {}", path.display());
         let mut entries = tokio::fs::read_dir(&path).await?;
         let mut lines = Vec::new();
         while let Some(entry) = entries.next_entry().await? {

@@ -112,33 +112,53 @@ impl AgentLoop {
                     additional_params: None,
                 };
 
+                tracing::debug!("Completion request: {:?}", request.tools);
+
                 let response = self.model.completion(request).await?;
 
                 let mut has_tool_calls = false;
                 let mut text_parts = Vec::new();
+                // Collect assistant content and tool results so we can append the Assistant
+                // message (with tool_calls) to history *before* tool results. Without this,
+                // the model never sees its own tool-call turn and keeps requesting the same
+                // tool in a loop until max iterations.
+                let mut assistant_contents = Vec::new();
+                let mut tool_results = Vec::new();
 
                 for content in response.iter() {
+                    tracing::debug!("Received completion message: {:?}", content);
                     match content {
                         AssistantContent::Text(t) => {
                             text_parts.push(t.text.clone());
+                            assistant_contents.push(content.clone());
                         }
                         AssistantContent::ToolCall(tc) => {
                             has_tool_calls = true;
-                            // tc.function.arguments is already a Value, not a string
+                            assistant_contents.push(content.clone());
                             let args = tc.function.arguments.clone();
                             let result = self.tools.execute(&tc.function.name, args).await;
                             let result_str = match result {
                                 Ok(s) => s,
                                 Err(e) => format!("Error: {e}"),
                             };
-                            // Tool results are sent as User messages with ToolResult content
-                            history.push(Message::User {
-                                content: OneOrMany::one(UserContent::tool_result(
-                                    tc.id.clone(),
-                                    OneOrMany::one(ToolResultContent::text(result_str)),
-                                )),
-                            });
+                            tool_results.push((tc.id.clone(), result_str));
                         }
+                    }
+                }
+
+                if has_tool_calls && !assistant_contents.is_empty() {
+                    let content = match assistant_contents.len() {
+                        1 => OneOrMany::one(assistant_contents.into_iter().next().unwrap()),
+                        _ => OneOrMany::many(assistant_contents).expect("non-empty"),
+                    };
+                    history.push(Message::Assistant { content });
+                    for (id, result_str) in tool_results {
+                        history.push(Message::User {
+                            content: OneOrMany::one(UserContent::tool_result(
+                                id,
+                                OneOrMany::one(ToolResultContent::text(result_str)),
+                            )),
+                        });
                     }
                 }
 

@@ -11,7 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 # LLM framework
-rig-core = "0.11"
+rig-core = { version = "0.11", features = ["all"] }
 rig-dyn = { version = "0.3", features = ["serde"] }
 
 # Async runtime
