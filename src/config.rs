@@ -89,6 +89,8 @@ pub struct ProvidersConfig {
 pub struct AgentDefaults {
     #[serde(default = "default_workspace")]
     pub workspace: String,
+    #[serde(default = "default_provider")]
+    pub provider: String,
     #[serde(default = "default_model")]
     pub model: String,
     #[serde(default = "default_max_tokens")]
@@ -104,9 +106,14 @@ pub struct AgentDefaults {
 fn default_workspace() -> String {
     "~/.synbot/workspace".into()
 }
-fn default_model() -> String {
-    "anthropic/claude-sonnet-4-5".into()
+fn default_provider() -> String {
+    "anthropic".into()
 }
+
+fn default_model() -> String {
+    "claude-sonnet-4-5".into()
+}
+
 fn default_max_tokens() -> u32 {
     8192
 }
@@ -124,6 +131,7 @@ impl Default for AgentDefaults {
     fn default() -> Self {
         Self {
             workspace: default_workspace(),
+            provider: default_model(),
             model: default_model(),
             max_tokens: default_max_tokens(),
             temperature: default_temperature(),

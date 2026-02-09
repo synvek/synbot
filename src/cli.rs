@@ -25,7 +25,11 @@ enum Commands {
         #[arg(short, long)]
         message: Option<String>,
 
-        /// Model override (e.g. "anthropic/claude-sonnet-4-5").
+        /// Provider override (e.g. "anthropic").
+        #[arg(short, long)]
+        provider: Option<String>,
+
+        /// Model override (e.g. "claude-sonnet-4-5").
         #[arg(long)]
         model: Option<String>,
     },
@@ -75,7 +79,7 @@ pub async fn run() -> Result<()> {
 
     match cli.command {
         Commands::Onboard => cmd_onboard().await,
-        Commands::Agent { message, model } => cmd_agent(message, model).await,
+        Commands::Agent { message, provider, model } => cmd_agent(message, provider, model).await,
         Commands::Start => cmd_start().await,
         Commands::Cron { action } => cmd_cron(action).await,
     }
@@ -132,7 +136,7 @@ fn create_workspace_templates(ws: &std::path::Path) -> Result<()> {
 // agent (one-shot)
 // ---------------------------------------------------------------------------
 
-async fn cmd_agent(message: Option<String>, model: Option<String>) -> Result<()> {
+async fn cmd_agent(message: Option<String>, provider: Option<String>, model: Option<String>) -> Result<()> {
     let cfg = config::load_config(None)?;
     let ws = config::workspace_path(&cfg);
 
@@ -149,10 +153,10 @@ async fn cmd_agent(message: Option<String>, model: Option<String>) -> Result<()>
     info!(model = %model_name, "Starting agent");
 
     // Build rig provider via rig-dyn
-    let provider = detect_rig_provider(&model_name);
+    let provider_name = provider.unwrap_or(cfg.agent.provider.clone());
+    let provider = detect_rig_provider(&provider_name);
     let client = provider.client(&api_key, api_base.as_deref())?;
-    let model = extract_model(&model_name);
-    let completion_model = client.completion_model(model.as_str()).await;
+    let completion_model = client.completion_model(model_name.as_str()).await;
 
     // Subagent manager (shared via Arc<Mutex<>>)
     let subagent_mgr = std::sync::Arc::new(
@@ -259,10 +263,10 @@ async fn cmd_start() -> Result<()> {
         anyhow::bail!("No API key configured.");
     }
 
-    let model_name = cfg.agent.model.clone();
-    let provider = detect_rig_provider(&model_name);
+    let model = cfg.agent.model.clone();
+    let provider_name = cfg.agent.provider.clone();
+    let provider = detect_rig_provider(&provider_name);
     let client = provider.client(&api_key, api_base.as_deref())?;
-    let model = extract_model(&model_name);
     let completion_model = client.completion_model(&model).await;
 
     // Subagent manager (shared via Arc<Mutex<>>)
@@ -443,21 +447,6 @@ fn detect_rig_provider(model: &str) -> rig_dyn::Provider {
     }
 }
 
-fn extract_model(model: &str) -> String {
-    let lower = model.to_lowercase();
-    if lower.contains("anthropic") || lower.contains("claude") {
-        model.to_string()
-    } else if lower.contains("openai") || lower.contains("gpt") {
-        model.to_string()
-    } else if lower.contains("deepseek") {
-        model.split_once('/').unwrap().1.to_string()
-    } else if lower.contains("ollama") {
-        model.split_once('/').unwrap().1.to_string()
-    } else {
-        // Default to OpenAI-compatible (works with OpenRouter etc.)
-        model.to_string()
-    }
-}
 fn build_default_tools(
     cfg: &config::Config,
     ws: &std::path::Path,
