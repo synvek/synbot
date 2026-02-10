@@ -184,6 +184,7 @@ async fn cmd_agent(message: Option<String>, provider: Option<String>, model: Opt
         cfg.agent.max_tool_iterations,
         inbound_rx,
         bus.outbound_tx_clone(),
+        &cfg,
     )
     .await;
 
@@ -292,6 +293,7 @@ async fn cmd_start() -> Result<()> {
         cfg.agent.max_tool_iterations,
         inbound_rx,
         bus.outbound_tx_clone(),
+        &cfg,
     )
     .await;
     tokio::spawn(async move {

@@ -1,6 +1,10 @@
 pub mod context;
+pub mod directive;
 pub mod memory;
 pub mod r#loop;
+pub mod role_registry;
 pub mod session;
+pub mod session_id;
+pub mod session_manager;
 pub mod skills;
 pub mod subagent;

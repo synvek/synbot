@@ -81,6 +81,53 @@ pub struct ProvidersConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Role, Participant, Group, Topic configs
+// ---------------------------------------------------------------------------
+
+/// 参与者配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParticipantConfig {
+    pub channel: String,
+    #[serde(default)]
+    pub channel_user_id: Option<String>,
+}
+
+/// 群组配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupConfig {
+    pub name: String,
+    pub participants: Vec<ParticipantConfig>,
+}
+
+/// 话题配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopicConfig {
+    pub name: String,
+    pub participants: Vec<ParticipantConfig>,
+}
+
+/// 单个角色的配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleConfig {
+    pub name: String,
+    pub system_prompt: String,
+    #[serde(default)]
+    pub skills: Vec<String>,
+    #[serde(default)]
+    pub tools: Vec<String>,
+    /// 以下字段可选，未设置时继承 AgentDefaults
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub max_tokens: Option<u32>,
+    pub temperature: Option<f32>,
+    pub max_iterations: Option<u32>,
+}
+
+// ---------------------------------------------------------------------------
 // Agent defaults
 // ---------------------------------------------------------------------------
 
@@ -101,6 +148,8 @@ pub struct AgentDefaults {
     pub max_tool_iterations: u32,
     #[serde(default = "default_max_concurrent_subagents")]
     pub max_concurrent_subagents: usize,
+    #[serde(default)]
+    pub roles: Vec<RoleConfig>,
 }
 
 fn default_workspace() -> String {
@@ -137,6 +186,7 @@ impl Default for AgentDefaults {
             temperature: default_temperature(),
             max_tool_iterations: default_max_iterations(),
             max_concurrent_subagents: default_max_concurrent_subagents(),
+            roles: Vec::new(),
         }
     }
 }
@@ -225,6 +275,12 @@ pub struct Config {
     pub agent: AgentDefaults,
     #[serde(default)]
     pub tools: ToolsConfig,
+    #[serde(default)]
+    pub main_channel: String,
+    #[serde(default)]
+    pub groups: Vec<GroupConfig>,
+    #[serde(default)]
+    pub topics: Vec<TopicConfig>,
 }
 
 // ---------------------------------------------------------------------------
@@ -329,6 +385,128 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
                 value: String::new(),
                 constraint: "must be non-empty when feishu is enabled".into(),
             });
+        }
+    }
+
+    // --- Collect enabled channel names for reference validation ---
+    let enabled_channels: Vec<&str> = {
+        let mut ch = Vec::new();
+        if config.channels.telegram.enabled {
+            ch.push("telegram");
+        }
+        if config.channels.discord.enabled {
+            ch.push("discord");
+        }
+        if config.channels.feishu.enabled {
+            ch.push("feishu");
+        }
+        ch
+    };
+
+    // --- main_channel validation ---
+    // Only validate when multi-agent features are in use
+    let has_multi_agent_features = !config.agent.roles.is_empty()
+        || !config.groups.is_empty()
+        || !config.topics.is_empty();
+
+    if has_multi_agent_features {
+        if config.main_channel.is_empty() {
+            errors.push(ValidationError {
+                field: "main_channel".into(),
+                value: String::new(),
+                constraint: "must be non-empty when roles, groups, or topics are configured".into(),
+            });
+        } else if !enabled_channels.contains(&config.main_channel.as_str()) {
+            errors.push(ValidationError {
+                field: "main_channel".into(),
+                value: config.main_channel.clone(),
+                constraint: format!(
+                    "must reference an enabled channel (available: {})",
+                    enabled_channels.join(", ")
+                ),
+            });
+        }
+    }
+
+    // --- Role validation ---
+    let mut seen_role_names = std::collections::HashSet::new();
+    for (i, role) in config.agent.roles.iter().enumerate() {
+        let role_label = if role.name.is_empty() {
+            format!("agent.roles[{}]", i)
+        } else {
+            format!("agent.roles[{}] ({})", i, role.name)
+        };
+
+        // Required fields
+        if role.name.is_empty() {
+            errors.push(ValidationError {
+                field: format!("{}.name", role_label),
+                value: String::new(),
+                constraint: "role name must be non-empty".into(),
+            });
+        }
+        if role.system_prompt.is_empty() {
+            errors.push(ValidationError {
+                field: format!("{}.system_prompt", role_label),
+                value: String::new(),
+                constraint: "role system_prompt must be non-empty".into(),
+            });
+        }
+
+        // Name format: only [a-zA-Z0-9_]
+        if !role.name.is_empty()
+            && !role
+                .name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            errors.push(ValidationError {
+                field: format!("{}.name", role_label),
+                value: role.name.clone(),
+                constraint: "role name must contain only letters, digits, and underscores"
+                    .into(),
+            });
+        }
+
+        // Duplicate names
+        if !role.name.is_empty() && !seen_role_names.insert(role.name.clone()) {
+            errors.push(ValidationError {
+                field: format!("{}.name", role_label),
+                value: role.name.clone(),
+                constraint: "duplicate role name".into(),
+            });
+        }
+    }
+
+    // --- Groups participant channel validation ---
+    for (i, group) in config.groups.iter().enumerate() {
+        for (j, participant) in group.participants.iter().enumerate() {
+            if !enabled_channels.contains(&participant.channel.as_str()) {
+                errors.push(ValidationError {
+                    field: format!("groups[{}].participants[{}].channel", i, j),
+                    value: participant.channel.clone(),
+                    constraint: format!(
+                        "must reference an enabled channel (available: {})",
+                        enabled_channels.join(", ")
+                    ),
+                });
+            }
+        }
+    }
+
+    // --- Topics participant channel validation ---
+    for (i, topic) in config.topics.iter().enumerate() {
+        for (j, participant) in topic.participants.iter().enumerate() {
+            if !enabled_channels.contains(&participant.channel.as_str()) {
+                errors.push(ValidationError {
+                    field: format!("topics[{}].participants[{}].channel", i, j),
+                    value: participant.channel.clone(),
+                    constraint: format!(
+                        "must reference an enabled channel (available: {})",
+                        enabled_channels.join(", ")
+                    ),
+                });
+            }
         }
     }
 
@@ -614,6 +792,130 @@ mod tests {
         assert!(result.is_ok());
         let cfg = result.unwrap();
         assert_eq!(cfg.agent.max_tokens, 4096);
+    }
+
+    // --- Helper: config with multi-agent features enabled ---
+
+    fn config_with_telegram() -> Config {
+        let mut cfg = valid_config();
+        cfg.channels.telegram.enabled = true;
+        cfg.channels.telegram.token = "bot123:abc".into();
+        cfg.main_channel = "telegram".into();
+        cfg
+    }
+
+    fn make_role(name: &str, system_prompt: &str) -> RoleConfig {
+        RoleConfig {
+            name: name.into(),
+            system_prompt: system_prompt.into(),
+            skills: Vec::new(),
+            tools: Vec::new(),
+            provider: None,
+            model: None,
+            max_tokens: None,
+            temperature: None,
+            max_iterations: None,
+        }
+    }
+
+    // --- main_channel validation ---
+
+    #[test]
+    fn main_channel_empty_with_roles_is_rejected() {
+        let mut cfg = config_with_telegram();
+        cfg.main_channel = String::new();
+        cfg.agent.roles = vec![make_role("helper", "You help")];
+        let errors = validate_config(&cfg).unwrap_err();
+        assert!(errors.iter().any(|e| e.field == "main_channel"));
+    }
+
+    #[test]
+    fn main_channel_referencing_disabled_channel_is_rejected() {
+        let mut cfg = valid_config();
+        cfg.main_channel = "telegram".into();
+        cfg.agent.roles = vec![make_role("helper", "You help")];
+        // telegram is not enabled
+        let errors = validate_config(&cfg).unwrap_err();
+        assert!(errors.iter().any(|e| e.field == "main_channel"));
+    }
+
+    #[test]
+    fn main_channel_referencing_enabled_channel_is_accepted() {
+        let mut cfg = config_with_telegram();
+        cfg.agent.roles = vec![make_role("helper", "You help")];
+        assert!(validate_config(&cfg).is_ok());
+    }
+
+    #[test]
+    fn main_channel_not_required_without_multi_agent_features() {
+        let mut cfg = valid_config();
+        cfg.main_channel = String::new();
+        // No roles, groups, or topics
+        assert!(validate_config(&cfg).is_ok());
+    }
+
+    // --- Role name format validation ---
+
+    #[test]
+    fn role_name_with_special_chars_is_rejected() {
+        let mut cfg = config_with_telegram();
+        cfg.agent.roles = vec![make_role("bad-name!", "prompt")];
+        let errors = validate_config(&cfg).unwrap_err();
+        assert!(errors.iter().any(|e| e.constraint.contains("letters, digits, and underscores")));
+    }
+
+    #[test]
+    fn role_name_alphanumeric_underscore_is_accepted() {
+        let mut cfg = config_with_telegram();
+        cfg.agent.roles = vec![make_role("good_Role_123", "prompt")];
+        assert!(validate_config(&cfg).is_ok());
+    }
+
+    // --- Role duplicate names ---
+
+    #[test]
+    fn duplicate_role_names_are_rejected() {
+        let mut cfg = config_with_telegram();
+        cfg.agent.roles = vec![
+            make_role("helper", "prompt1"),
+            make_role("helper", "prompt2"),
+        ];
+        let errors = validate_config(&cfg).unwrap_err();
+        assert!(errors.iter().any(|e| e.constraint.contains("duplicate")));
+    }
+
+    // --- Role required fields ---
+
+    #[test]
+    fn role_empty_name_is_rejected() {
+        let mut cfg = config_with_telegram();
+        cfg.agent.roles = vec![make_role("", "prompt")];
+        let errors = validate_config(&cfg).unwrap_err();
+        assert!(errors.iter().any(|e| e.constraint.contains("name must be non-empty")));
+    }
+
+    #[test]
+    fn role_empty_system_prompt_is_rejected() {
+        let mut cfg = config_with_telegram();
+        cfg.agent.roles = vec![make_role("helper", "")];
+        let errors = validate_config(&cfg).unwrap_err();
+        assert!(errors.iter().any(|e| e.constraint.contains("system_prompt must be non-empty")));
+    }
+
+    // --- Groups/topics participant channel validation ---
+
+    #[test]
+    fn group_participant_invalid_channel_is_rejected() {
+        let mut cfg = config_with_telegram();
+        cfg.groups = vec![GroupConfig {
+            name: "team".into(),
+            participants: vec![ParticipantConfig {
+                channel: "slack".into(),
+                channel_user_id: None,
+            }],
+        }];
+        let errors = validate_config(&cfg).unwrap_err();
+        assert!(errors.iter().any(|e| e.field.contains("groups[0].participants[0].channel")));
     }
 
     // --- ValidationError Display ---

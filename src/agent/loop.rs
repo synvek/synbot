@@ -1,29 +1,38 @@
-//! Agent loop — the core processing engine.
+﻿//! Agent loop -- the core processing engine.
 
 use anyhow::Result;
 use rig::completion::CompletionRequest;
 use rig::message::{AssistantContent, Message, ToolResultContent, UserContent};
 use rig::OneOrMany;
 use rig_dyn::CompletionModel;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, Mutex};
 use tracing::{error, info, warn, Instrument};
 
 use crate::agent::context::ContextBuilder;
+use crate::agent::directive::DirectiveParser;
+use crate::agent::role_registry::RoleRegistry;
 use crate::agent::session::SessionStore;
+use crate::agent::session_manager::SessionManager;
+use crate::agent::subagent::SubagentManager;
 use crate::bus::{InboundMessage, OutboundMessage};
+use crate::config::Config;
 use crate::tools::ToolRegistry;
 
 pub struct AgentLoop {
-    model: Box<dyn CompletionModel>,
+    model: Arc<dyn CompletionModel>,
     context: ContextBuilder,
     tools: Arc<ToolRegistry>,
     max_iterations: u32,
     inbound_rx: mpsc::Receiver<InboundMessage>,
     outbound_tx: broadcast::Sender<OutboundMessage>,
-    sessions: std::collections::HashMap<String, Vec<Message>>,
+    sessions: Arc<Mutex<HashMap<String, Vec<Message>>>>,
     session_store: SessionStore,
+    role_registry: Arc<RoleRegistry>,
+    session_manager: Arc<Mutex<SessionManager>>,
+    subagent_manager: Arc<Mutex<SubagentManager>>,
 }
 
 impl AgentLoop {
@@ -34,32 +43,48 @@ impl AgentLoop {
         max_iterations: u32,
         inbound_rx: mpsc::Receiver<InboundMessage>,
         outbound_tx: broadcast::Sender<OutboundMessage>,
+        config: &Config,
     ) -> Self {
         let session_store = SessionStore::new(&workspace);
-
-        // Restore previously persisted sessions from disk
+        let mut role_registry = RoleRegistry::new();
+        if let Err(e) = role_registry.load_from_config(
+            &config.agent.roles, &config.agent, &workspace,
+        ) {
+            warn!(error = %e, "Failed to load role registry from config");
+        }
+        let session_manager = SessionManager::new(
+            config.groups.clone(), config.topics.clone(),
+        );
+        let subagent_manager = SubagentManager::new(config.agent.max_concurrent_subagents);
         let sessions = match session_store.load_all_sessions().await {
             Ok(s) => {
                 if !s.is_empty() {
                     info!(count = s.len(), "Restored persisted sessions");
                 }
-                s
+                s.into_iter()
+                    .map(|(key, data)| {
+                        let messages = data.messages.iter().map(|m| m.to_message()).collect();
+                        (key, messages)
+                    })
+                    .collect()
             }
             Err(e) => {
                 warn!(error = %e, "Failed to load persisted sessions, starting fresh");
-                std::collections::HashMap::new()
+                HashMap::new()
             }
         };
-
         Self {
             context: ContextBuilder::new(&workspace),
-            model,
+            model: Arc::from(model),
             tools,
             max_iterations,
             inbound_rx,
             outbound_tx,
-            sessions,
+            sessions: Arc::new(Mutex::new(sessions)),
             session_store,
+            role_registry: Arc::new(role_registry),
+            session_manager: Arc::new(Mutex::new(session_manager)),
+            subagent_manager: Arc::new(Mutex::new(subagent_manager)),
         }
     }
 
@@ -74,121 +99,98 @@ impl AgentLoop {
     }
 
     async fn handle_message(&mut self, msg: InboundMessage) -> Result<()> {
-        let session_key = msg.session_key();
         let span = tracing::info_span!(
             "handle_message",
-            session_key = %session_key,
             channel = %msg.channel,
             message_length = msg.content.len(),
         );
-
         async {
             let start = std::time::Instant::now();
             info!(chat = %msg.chat_id, "Processing message");
-
-            let system_prompt = self.context.build_system_prompt();
-            let tool_defs = self.tools.rig_definitions();
-
-            let history = self.sessions.entry(session_key.clone()).or_default();
-            history.push(Message::user(&msg.content));
-
-            let mut iterations = 0u32;
-
-            loop {
-                iterations += 1;
-                if iterations > self.max_iterations {
-                    warn!("Max iterations ({}) reached", self.max_iterations);
-                    break;
-                }
-
-                let request = CompletionRequest {
-                    preamble: Some(system_prompt.clone()),
-                    chat_history: history.clone(),
-                    prompt: Message::user(""),
-                    tools: tool_defs.clone(),
-                    documents: vec![],
-                    temperature: None,
-                    max_tokens: None,
-                    additional_params: None,
-                };
-
-                tracing::debug!("Completion request: {:?}", request.tools);
-
-                let response = self.model.completion(request).await?;
-
-                let mut has_tool_calls = false;
-                let mut text_parts = Vec::new();
-                // Collect assistant content and tool results so we can append the Assistant
-                // message (with tool_calls) to history *before* tool results. Without this,
-                // the model never sees its own tool-call turn and keeps requesting the same
-                // tool in a loop until max iterations.
-                let mut assistant_contents = Vec::new();
-                let mut tool_results = Vec::new();
-
-                for content in response.iter() {
-                    tracing::debug!("Received completion message: {:?}", content);
-                    match content {
-                        AssistantContent::Text(t) => {
-                            text_parts.push(t.text.clone());
-                            assistant_contents.push(content.clone());
-                        }
-                        AssistantContent::ToolCall(tc) => {
-                            has_tool_calls = true;
-                            assistant_contents.push(content.clone());
-                            let args = tc.function.arguments.clone();
-                            let result = self.tools.execute(&tc.function.name, args).await;
-                            let result_str = match result {
-                                Ok(s) => s,
-                                Err(e) => format!("Error: {e}"),
-                            };
-                            tool_results.push((tc.id.clone(), result_str));
-                        }
-                    }
-                }
-
-                if has_tool_calls && !assistant_contents.is_empty() {
-                    let content = match assistant_contents.len() {
-                        1 => OneOrMany::one(assistant_contents.into_iter().next().unwrap()),
-                        _ => OneOrMany::many(assistant_contents).expect("non-empty"),
-                    };
-                    history.push(Message::Assistant { content });
-                    for (id, result_str) in tool_results {
-                        history.push(Message::User {
-                            content: OneOrMany::one(UserContent::tool_result(
-                                id,
-                                OneOrMany::one(ToolResultContent::text(result_str)),
-                            )),
-                        });
-                    }
-                }
-
-                if !has_tool_calls {
-                    let reply = text_parts.join("");
-                    if !reply.is_empty() {
-                        history.push(Message::assistant(&reply));
-                        let _ = self.outbound_tx.send(OutboundMessage {
-                            channel: msg.channel.clone(),
-                            chat_id: msg.chat_id.clone(),
-                            content: reply,
-                            reply_to: None,
-                            media: vec![],
-                        });
-                    }
-                    break;
-                }
+            let directives = DirectiveParser::parse(&msg.content);
+            if directives.len() <= 1 {
+                self.process_directives_sequential(&msg, &directives, start).await?;
+            } else {
+                self.process_directives_parallel(&msg, &directives, start).await?;
             }
+            Ok(())
+        }
+        .instrument(span)
+        .await
+    }
 
-            let duration_ms = start.elapsed().as_millis() as u64;
+    async fn process_directives_sequential(
+        &mut self,
+        msg: &InboundMessage,
+        directives: &[crate::agent::directive::Directive],
+        start: std::time::Instant,
+    ) -> Result<()> {
+        for directive in directives {
+            let agent_id = match &directive.target {
+                None => "main".to_string(),
+                Some(name) => {
+                    if !self.role_registry.contains(name) {
+                        self.send_unknown_role_error(msg, name).await;
+                        continue;
+                    }
+                    name.clone()
+                }
+            };
+
+            let session_id = {
+                let sm = self.session_manager.lock().await;
+                sm.resolve_session(&agent_id, &msg.channel, &msg.chat_id, &msg.metadata)
+            };
+            let session_key = session_id.format();
+
+            let (system_prompt, model_max_iterations) = if agent_id == "main" {
+                (self.context.build_system_prompt(), self.max_iterations)
+            } else {
+                let role = self.role_registry.get(&agent_id).unwrap();
+                (role.system_prompt.clone(), role.params.max_iterations)
+            };
+
+            let tool_defs = self.tools.rig_definitions();
+            let mut sessions = self.sessions.lock().await;
+            let history = sessions.entry(session_key.clone()).or_default();
+            history.push(Message::user(&directive.content));
+
+            let iterations = run_completion_loop(
+                &*self.model,
+                &system_prompt,
+                model_max_iterations,
+                &agent_id,
+                history,
+                &tool_defs,
+                &self.tools,
+                &msg.channel,
+                &msg.chat_id,
+                &self.outbound_tx,
+            ).await?;
+
+            drop(sessions);
+
             info!(
+                agent_id = %agent_id,
                 iteration_count = iterations,
-                duration_ms = duration_ms,
-                "Message processing complete"
+                duration_ms = start.elapsed().as_millis() as u64,
+                "Directive processing complete"
             );
 
-            // Persist the updated session to disk.
-            // Failures are logged as warnings but do not crash the agent.
-            if let Some(messages) = self.sessions.get(&session_key) {
-                if let Err(e) = self.session_store.save_session(&session_key, messages).await {
+            // Persist session with metadata
+            let sessions = self.sessions.lock().await;
+            if let Some(messages) = sessions.get(&session_key) {
+                let now = chrono::Utc::now();
+                let meta = crate::agent::session_manager::SessionMeta {
+                    id: session_id.clone(),
+                    participants: vec![
+                        format!("{}:{}", msg.channel, msg.sender_id),
+                        format!("agent:{}", agent_id),
+                    ],
+                    created_at: now,
+                    updated_at: now,
+                };
+                if let Err(e) = self.session_store.save_session(&session_key, messages, Some(&meta)).await {
                     warn!(
                         session_key = %session_key,
                         error = %e,
@@ -196,10 +198,274 @@ impl AgentLoop {
                     );
                 }
             }
-
-            Ok(())
         }
-        .instrument(span)
-        .await
+        Ok(())
     }
+
+    async fn process_directives_parallel(
+        &mut self,
+        msg: &InboundMessage,
+        directives: &[crate::agent::directive::Directive],
+        _start: std::time::Instant,
+    ) -> Result<()> {
+        let mut spawned_ids: Vec<(String, String, String)> = Vec::new();
+
+        for directive in directives {
+            let agent_id = match &directive.target {
+                None => "main".to_string(),
+                Some(name) => {
+                    if !self.role_registry.contains(name) {
+                        self.send_unknown_role_error(msg, name).await;
+                        continue;
+                    }
+                    name.clone()
+                }
+            };
+
+            let session_id = {
+                let sm = self.session_manager.lock().await;
+                sm.resolve_session(&agent_id, &msg.channel, &msg.chat_id, &msg.metadata)
+            };
+            let session_key = session_id.format();
+
+            let (system_prompt, model_max_iterations) = if agent_id == "main" {
+                (self.context.build_system_prompt(), self.max_iterations)
+            } else {
+                let role = self.role_registry.get(&agent_id).unwrap();
+                (role.system_prompt.clone(), role.params.max_iterations)
+            };
+
+            let tool_defs = self.tools.rig_definitions();
+
+            // Push user message into session history before spawning
+            {
+                let mut sessions = self.sessions.lock().await;
+                let history = sessions.entry(session_key.clone()).or_default();
+                history.push(Message::user(&directive.content));
+            }
+
+            let model = Arc::clone(&self.model);
+            let tools = Arc::clone(&self.tools);
+            let sessions = Arc::clone(&self.sessions);
+            let session_store_workspace = self.session_store.workspace().to_path_buf();
+            let outbound_tx = self.outbound_tx.clone();
+            let channel = msg.channel.clone();
+            let chat_id = msg.chat_id.clone();
+            let sender_id = msg.sender_id.clone();
+            let sk = session_key.clone();
+            let aid = agent_id.clone();
+            let sid = session_id.clone();
+
+            let task_future = Box::pin(async move {
+                let mut sessions_guard = sessions.lock().await;
+                let history = sessions_guard.entry(sk.clone()).or_default();
+                let iterations = run_completion_loop(
+                    &*model,
+                    &system_prompt,
+                    model_max_iterations,
+                    &aid,
+                    history,
+                    &tool_defs,
+                    &tools,
+                    &channel,
+                    &chat_id,
+                    &outbound_tx,
+                ).await?;
+
+                // Persist session with metadata
+                let store = SessionStore::new(&session_store_workspace);
+                if let Some(messages) = sessions_guard.get(&sk) {
+                    let now = chrono::Utc::now();
+                    let meta = crate::agent::session_manager::SessionMeta {
+                        id: sid.clone(),
+                        participants: vec![
+                            format!("{}:{}", channel, sender_id),
+                            format!("agent:{}", aid),
+                        ],
+                        created_at: now,
+                        updated_at: now,
+                    };
+                    if let Err(e) = store.save_session(&sk, messages, Some(&meta)).await {
+                        warn!(
+                            session_key = %sk,
+                            error = %e,
+                            "Failed to persist session, will retry on next message"
+                        );
+                    }
+                }
+
+                Ok(format!("agent={}, iterations={}", aid, iterations))
+            });
+
+            let label = format!(
+                "directive:{}:{}",
+                agent_id,
+                directive.content.chars().take(30).collect::<String>()
+            );
+
+            let subagent_id = {
+                let mut mgr = self.subagent_manager.lock().await;
+                mgr.spawn_fn(label, task_future).await
+            };
+
+            match subagent_id {
+                Ok(id) => {
+                    spawned_ids.push((id, agent_id.clone(), session_key));
+                }
+                Err(e) => {
+                    warn!(
+                        agent_id = %agent_id,
+                        error = %e,
+                        "Failed to spawn parallel directive task"
+                    );
+                    let _ = self.outbound_tx.send(OutboundMessage {
+                        channel: msg.channel.clone(),
+                        chat_id: msg.chat_id.clone(),
+                        content: format!("Role '{}' is busy, please retry later", agent_id),
+                        reply_to: None,
+                        media: vec![],
+                    });
+                }
+            }
+        }
+
+        // Wait for all spawned tasks to complete
+        if !spawned_ids.is_empty() {
+            let ids: Vec<String> = spawned_ids.iter().map(|(id, _, _)| id.clone()).collect();
+            loop {
+                let mut all_done = true;
+                {
+                    let mgr = self.subagent_manager.lock().await;
+                    for id in &ids {
+                        if let Some(handle) = mgr.get_result(id).await {
+                            if matches!(handle.status, crate::agent::subagent::SubagentStatus::Running) {
+                                all_done = false;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if all_done {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn send_unknown_role_error(&self, msg: &InboundMessage, unknown_role: &str) {
+        let available = self.role_registry.list_names();
+        let role_list = if available.is_empty() {
+            "(no registered roles)".to_string()
+        } else {
+            available.join(", ")
+        };
+        let _ = self.outbound_tx.send(OutboundMessage {
+            channel: msg.channel.clone(),
+            chat_id: msg.chat_id.clone(),
+            content: format!("Unknown role '{}'. Available: {}", unknown_role, role_list),
+            reply_to: None,
+            media: vec![],
+        });
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Standalone completion loop
+// ---------------------------------------------------------------------------
+
+async fn run_completion_loop(
+    model: &dyn CompletionModel,
+    system_prompt: &str,
+    max_iterations: u32,
+    agent_id: &str,
+    history: &mut Vec<Message>,
+    tool_defs: &[rig::completion::ToolDefinition],
+    tools: &ToolRegistry,
+    channel: &str,
+    chat_id: &str,
+    outbound_tx: &broadcast::Sender<OutboundMessage>,
+) -> Result<u32> {
+    let mut iterations = 0u32;
+
+    loop {
+        iterations += 1;
+        if iterations > max_iterations {
+            warn!("Max iterations ({}) reached for agent '{}'", max_iterations, agent_id);
+            break;
+        }
+
+        let request = CompletionRequest {
+            preamble: Some(system_prompt.to_string()),
+            chat_history: history.clone(),
+            prompt: Message::user(""),
+            tools: tool_defs.to_vec(),
+            documents: vec![],
+            temperature: None,
+            max_tokens: None,
+            additional_params: None,
+        };
+
+        let response = model.completion(request).await?;
+
+        let mut has_tool_calls = false;
+        let mut text_parts = Vec::new();
+        let mut assistant_contents = Vec::new();
+        let mut tool_results = Vec::new();
+
+        for content in response.iter() {
+            match content {
+                AssistantContent::Text(t) => {
+                    text_parts.push(t.text.clone());
+                    assistant_contents.push(content.clone());
+                }
+                AssistantContent::ToolCall(tc) => {
+                    has_tool_calls = true;
+                    assistant_contents.push(content.clone());
+                    let args = tc.function.arguments.clone();
+                    let result = tools.execute(&tc.function.name, args).await;
+                    let result_str = match result {
+                        Ok(s) => s,
+                        Err(e) => format!("Error: {e}"),
+                    };
+                    tool_results.push((tc.id.clone(), result_str));
+                }
+            }
+        }
+
+        if has_tool_calls && !assistant_contents.is_empty() {
+            let content = match assistant_contents.len() {
+                1 => OneOrMany::one(assistant_contents.into_iter().next().unwrap()),
+                _ => OneOrMany::many(assistant_contents).expect("non-empty"),
+            };
+            history.push(Message::Assistant { content });
+            for (id, result_str) in tool_results {
+                history.push(Message::User {
+                    content: OneOrMany::one(UserContent::tool_result(
+                        id,
+                        OneOrMany::one(ToolResultContent::text(result_str)),
+                    )),
+                });
+            }
+        }
+
+        if !has_tool_calls {
+            let reply = text_parts.join("");
+            if !reply.is_empty() {
+                history.push(Message::assistant(&reply));
+                let _ = outbound_tx.send(OutboundMessage {
+                    channel: channel.to_string(),
+                    chat_id: chat_id.to_string(),
+                    content: reply,
+                    reply_to: None,
+                    media: vec![],
+                });
+            }
+            break;
+        }
+    }
+
+    Ok(iterations)
 }
