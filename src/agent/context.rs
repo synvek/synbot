@@ -56,7 +56,7 @@ impl ContextBuilder {
         let ws = self.workspace.display();
         format!(
             "# synbot 🐈\n\n\
-             You are synvek assistant, a helpful AI assistant.\n\n\
+             You are synbot assistant, a helpful AI assistant.\n\n\
              ## Current Time\n{now}\n\n\
              ## Workspace\n{ws}\n"
         )
