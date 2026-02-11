@@ -359,6 +359,7 @@ mod tests {
         mgr.get_or_create(&sid).push(SessionMessage {
             role: "user".into(),
             content: "hello".into(),
+            timestamp: Utc::now(),
         });
 
         // Get again — should return the same session with the message
@@ -386,6 +387,7 @@ mod tests {
             SessionMessage {
                 role: "user".into(),
                 content: "hi".into(),
+                timestamp: Utc::now(),
             },
         );
         let history = mgr.get_history(&sid).unwrap();
@@ -404,6 +406,7 @@ mod tests {
             SessionMessage {
                 role: "user".into(),
                 content: "first".into(),
+                timestamp: Utc::now(),
             },
         );
         assert_eq!(mgr.session_count(), 1);
@@ -420,6 +423,7 @@ mod tests {
             SessionMessage {
                 role: "user".into(),
                 content: "first".into(),
+                timestamp: Utc::now(),
             },
         );
         mgr.append(
@@ -427,6 +431,7 @@ mod tests {
             SessionMessage {
                 role: "assistant".into(),
                 content: "second".into(),
+                timestamp: Utc::now(),
             },
         );
         let history = mgr.get_history(&sid).unwrap();
@@ -444,6 +449,7 @@ mod tests {
             SessionMessage {
                 role: "user".into(),
                 content: "msg1".into(),
+                timestamp: Utc::now(),
             },
         );
         let first_updated = mgr.get_meta(&sid).unwrap().updated_at;
@@ -456,6 +462,7 @@ mod tests {
             SessionMessage {
                 role: "user".into(),
                 content: "msg2".into(),
+                timestamp: Utc::now(),
             },
         );
         let second_updated = mgr.get_meta(&sid).unwrap().updated_at;
@@ -475,6 +482,7 @@ mod tests {
             SessionMessage {
                 role: "user".into(),
                 content: "msg_a".into(),
+                timestamp: Utc::now(),
             },
         );
         mgr.append(
@@ -482,6 +490,7 @@ mod tests {
             SessionMessage {
                 role: "user".into(),
                 content: "msg_b".into(),
+                timestamp: Utc::now(),
             },
         );
 
@@ -505,6 +514,7 @@ mod tests {
             SessionMessage {
                 role: "user".into(),
                 content: "to_main".into(),
+                timestamp: Utc::now(),
             },
         );
         mgr.append(
@@ -512,6 +522,7 @@ mod tests {
             SessionMessage {
                 role: "user".into(),
                 content: "to_role".into(),
+                timestamp: Utc::now(),
             },
         );
 

@@ -176,6 +176,14 @@ async fn cmd_agent(message: Option<String>, provider: Option<String>, model: Opt
     let inbound_tx = bus.inbound_sender();
     let inbound_rx = bus.take_inbound_receiver().unwrap();
 
+    // Create session_manager for CLI mode
+    let session_manager = std::sync::Arc::new(tokio::sync::RwLock::new(
+        crate::agent::session_manager::SessionManager::new(
+            cfg.groups.clone(),
+            cfg.topics.clone(),
+        ),
+    ));
+
     // Agent loop
     let mut agent_loop = crate::agent::r#loop::AgentLoop::new(
         completion_model,
@@ -185,6 +193,7 @@ async fn cmd_agent(message: Option<String>, provider: Option<String>, model: Opt
         inbound_rx,
         bus.outbound_tx_clone(),
         &cfg,
+        session_manager,
     )
     .await;
 
@@ -316,6 +325,7 @@ async fn cmd_start() -> Result<()> {
         inbound_rx,
         bus.outbound_tx_clone(),
         &cfg,
+        std::sync::Arc::clone(&session_manager),
     )
     .await;
     tokio::spawn(async move {

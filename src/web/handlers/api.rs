@@ -292,14 +292,19 @@ pub async fn get_sessions(
 /// Session detail with full message history
 #[derive(Serialize)]
 pub struct SessionDetail {
+    pub meta: SessionMetaDto,
+    pub messages: Vec<SessionMessageDto>,
+}
+
+/// Session metadata DTO
+#[derive(Serialize)]
+pub struct SessionMetaDto {
     pub id: String,
     pub channel: String,
     pub scope: String,
     pub identifier: String,
-    pub participants: Vec<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
-    pub messages: Vec<SessionMessageDto>,
 }
 
 /// Message DTO for API responses
@@ -307,6 +312,7 @@ pub struct SessionDetail {
 pub struct SessionMessageDto {
     pub role: String,
     pub content: String,
+    pub timestamp: DateTime<Utc>,
 }
 
 /// GET /api/sessions/{id} - Returns session details with message history
@@ -336,6 +342,7 @@ pub async fn get_session_by_id(
         .map(|msg| SessionMessageDto {
             role: msg.role.clone(),
             content: msg.content.clone(),
+            timestamp: msg.timestamp,
         })
         .collect();
     
@@ -351,14 +358,17 @@ pub async fn get_session_by_id(
     
     let identifier = meta.id.identifier.clone().unwrap_or_default();
     
-    let detail = SessionDetail {
+    let meta_dto = SessionMetaDto {
         id: meta.id.format(),
         channel: meta.id.channel.clone(),
         scope,
         identifier,
-        participants: meta.participants.clone(),
         created_at: meta.created_at,
         updated_at: meta.updated_at,
+    };
+    
+    let detail = SessionDetail {
+        meta: meta_dto,
         messages: message_dtos,
     };
     

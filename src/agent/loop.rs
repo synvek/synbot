@@ -1,4 +1,4 @@
-﻿//! Agent loop -- the core processing engine.
+//! Agent loop -- the core processing engine.
 
 use anyhow::Result;
 use rig::completion::CompletionRequest;
@@ -8,7 +8,7 @@ use rig_dyn::CompletionModel;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{broadcast, mpsc, Mutex};
+use tokio::sync::{broadcast, mpsc, Mutex, RwLock};
 use tracing::{error, info, warn, Instrument};
 
 use crate::agent::context::ContextBuilder;
@@ -31,7 +31,7 @@ pub struct AgentLoop {
     sessions: Arc<Mutex<HashMap<String, Vec<Message>>>>,
     session_store: SessionStore,
     role_registry: Arc<RoleRegistry>,
-    session_manager: Arc<Mutex<SessionManager>>,
+    session_manager: Arc<RwLock<SessionManager>>,
     subagent_manager: Arc<Mutex<SubagentManager>>,
 }
 
@@ -44,6 +44,7 @@ impl AgentLoop {
         inbound_rx: mpsc::Receiver<InboundMessage>,
         outbound_tx: broadcast::Sender<OutboundMessage>,
         config: &Config,
+        session_manager: Arc<RwLock<SessionManager>>,
     ) -> Self {
         let session_store = SessionStore::new(&workspace);
         let mut role_registry = RoleRegistry::new();
@@ -52,9 +53,6 @@ impl AgentLoop {
         ) {
             warn!(error = %e, "Failed to load role registry from config");
         }
-        let session_manager = SessionManager::new(
-            config.groups.clone(), config.topics.clone(),
-        );
         let subagent_manager = SubagentManager::new(config.agent.max_concurrent_subagents);
         let sessions = match session_store.load_all_sessions().await {
             Ok(s) => {
@@ -73,6 +71,26 @@ impl AgentLoop {
                 HashMap::new()
             }
         };
+        
+        // Load sessions into the provided session_manager
+        {
+            let mut sm = session_manager.write().await;
+            match session_store.load_all_sessions().await {
+                Ok(session_data) => {
+                    for (key, data) in session_data {
+                        if let Ok(session_id) = crate::agent::session_id::SessionId::parse(&key) {
+                            let history = sm.get_or_create(&session_id);
+                            history.clear();
+                            history.extend(data.messages);
+                        }
+                    }
+                    info!(count = sm.session_count(), "Loaded sessions into session_manager");
+                }
+                Err(e) => {
+                    warn!(error = %e, "Failed to load sessions into session_manager");
+                }
+            }
+        }
         Self {
             context: ContextBuilder::new(&workspace),
             model: Arc::from(model),
@@ -83,7 +101,7 @@ impl AgentLoop {
             sessions: Arc::new(Mutex::new(sessions)),
             session_store,
             role_registry: Arc::new(role_registry),
-            session_manager: Arc::new(Mutex::new(session_manager)),
+            session_manager,
             subagent_manager: Arc::new(Mutex::new(subagent_manager)),
         }
     }
@@ -138,7 +156,7 @@ impl AgentLoop {
             };
 
             let session_id = {
-                let sm = self.session_manager.lock().await;
+                let sm = self.session_manager.write().await;
                 sm.resolve_session(&agent_id, &msg.channel, &msg.chat_id, &msg.metadata)
             };
             let session_key = session_id.format();
@@ -154,6 +172,17 @@ impl AgentLoop {
             let mut sessions = self.sessions.lock().await;
             let history = sessions.entry(session_key.clone()).or_default();
             history.push(Message::user(&directive.content));
+            
+            // Update session_manager with the user message
+            {
+                let mut sm = self.session_manager.write().await;
+                let user_msg = crate::agent::session::SessionMessage {
+                    role: "user".to_string(),
+                    content: directive.content.clone(),
+                    timestamp: chrono::Utc::now(),
+                };
+                sm.append(&session_id, user_msg);
+            }
 
             let iterations = run_completion_loop(
                 &*self.model,
@@ -177,7 +206,7 @@ impl AgentLoop {
                 "Directive processing complete"
             );
 
-            // Persist session with metadata
+            // Persist session with metadata and sync to session_manager
             let sessions = self.sessions.lock().await;
             if let Some(messages) = sessions.get(&session_key) {
                 let now = chrono::Utc::now();
@@ -190,6 +219,19 @@ impl AgentLoop {
                     created_at: now,
                     updated_at: now,
                 };
+                
+                // Sync all messages to session_manager
+                {
+                    let mut sm = self.session_manager.write().await;
+                    let session_messages: Vec<crate::agent::session::SessionMessage> = 
+                        messages.iter().map(crate::agent::session::SessionMessage::from_message).collect();
+                    
+                    // Clear and rebuild the session in session_manager
+                    let history = sm.get_or_create(&session_id);
+                    history.clear();
+                    history.extend(session_messages);
+                }
+                
                 if let Err(e) = self.session_store.save_session(&session_key, messages, Some(&meta)).await {
                     warn!(
                         session_key = %session_key,
@@ -223,7 +265,7 @@ impl AgentLoop {
             };
 
             let session_id = {
-                let sm = self.session_manager.lock().await;
+                let sm = self.session_manager.write().await;
                 sm.resolve_session(&agent_id, &msg.channel, &msg.chat_id, &msg.metadata)
             };
             let session_key = session_id.format();
@@ -242,11 +284,21 @@ impl AgentLoop {
                 let mut sessions = self.sessions.lock().await;
                 let history = sessions.entry(session_key.clone()).or_default();
                 history.push(Message::user(&directive.content));
+                
+                // Update session_manager with the user message
+                let mut sm = self.session_manager.write().await;
+                let user_msg = crate::agent::session::SessionMessage {
+                    role: "user".to_string(),
+                    content: directive.content.clone(),
+                    timestamp: chrono::Utc::now(),
+                };
+                sm.append(&session_id, user_msg);
             }
 
             let model = Arc::clone(&self.model);
             let tools = Arc::clone(&self.tools);
             let sessions = Arc::clone(&self.sessions);
+            let session_manager = Arc::clone(&self.session_manager);
             let session_store_workspace = self.session_store.workspace().to_path_buf();
             let outbound_tx = self.outbound_tx.clone();
             let channel = msg.channel.clone();
@@ -272,7 +324,7 @@ impl AgentLoop {
                     &outbound_tx,
                 ).await?;
 
-                // Persist session with metadata
+                // Persist session with metadata and sync to session_manager
                 let store = SessionStore::new(&session_store_workspace);
                 if let Some(messages) = sessions_guard.get(&sk) {
                     let now = chrono::Utc::now();
@@ -285,6 +337,19 @@ impl AgentLoop {
                         created_at: now,
                         updated_at: now,
                     };
+                    
+                    // Sync all messages to session_manager
+                    {
+                        let mut sm = session_manager.write().await;
+                        let session_messages: Vec<crate::agent::session::SessionMessage> = 
+                            messages.iter().map(crate::agent::session::SessionMessage::from_message).collect();
+                        
+                        // Clear and rebuild the session in session_manager
+                        let history = sm.get_or_create(&sid);
+                        history.clear();
+                        history.extend(session_messages);
+                    }
+                    
                     if let Err(e) = store.save_session(&sk, messages, Some(&meta)).await {
                         warn!(
                             session_key = %sk,
@@ -469,3 +534,4 @@ async fn run_completion_loop(
 
     Ok(iterations)
 }
+

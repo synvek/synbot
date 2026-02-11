@@ -4,7 +4,7 @@
 //! as backward-compatible loading of the legacy format (plain `Vec<SessionMessage>`).
 
 use anyhow::{Context, Result};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use rig::message::Message;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -24,6 +24,8 @@ use crate::agent::session_manager::SessionMeta;
 pub struct SessionMessage {
     pub role: String,
     pub content: String,
+    #[serde(default = "Utc::now")]
+    pub timestamp: DateTime<Utc>,
 }
 
 impl SessionMessage {
@@ -45,6 +47,7 @@ impl SessionMessage {
                 SessionMessage {
                     role: "user".to_string(),
                     content: text,
+                    timestamp: Utc::now(),
                 }
             }
             Message::Assistant { content } => {
@@ -62,6 +65,7 @@ impl SessionMessage {
                 SessionMessage {
                     role: "assistant".to_string(),
                     content: text,
+                    timestamp: Utc::now(),
                 }
             }
         }
@@ -459,7 +463,11 @@ mod tests {
         // Verify content via SessionMessage round-trip
         let original: Vec<SessionMessage> =
             messages.iter().map(SessionMessage::from_message).collect();
-        assert_eq!(original, loaded.messages);
+        assert_eq!(original.len(), loaded.messages.len());
+        for (orig, loaded_msg) in original.iter().zip(loaded.messages.iter()) {
+            assert_eq!(orig.role, loaded_msg.role);
+            assert_eq!(orig.content, loaded_msg.content);
+        }
     }
 
     #[tokio::test]
@@ -584,7 +592,8 @@ mod tests {
 
         let back = sm.to_message();
         let sm2 = SessionMessage::from_message(&back);
-        assert_eq!(sm, sm2);
+        assert_eq!(sm.role, sm2.role);
+        assert_eq!(sm.content, sm2.content);
 
         let asst_msg = Message::assistant("I can help");
         let sm = SessionMessage::from_message(&asst_msg);
@@ -593,7 +602,8 @@ mod tests {
 
         let back = sm.to_message();
         let sm2 = SessionMessage::from_message(&back);
-        assert_eq!(sm, sm2);
+        assert_eq!(sm.role, sm2.role);
+        assert_eq!(sm.content, sm2.content);
     }
 
     #[tokio::test]
@@ -663,10 +673,12 @@ mod tests {
             SessionMessage {
                 role: "user".into(),
                 content: "old hello".into(),
+                timestamp: Utc::now(),
             },
             SessionMessage {
                 role: "assistant".into(),
                 content: "old reply".into(),
+                timestamp: Utc::now(),
             },
         ];
         let json = serde_json::to_string_pretty(&legacy_messages).unwrap();
@@ -772,6 +784,7 @@ mod tests {
         let legacy = vec![SessionMessage {
             role: "user".into(),
             content: "legacy format".into(),
+            timestamp: Utc::now(),
         }];
         let json = serde_json::to_string_pretty(&legacy).unwrap();
         let path = store.session_path("agent:main:old");
@@ -797,10 +810,12 @@ mod tests {
                 SessionMessage {
                     role: "user".into(),
                     content: "hello".into(),
+                    timestamp: Utc::now(),
                 },
                 SessionMessage {
                     role: "assistant".into(),
                     content: "hi there!".into(),
+                    timestamp: Utc::now(),
                 },
             ],
         };

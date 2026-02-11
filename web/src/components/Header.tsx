@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { apiClient } from '../api/client'
-import { useTheme, colorSchemes, darkColorSchemes } from '../contexts/ThemeContext'
+import { useTheme } from '../contexts/ThemeContext'
 import { useI18n } from '../i18n/I18nContext'
 import LanguageSwitcher from '../i18n/components/LanguageSwitcher'
 import { Sun, Moon, Palette, ChevronDown } from 'lucide-react'
