@@ -8,7 +8,7 @@ const Config: React.FC = () => {
   const [config, setConfig] = useState<SanitizedConfig | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['channels', 'theme']))
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['channels']))
   const { t } = useI18n()
 
   useEffect(() => {
@@ -113,7 +113,7 @@ const Config: React.FC = () => {
             <h3 className="text-lg font-semibold text-text capitalize">
               {title}
             </h3>
-            {isEmpty && (
+            {isEmpty && title !== 'theme' && (
               <span className="text-sm text-text-secondary italic">{t('config.empty')}</span>
             )}
           </div>
@@ -122,18 +122,24 @@ const Config: React.FC = () => {
           </span>
         </button>
 
-        {isExpanded && !isEmpty && data && (
+        {isExpanded && (
           <div className="px-6 pb-4 border-t border-border">
-            <div className="bg-surface/50 rounded p-4 mt-4">
-              <div className="space-y-3 text-sm">
-                {Object.entries(data).map(([key, value]) => (
-                  <div key={key} className="border-b border-border pb-2 last:border-0">
-                    <div className="font-medium text-text mb-1">{key}:</div>
-                    <div className="ml-2">{renderValue(value)}</div>
-                  </div>
-                ))}
+            {title === 'theme' ? (
+              <div className="mt-4">
+                <ThemePreview />
               </div>
-            </div>
+            ) : !isEmpty && data ? (
+              <div className="bg-surface/50 rounded p-4 mt-4">
+                <div className="space-y-3 text-sm">
+                  {Object.entries(data).map(([key, value]) => (
+                    <div key={key} className="border-b border-border pb-2 last:border-0">
+                      <div className="font-medium text-text mb-1">{key}:</div>
+                      <div className="ml-2">{renderValue(value)}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </div>
         )}
       </div>
@@ -174,19 +180,13 @@ const Config: React.FC = () => {
       </div>
 
       <div className="space-y-4">
-        {renderSection('theme', {})}
         {renderSection('channels', config.channels)}
         {renderSection('providers', config.providers)}
         {renderSection('agent', config.agent)}
         {renderSection('tools', config.tools)}
         {config.web && renderSection('web', config.web as Record<string, unknown>)}
+        {renderSection('theme', { preview: 'theme_preview' })}
       </div>
-
-      {expandedSections.has('theme') && (
-        <div className="mt-4">
-          <ThemePreview />
-        </div>
-      )}
 
       <div className="mt-6 bg-warning/10 border border-warning/20 rounded-lg p-4">
         <p className="text-sm text-warning">
