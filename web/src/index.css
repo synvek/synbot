@@ -58,6 +58,12 @@ body {
   color: var(--color-primary);
 }
 
+/* 导航激活态：柔和的主色浅底，适配所有主题 */
+.bg-primary-muted {
+  background-color: var(--color-border);
+  background-color: color-mix(in srgb, var(--color-primary) 25%, var(--color-surface));
+}
+
 .border-border {
   border-color: var(--color-border);
 }

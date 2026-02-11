@@ -26,7 +26,7 @@ const Sidebar: React.FC = () => {
                 className={({ isActive }) =>
                   `flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all ${
                     isActive
-                      ? 'bg-primary/10 text-primary font-medium'
+                      ? 'bg-primary-muted text-primary font-medium'
                       : 'text-text hover:bg-background hover:text-primary'
                   }`
                 }
