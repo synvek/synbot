@@ -14,6 +14,13 @@ import type {
   PaginatedResponse,
 } from '../types/api';
 
+// API response wrapper from backend
+interface ApiResponse<T> {
+  success: boolean;
+  data?: T;
+  error?: string;
+}
+
 export class ApiClient {
   private client: AxiosInstance;
   private authHeader?: string;
@@ -74,8 +81,8 @@ export class ApiClient {
 
   // System Status
   async getStatus(): Promise<SystemStatus> {
-    const response = await this.client.get<SystemStatus>('/api/status');
-    return response.data;
+    const response = await this.client.get<ApiResponse<SystemStatus>>('/api/status');
+    return response.data.data!;
   }
 
   // Sessions
@@ -91,67 +98,67 @@ export class ApiClient {
     if (channel) params.channel = channel;
     if (scope) params.scope = scope;
 
-    const response = await this.client.get<PaginatedResponse<SessionSummary>>(
+    const response = await this.client.get<ApiResponse<PaginatedResponse<SessionSummary>>>(
       '/api/sessions',
       { params }
     );
-    return response.data;
+    return response.data.data!;
   }
 
   async getSession(id: string): Promise<SessionDetail> {
-    const response = await this.client.get<SessionDetail>(`/api/sessions/${id}`);
-    return response.data;
+    const response = await this.client.get<ApiResponse<SessionDetail>>(`/api/sessions/${id}`);
+    return response.data.data!;
   }
 
   // Channels
   async getChannels(): Promise<ChannelInfo[]> {
-    const response = await this.client.get<ChannelInfo[]>('/api/channels');
-    return response.data;
+    const response = await this.client.get<ApiResponse<ChannelInfo[]>>('/api/channels');
+    return response.data.data!;
   }
 
   // Cron Jobs
   async getCronJobs(): Promise<CronJobInfo[]> {
-    const response = await this.client.get<CronJobInfo[]>('/api/cron');
-    return response.data;
+    const response = await this.client.get<ApiResponse<CronJobInfo[]>>('/api/cron');
+    return response.data.data!;
   }
 
   async updateCronJob(id: string, enabled: boolean): Promise<CronJobInfo> {
-    const response = await this.client.patch<CronJobInfo>(`/api/cron/${id}`, {
+    const response = await this.client.patch<ApiResponse<CronJobInfo>>(`/api/cron/${id}`, {
       enabled,
     });
-    return response.data;
+    return response.data.data!;
   }
 
   // Roles
   async getRoles(): Promise<RoleInfo[]> {
-    const response = await this.client.get<RoleInfo[]>('/api/roles');
-    return response.data;
+    const response = await this.client.get<ApiResponse<RoleInfo[]>>('/api/roles');
+    return response.data.data!;
   }
 
   // Skills
   async getSkills(): Promise<SkillInfo[]> {
-    const response = await this.client.get<SkillInfo[]>('/api/skills');
-    return response.data;
+    const response = await this.client.get<ApiResponse<SkillInfo[]>>('/api/skills');
+    return response.data.data!;
   }
 
   async getSkill(name: string): Promise<SkillDetail> {
-    const response = await this.client.get<SkillDetail>(`/api/skills/${name}`);
-    return response.data;
+    const response = await this.client.get<ApiResponse<SkillDetail>>(`/api/skills/${name}`);
+    return response.data.data!;
   }
 
   // Config
   async getConfig(): Promise<SanitizedConfig> {
-    const response = await this.client.get<SanitizedConfig>('/api/config');
-    return response.data;
+    const response = await this.client.get<ApiResponse<SanitizedConfig>>('/api/config');
+    return response.data.data!;
   }
 
   // Logs
   async getLogs(params: LogQueryParams): Promise<PaginatedResponse<LogEntry>> {
-    const response = await this.client.get<PaginatedResponse<LogEntry>>(
+    const response = await this.client.get<ApiResponse<PaginatedResponse<LogEntry>>>(
       '/api/logs',
       { params }
     );
-    return response.data;
+    return response.data.data!;
   }
 }
 

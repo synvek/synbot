@@ -89,9 +89,9 @@ const Config: React.FC = () => {
     return <span className="text-gray-800">{String(value)}</span>
   }
 
-  const renderSection = (title: string, data: Record<string, unknown>) => {
+  const renderSection = (title: string, data: Record<string, unknown> | undefined | null) => {
     const isExpanded = expandedSections.has(title)
-    const isEmpty = Object.keys(data).length === 0
+    const isEmpty = !data || Object.keys(data).length === 0
 
     return (
       <div key={title} className="bg-white rounded-lg shadow">
@@ -118,7 +118,7 @@ const Config: React.FC = () => {
           </span>
         </button>
 
-        {isExpanded && !isEmpty && (
+        {isExpanded && !isEmpty && data && (
           <div className="px-6 pb-4 border-t border-gray-100">
             <div className="bg-gray-50 rounded p-4 mt-4">
               <div className="space-y-3 text-sm">
@@ -174,6 +174,7 @@ const Config: React.FC = () => {
         {renderSection('providers', config.providers)}
         {renderSection('agent', config.agent)}
         {renderSection('tools', config.tools)}
+        {config.web && renderSection('web', config.web as Record<string, unknown>)}
       </div>
 
       <div className="mt-6 bg-yellow-50 border border-yellow-200 rounded-lg p-4">

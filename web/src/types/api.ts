@@ -110,6 +110,7 @@ export interface SanitizedConfig {
   providers: Record<string, unknown>;
   agent: Record<string, unknown>;
   tools: Record<string, unknown>;
+  web?: Record<string, unknown>;
 }
 
 // Log Types
