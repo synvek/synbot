@@ -57,7 +57,7 @@ const Roles: React.FC = () => {
             <div
               key={role.name}
               onClick={() => setSelectedRole(role)}
-              className={`bg-white rounded-lg shadow p-4 cursor-pointer transition-all hover:shadow-lg ${
+              className={`bg-surface rounded-lg shadow p-4 cursor-pointer transition-all hover:shadow-lg ${
                 selectedRole?.name === role.name ? 'ring-2 ring-blue-500' : ''
               }`}
             >
@@ -72,7 +72,7 @@ const Roles: React.FC = () => {
         </div>
 
         {selectedRole && (
-          <div className="bg-white rounded-lg shadow p-6">
+          <div className="bg-surface rounded-lg shadow p-6">
             <h3 className="text-xl font-bold text-gray-900 mb-4">
               {selectedRole.name}
             </h3>

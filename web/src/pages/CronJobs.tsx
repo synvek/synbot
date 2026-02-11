@@ -73,7 +73,7 @@ const CronJobs: React.FC = () => {
         {jobs.map((job) => (
           <div
             key={job.id}
-            className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow"
+            className="bg-surface rounded-lg shadow p-6 hover:shadow-lg transition-shadow"
           >
             <div className="flex items-start justify-between">
               <div className="flex-1">

@@ -84,7 +84,7 @@ const Channels: React.FC = () => {
         {channels.map((channel) => (
           <div
             key={channel.name}
-            className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow"
+            className="bg-surface rounded-lg shadow p-6 hover:shadow-lg transition-shadow"
           >
             <div className="flex items-start justify-between mb-4">
               <div>

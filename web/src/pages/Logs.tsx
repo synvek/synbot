@@ -117,7 +117,7 @@ const Logs: React.FC = () => {
         <p className="text-gray-600 mt-1">{t('logs.description')}</p>
       </div>
 
-      <div className="bg-white rounded-lg shadow p-4 mb-4">
+      <div className="bg-surface rounded-lg shadow p-4 mb-4">
         <div className="flex flex-wrap gap-4 items-end">
           <div className="flex-1 min-w-[200px]">
             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -179,7 +179,7 @@ const Logs: React.FC = () => {
         </div>
       )}
 
-      <div className="bg-white rounded-lg shadow">
+      <div className="bg-surface rounded-lg shadow">
         <div className="p-4 border-b border-gray-200 flex items-center justify-between">
           <div className="text-sm text-gray-600">
             {t('logs.showing')} {logs.length} {t('logs.logEntries')}

@@ -71,7 +71,7 @@ const Skills: React.FC = () => {
             <div
               key={skill.name}
               onClick={() => handleSkillClick(skill.name)}
-              className={`bg-white rounded-lg shadow p-4 cursor-pointer transition-all hover:shadow-lg ${
+              className={`bg-surface rounded-lg shadow p-4 cursor-pointer transition-all hover:shadow-lg ${
                 selectedSkill?.name === skill.name ? 'ring-2 ring-blue-500' : ''
               }`}
             >
@@ -97,7 +97,7 @@ const Skills: React.FC = () => {
           ))}
         </div>
 
-        <div className="bg-white rounded-lg shadow p-6">
+        <div className="bg-surface rounded-lg shadow p-6">
           {loadingDetail ? (
             <div className="flex items-center justify-center h-64">
               <div className="text-gray-500">{t('skills.loadingDetails')}</div>
