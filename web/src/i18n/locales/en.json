@@ -133,5 +133,25 @@
     "orangeSunset": "Orange Sunset",
     "pinkBlossom": "Pink Blossom",
     "grayModern": "Gray Modern"
+  },
+  "sessions": {
+    "title": "Sessions",
+    "description": "View and manage active sessions",
+    "channel": "Channel",
+    "scope": "Scope",
+    "filterByChannel": "Filter by channel",
+    "filterByScope": "Filter by scope",
+    "sessionList": "Session List",
+    "sessionDetails": "Session Details",
+    "anonymous": "Anonymous",
+    "direct": "Direct",
+    "messages": "messages",
+    "updated": "Updated",
+    "noSessionsFound": "No sessions found",
+    "id": "ID",
+    "created": "Created",
+    "messageHistory": "Message History",
+    "selectSessionToView": "Select a session to view details",
+    "failedToFetch": "Failed to fetch sessions"
   }
 }

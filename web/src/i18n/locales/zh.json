@@ -133,5 +133,25 @@
     "orangeSunset": "橙色日落",
     "pinkBlossom": "粉色花语",
     "grayModern": "灰色现代"
+  },
+  "sessions": {
+    "title": "会话",
+    "description": "查看和管理活跃会话",
+    "channel": "频道",
+    "scope": "范围",
+    "filterByChannel": "按频道筛选",
+    "filterByScope": "按范围筛选",
+    "sessionList": "会话列表",
+    "sessionDetails": "会话详情",
+    "anonymous": "匿名",
+    "direct": "直接",
+    "messages": "条消息",
+    "updated": "更新于",
+    "noSessionsFound": "未找到会话",
+    "id": "ID",
+    "created": "创建于",
+    "messageHistory": "消息历史",
+    "selectSessionToView": "选择会话以查看详情",
+    "failedToFetch": "获取会话失败"
   }
 }
