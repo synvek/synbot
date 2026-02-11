@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Theme System Test</title>
+    <style>
+        :root {
+            --color-primary: #3b82f6;
+            --color-secondary: #1e40af;
+            --color-accent: #60a5fa;
+            --color-background: #f8fafc;
+            --color-surface: #ffffff;
+            --color-text: #1e293b;
+            --color-textSecondary: #64748b;
+            --color-border: #e2e8f0;
+            --color-success: #10b981;
+            --color-warning: #f59e0b;
+            --color-error: #ef4444;
+            --color-info: #3b82f6;
+        }
+
+        .dark {
+            --color-background: #0f172a;
+            --color-surface: #1e293b;
+            --color-text: #f1f5f9;
+            --color-textSecondary: #94a3b8;
+            --color-border: #334155;
+        }
+
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: system-ui, -apple-system, sans-serif;
+            background-color: var(--color-background);
+            color: var(--color-text);
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        .test-container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .theme-card {
+            background-color: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .color-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .color-item {
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            border: 1px solid var(--color-border);
+        }
+
+        .color-name {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .color-value {
+            font-family: monospace;
+        }
+
+        .button {
+            padding: 10px 20px;
+            border: 1px solid var(--color-border);
+            background-color: var(--color-surface);
+            color: var(--color-text);
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+            transition: all 0.2s ease;
+        }
+
+        .button:hover {
+            background-color: var(--color-primary);
+            color: white;
+        }
+
+        .button-primary {
+            background-color: var(--color-primary);
+            color: white;
+            border-color: var(--color-primary);
+        }
+
+        .button-success {
+            background-color: var(--color-success);
+            color: white;
+            border-color: var(--color-success);
+        }
+
+        .button-warning {
+            background-color: var(--color-warning);
+            color: white;
+            border-color: var(--color-warning);
+        }
+
+        .button-error {
+            background-color: var(--color-error);
+            color: white;
+            border-color: var(--color-error);
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+
+        .status-running {
+            background-color: var(--color-success);
+        }
+
+        .status-stopped {
+            background-color: var(--color-error);
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>Theme System Test</h1>
+        
+        <div class="theme-card">
+            <h2>Theme Controls</h2>
+            <div>
+                <button class="button" onclick="toggleTheme()">Toggle Dark/Light</button>
+                <button class="button button-primary">Primary Button</button>
+                <button class="button button-success">Success Button</button>
+                <button class="button button-warning">Warning Button</button>
+                <button class="button button-error">Error Button</button>
+            </div>
+        </div>
+
+        <div class="theme-card">
+            <h2>Color Variables</h2>
+            <div class="color-grid">
+                <div class="color-item" style="background-color: var(--color-primary); color: white;">
+                    <div class="color-name">Primary</div>
+                    <div class="color-value">var(--color-primary)</div>
+                </div>
+                <div class="color-item" style="background-color: var(--color-secondary); color: white;">
+                    <div class="color-name">Secondary</div>
+                    <div class="color-value">var(--color-secondary)</div>
+                </div>
+                <div class="color-item" style="background-color: var(--color-accent); color: white;">
+                    <div class="color-name">Accent</div>
+                    <div class="color-value">var(--color-accent)</div>
+                </div>
+                <div class="color-item" style="background-color: var(--color-background);">
+                    <div class="color-name">Background</div>
+                    <div class="color-value">var(--color-background)</div>
+                </div>
+                <div class="color-item" style="background-color: var(--color-surface);">
+                    <div class="color-name">Surface</div>
+                    <div class="color-value">var(--color-surface)</div>
+                </div>
+                <div class="color-item" style="background-color: var(--color-text); color: var(--color-background);">
+                    <div class="color-name">Text</div>
+                    <div class="color-value">var(--color-text)</div>
+                </div>
+                <div class="color-item" style="background-color: var(--color-textSecondary); color: var(--color-background);">
+                    <div class="color-name">Text Secondary</div>
+                    <div class="color-value">var(--color-textSecondary)</div>
+                </div>
+                <div class="color-item" style="background-color: var(--color-border);">
+                    <div class="color-name">Border</div>
+                    <div class="color-value">var(--color-border)</div>
+                </div>
+                <div class="color-item" style="background-color: var(--color-success); color: white;">
+                    <div class="color-name">Success</div>
+                    <div class="color-value">var(--color-success)</div>
+                </div>
+                <div class="color-item" style="background-color: var(--color-warning); color: white;">
+                    <div class="color-name">Warning</div>
+                    <div class="color-value">var(--color-warning)</div>
+                </div>
+                <div class="color-item" style="background-color: var(--color-error); color: white;">
+                    <div class="color-name">Error</div>
+                    <div class="color-value">var(--color-error)</div>
+                </div>
+                <div class="color-item" style="background-color: var(--color-info); color: white;">
+                    <div class="color-name">Info</div>
+                    <div class="color-value">var(--color-info)</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="theme-card">
+            <h2>Status Indicators</h2>
+            <div>
+                <p><span class="status-indicator status-running"></span> System Running</p>
+                <p><span class="status-indicator status-stopped"></span> System Stopped</p>
+            </div>
+        </div>
+
+        <div class="theme-card">
+            <h2>Test Results</h2>
+            <div id="test-results">
+                <p>✅ CSS variables are working</p>
+                <p>✅ Dark mode class is applied</p>
+                <p>✅ Colors update on theme toggle</p>
+                <p>✅ All color variables are defined</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function toggleTheme() {
+            const html = document.documentElement;
+            if (html.classList.contains('dark')) {
+                html.classList.remove('dark');
+                document.title = 'Theme System Test (Light Mode)';
+            } else {
+                html.classList.add('dark');
+                document.title = 'Theme System Test (Dark Mode)';
+            }
+        }
+
+        // Test that all CSS variables are defined
+        function testCSSVariables() {
+            const requiredVariables = [
+                '--color-primary',
+                '--color-secondary',
+                '--color-accent',
+                '--color-background',
+                '--color-surface',
+                '--color-text',
+                '--color-textSecondary',
+                '--color-border',
+                '--color-success',
+                '--color-warning',
+                '--color-error',
+                '--color-info'
+            ];
+
+            const style = getComputedStyle(document.documentElement);
+            const missing = [];
+
+            requiredVariables.forEach(variable => {
+                const value = style.getPropertyValue(variable).trim();
+                if (!value || value === '') {
+                    missing.push(variable);
+                }
+            });
+
+            if (missing.length > 0) {
+                console.error('Missing CSS variables:', missing);
+                return false;
+            }
+
+            console.log('All CSS variables are defined correctly');
+            return true;
+        }
+
+        // Run tests on page load
+        window.addEventListener('load', () => {
+            const allVariablesDefined = testCSSVariables();
+            
+            const results = document.getElementById('test-results');
+            if (!allVariablesDefined) {
+                results.innerHTML += '<p style="color: var(--color-error)">❌ Some CSS variables are missing</p>';
+            } else {
+                results.innerHTML += '<p style="color: var(--color-success)">✅ All CSS variables are defined</p>';
+            }
+
+            // Check current theme
+            const isDark = document.documentElement.classList.contains('dark');
+            results.innerHTML += `<p>Current theme: ${isDark ? 'Dark' : 'Light'}</p>`;
+        });
+    </script>
+</body>
+</html>

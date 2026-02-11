@@ -15,7 +15,7 @@ const Sidebar: React.FC = () => {
   ]
 
   return (
-    <aside className="w-64 bg-white shadow-sm overflow-y-auto">
+    <aside className="w-64 bg-surface shadow-sm overflow-y-auto border-r border-border">
       <nav className="p-4">
         <ul className="space-y-2">
           {navItems.map((item) => (
@@ -24,10 +24,10 @@ const Sidebar: React.FC = () => {
                 to={item.path}
                 end={item.path === '/'}
                 className={({ isActive }) =>
-                  `flex items-center gap-3 px-4 py-2 rounded-lg transition-colors ${
+                  `flex items-center gap-3 px-4 py-2.5 rounded-lg transition-all ${
                     isActive
-                      ? 'bg-blue-50 text-blue-600 font-medium'
-                      : 'text-gray-700 hover:bg-gray-50'
+                      ? 'bg-primary/10 text-primary font-medium'
+                      : 'text-text hover:bg-background hover:text-primary'
                   }`
                 }
               >

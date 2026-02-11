@@ -33,15 +33,15 @@ const Overview: React.FC = () => {
   if (loading && !status) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-gray-500">Loading...</div>
+        <div className="text-text-secondary">Loading...</div>
       </div>
     )
   }
 
   if (error) {
     return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-        <p className="text-red-800">{error}</p>
+      <div className="bg-error/10 border border-error/20 rounded-lg p-4">
+        <p className="text-error">{error}</p>
       </div>
     )
   }
@@ -52,31 +52,31 @@ const Overview: React.FC = () => {
     {
       title: 'System Status',
       value: status.running ? 'Running' : 'Stopped',
-      color: status.running ? 'green' : 'red',
+      color: status.running ? 'success' : 'error',
       icon: '🟢',
     },
     {
       title: 'Active Sessions',
       value: status.session_count,
-      color: 'blue',
+      color: 'primary',
       icon: '💬',
     },
     {
       title: 'Channels',
       value: status.channel_count,
-      color: 'purple',
+      color: 'accent',
       icon: '📡',
     },
     {
       title: 'Cron Jobs',
       value: status.cron_job_count,
-      color: 'yellow',
+      color: 'warning',
       icon: '⏰',
     },
     {
       title: 'Roles',
       value: status.role_count,
-      color: 'indigo',
+      color: 'secondary',
       icon: '👤',
     },
   ]
@@ -94,8 +94,8 @@ const Overview: React.FC = () => {
   return (
     <div>
       <div className="mb-6">
-        <h2 className="text-2xl font-bold text-gray-900">System Overview</h2>
-        <p className="text-gray-600 mt-1">
+        <h2 className="text-2xl font-bold text-text">System Overview</h2>
+        <p className="text-text-secondary mt-1">
           Uptime: {formatUptime(status.uptime_secs)}
         </p>
       </div>
@@ -104,12 +104,12 @@ const Overview: React.FC = () => {
         {cards.map((card) => (
           <div
             key={card.title}
-            className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow"
+            className="bg-surface border border-border rounded-lg p-6 hover:shadow-lg transition-all hover:scale-[1.02]"
           >
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-600 mb-1">{card.title}</p>
-                <p className="text-3xl font-bold text-gray-900">{card.value}</p>
+                <p className="text-sm text-text-secondary mb-1">{card.title}</p>
+                <p className={`text-3xl font-bold text-${card.color}`}>{card.value}</p>
               </div>
               <div className="text-4xl">{card.icon}</div>
             </div>
@@ -117,7 +117,7 @@ const Overview: React.FC = () => {
         ))}
       </div>
 
-      <div className="mt-4 text-sm text-gray-500">
+      <div className="mt-4 text-sm text-text-secondary">
         Last updated: {new Date().toLocaleTimeString()} • Auto-refresh: 30s
       </div>
     </div>
