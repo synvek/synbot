@@ -1,17 +1,32 @@
-import React from 'react'
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import Layout from './components/Layout'
+import Overview from './pages/Overview'
+import Channels from './pages/Channels'
+import Sessions from './pages/Sessions'
+import CronJobs from './pages/CronJobs'
+import Roles from './pages/Roles'
+import Skills from './pages/Skills'
+import Config from './pages/Config'
+import Logs from './pages/Logs'
+import Chat from './pages/Chat'
 
 function App() {
   return (
-    <div className="min-h-screen bg-gray-100">
-      <div className="container mx-auto px-4 py-8">
-        <h1 className="text-3xl font-bold text-gray-900">
-          Web Admin Dashboard
-        </h1>
-        <p className="mt-4 text-gray-600">
-          Dashboard is initializing...
-        </p>
-      </div>
-    </div>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Layout />}>
+          <Route index element={<Overview />} />
+          <Route path="channels" element={<Channels />} />
+          <Route path="sessions" element={<Sessions />} />
+          <Route path="cron" element={<CronJobs />} />
+          <Route path="roles" element={<Roles />} />
+          <Route path="skills" element={<Skills />} />
+          <Route path="config" element={<Config />} />
+          <Route path="logs" element={<Logs />} />
+          <Route path="chat" element={<Chat />} />
+        </Route>
+      </Routes>
+    </BrowserRouter>
   )
 }
 
