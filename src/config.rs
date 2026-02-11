@@ -274,7 +274,7 @@ pub struct WebConfig {
 }
 
 fn default_web_port() -> u16 {
-    8080
+    18888
 }
 
 fn default_web_host() -> String {

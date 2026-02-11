@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::channels::Channel;
 use crate::config;
@@ -116,7 +116,7 @@ async fn cmd_onboard() -> Result<()> {
 fn create_workspace_templates(ws: &std::path::Path) -> Result<()> {
     let templates = [
         ("AGENTS.md", "# Agent Instructions\n\nYou are a helpful AI assistant. Be concise, accurate, and friendly.\n"),
-        ("SOUL.md", "# Soul\n\nI am synbot, a lightweight AI assistant.\n\n## Personality\n\n- Helpful and friendly\n- Concise and to the point\n"),
+        ("SOUL.md", "# Soul\n\nI am synbot, a personal AI assistant.\n\n## Personality\n\n- Helpful and friendly\n- Concise and to the point\n"),
         ("USER.md", "# User Profile\n\n(Add information about yourself here.)\n"),
         ("TOOLS.md", "# Available Tools\n\nSee tool definitions provided by the agent runtime.\n"),
         ("HEARTBEAT.md", "# Heartbeat Tasks\n\n<!-- Add periodic tasks below -->\n"),
@@ -463,14 +463,19 @@ async fn cmd_cron(action: CronAction) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 fn resolve_provider(cfg: &config::Config) -> (String, Option<String>) {
-    // Helper to convert empty string to None
+    // Helper: trim empty to None, then normalize URL (IDN -> punycode) so reqwest does not fail
     let normalize_base = |base: &Option<String>| -> Option<String> {
         base.as_ref().and_then(|s| {
             let trimmed = s.trim();
             if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_string())
+                return None;
+            }
+            match crate::url_utils::normalize_http_url(trimmed) {
+                Ok(normalized) => Some(normalized),
+                Err(e) => {
+                    warn!(url = %trimmed, error = %e, "Invalid api_base URL, using as-is (may cause request to fail)");
+                    Some(trimmed.to_string())
+                }
             }
         })
     };

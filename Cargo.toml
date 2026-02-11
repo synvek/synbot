@@ -52,6 +52,7 @@ async-trait = "0.1"
 tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
 futures-util = "0.3"
 url = "2"
+idna = "0.2"
 
 # Directory helpers
 dirs = "6"

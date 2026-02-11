@@ -1,6 +1,6 @@
 //! Web tools: web_search (Brave), web_fetch.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
 use crate::tools::DynTool;
@@ -82,13 +82,17 @@ impl DynTool for WebFetchTool {
         })
     }
     async fn call(&self, args: Value) -> Result<String> {
-        let url = args["url"].as_str().unwrap_or("");
+        let raw_url = args["url"].as_str().unwrap_or("");
         let max_chars = args["max_chars"].as_u64().unwrap_or(50000) as usize;
+
+        // Normalize URL (e.g. IDN to punycode) to avoid "invalid international domain name" from reqwest
+        let url = crate::url_utils::normalize_http_url(raw_url)
+            .with_context(|| format!("invalid or unsupported URL: {}", raw_url))?;
 
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()?;
-        let text = client.get(url).send().await?.text().await?;
+        let text = client.get(&url).send().await?.text().await?;
 
         let mut content = text;
         if content.len() > max_chars {

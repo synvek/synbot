@@ -10,6 +10,9 @@ mod heartbeat;
 mod tools;
 mod web;
 
+mod url_utils;
+
+
 #[tokio::main]
 async fn main() -> Result<()> {
     cli::run().await
