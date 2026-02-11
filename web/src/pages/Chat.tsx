@@ -31,7 +31,7 @@ export default function Chat() {
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-[calc(100vh-8rem)]">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Web Chat</h1>
         <div className="mt-2 flex items-center gap-4">
@@ -53,7 +53,7 @@ export default function Chat() {
         </div>
       </div>
 
-      <div className="flex-1 bg-white rounded-lg shadow overflow-hidden flex flex-col">
+      <div className="flex-1 bg-white rounded-lg shadow overflow-hidden flex flex-col min-h-0">
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {messages.length === 0 ? (
             <div className="text-center text-gray-500 mt-8">

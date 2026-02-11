@@ -15,7 +15,7 @@ const Sidebar: React.FC = () => {
   ]
 
   return (
-    <aside className="w-64 bg-white shadow-sm min-h-screen">
+    <aside className="w-64 bg-white shadow-sm overflow-y-auto">
       <nav className="p-4">
         <ul className="space-y-2">
           {navItems.map((item) => (
