@@ -54,11 +54,11 @@ const Header: React.FC = () => {
           <div className="relative">
             <button
               onClick={() => setShowColorMenu(!showColorMenu)}
-              className="flex items-center space-x-2 px-3 py-2 text-sm text-text hover:text-primary hover:bg-surface rounded-md transition-colors border border-border"
+              className="flex items-center space-x-1 px-3 py-2 text-sm text-text hover:text-primary hover:bg-surface rounded-md transition-colors border border-border"
+              title={getCurrentSchemeName()}
             >
               <Palette className="w-4 h-4" />
-              <span>{getCurrentSchemeName()}</span>
-              <ChevronDown className="w-4 h-4" />
+              <ChevronDown className="w-3 h-3" />
             </button>
             
             {showColorMenu && (

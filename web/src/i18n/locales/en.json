@@ -45,11 +45,10 @@
     "stopped": "Stopped",
     "yes": "Yes",
     "no": "No",
-    "ok": "OK",
-    "cancel": "Cancel"
+    "ok": "OK"
   },
   "app": {
-    "title": "Web Admin Dashboard",
+    "title": "Synbot",
     "description": "Administration dashboard for managing system components"
   },
   "sidebar": {

@@ -45,11 +45,10 @@
     "stopped": "已停止",
     "yes": "是",
     "no": "否",
-    "ok": "确定",
-    "cancel": "取消"
+    "ok": "确定"
   },
   "app": {
-    "title": "Web 管理面板",
+    "title": "Synbot",
     "description": "用于管理系统组件的管理面板"
   },
   "sidebar": {
