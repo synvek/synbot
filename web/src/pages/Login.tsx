@@ -1,6 +1,7 @@
 import { useState, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiClient } from '../api/client';
+import { useI18n } from '../i18n/I18nContext';
 
 export default function Login() {
   const [username, setUsername] = useState('');
@@ -8,6 +9,7 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const { t } = useI18n();
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -26,7 +28,7 @@ export default function Login() {
     } catch (err) {
       // Clear invalid credentials
       apiClient.clearAuth();
-      setError('Invalid username or password');
+      setError(t('login.invalidCredentials'));
     } finally {
       setLoading(false);
     }
@@ -35,12 +37,12 @@ export default function Login() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100">
       <div className="max-w-md w-full bg-white rounded-lg shadow-md p-8">
-        <h1 className="text-2xl font-bold text-center mb-6">Admin Dashboard</h1>
+        <h1 className="text-2xl font-bold text-center mb-6">{t('login.title')}</h1>
         
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label htmlFor="username" className="block text-sm font-medium text-gray-700 mb-1">
-              Username
+              {t('common.username')}
             </label>
             <input
               id="username"
@@ -55,7 +57,7 @@ export default function Login() {
 
           <div>
             <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-              Password
+              {t('common.password')}
             </label>
             <input
               id="password"
@@ -79,7 +81,7 @@ export default function Login() {
             disabled={loading}
             className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-400 disabled:cursor-not-allowed"
           >
-            {loading ? 'Logging in...' : 'Login'}
+            {loading ? t('login.loggingIn') : t('common.login')}
           </button>
         </form>
       </div>

@@ -2,12 +2,14 @@ import React, { useEffect, useState } from 'react'
 import { apiClient } from '../api/client'
 import type { SanitizedConfig } from '../types/api'
 import ThemePreview from '../components/ThemePreview'
+import { useI18n } from '../i18n/I18nContext'
 
 const Config: React.FC = () => {
   const [config, setConfig] = useState<SanitizedConfig | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['channels', 'theme']))
+  const { t } = useI18n()
 
   useEffect(() => {
     const fetchConfig = async () => {
@@ -17,7 +19,7 @@ const Config: React.FC = () => {
         setConfig(data)
         setError(null)
       } catch (err) {
-        setError('Failed to fetch configuration')
+        setError(t('config.failedToFetch'))
         console.error(err)
       } finally {
         setLoading(false)
@@ -112,7 +114,7 @@ const Config: React.FC = () => {
               {title}
             </h3>
             {isEmpty && (
-              <span className="text-sm text-text-secondary italic">(empty)</span>
+              <span className="text-sm text-text-secondary italic">{t('config.empty')}</span>
             )}
           </div>
           <span className="text-text-secondary">
@@ -141,7 +143,7 @@ const Config: React.FC = () => {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-text-secondary">Loading...</div>
+        <div className="text-text-secondary">{t('common.loading')}</div>
       </div>
     )
   }
@@ -157,7 +159,7 @@ const Config: React.FC = () => {
   if (!config) {
     return (
       <div className="text-center py-12 text-text-secondary">
-        No configuration available
+        {t('config.noConfiguration')}
       </div>
     )
   }
@@ -165,9 +167,9 @@ const Config: React.FC = () => {
   return (
     <div>
       <div className="mb-6">
-        <h2 className="text-2xl font-bold text-text">Configuration</h2>
+        <h2 className="text-2xl font-bold text-text">{t('config.title')}</h2>
         <p className="text-text-secondary mt-1">
-          System configuration (sensitive values are masked)
+          {t('config.description')}
         </p>
       </div>
 
@@ -188,8 +190,7 @@ const Config: React.FC = () => {
 
       <div className="mt-6 bg-warning/10 border border-warning/20 rounded-lg p-4">
         <p className="text-sm text-warning">
-          <span className="font-medium">Note:</span> Sensitive values like API keys,
-          tokens, and passwords are masked for security.
+          <span className="font-medium">{t('common.note')}:</span> {t('config.note')}
         </p>
       </div>
     </div>

@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react'
 import { apiClient } from '../api/client'
 import type { SystemStatus } from '../types/api'
+import { useI18n } from '../i18n/I18nContext'
 
 const Overview: React.FC = () => {
   const [status, setStatus] = useState<SystemStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const { t } = useI18n()
 
   const fetchStatus = async () => {
     try {
@@ -14,7 +16,7 @@ const Overview: React.FC = () => {
       setStatus(data)
       setError(null)
     } catch (err) {
-      setError('Failed to fetch system status')
+      setError(t('overview.failedToFetch'))
       console.error(err)
     } finally {
       setLoading(false)
@@ -33,7 +35,7 @@ const Overview: React.FC = () => {
   if (loading && !status) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-text-secondary">Loading...</div>
+        <div className="text-text-secondary">{t('common.loading')}</div>
       </div>
     )
   }
@@ -50,31 +52,31 @@ const Overview: React.FC = () => {
 
   const cards = [
     {
-      title: 'System Status',
-      value: status.running ? 'Running' : 'Stopped',
+      title: t('overview.systemStatus'),
+      value: status.running ? t('common.running') : t('common.stopped'),
       color: status.running ? 'success' : 'error',
       icon: '🟢',
     },
     {
-      title: 'Active Sessions',
+      title: t('overview.activeSessions'),
       value: status.session_count,
       color: 'primary',
       icon: '💬',
     },
     {
-      title: 'Channels',
+      title: t('overview.channels'),
       value: status.channel_count,
       color: 'accent',
       icon: '📡',
     },
     {
-      title: 'Cron Jobs',
+      title: t('overview.cronJobs'),
       value: status.cron_job_count,
       color: 'warning',
       icon: '⏰',
     },
     {
-      title: 'Roles',
+      title: t('overview.roles'),
       value: status.role_count,
       color: 'secondary',
       icon: '👤',
@@ -94,9 +96,9 @@ const Overview: React.FC = () => {
   return (
     <div>
       <div className="mb-6">
-        <h2 className="text-2xl font-bold text-text">System Overview</h2>
+        <h2 className="text-2xl font-bold text-text">{t('overview.title')}</h2>
         <p className="text-text-secondary mt-1">
-          Uptime: {formatUptime(status.uptime_secs)}
+          {t('overview.uptime')}: {formatUptime(status.uptime_secs)}
         </p>
       </div>
 
@@ -118,7 +120,7 @@ const Overview: React.FC = () => {
       </div>
 
       <div className="mt-4 text-sm text-text-secondary">
-        Last updated: {new Date().toLocaleTimeString()} • Auto-refresh: 30s
+        {t('overview.lastUpdated')}: {new Date().toLocaleTimeString()} • {t('overview.autoRefresh')}: 30s
       </div>
     </div>
   )

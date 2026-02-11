@@ -1,17 +1,20 @@
 import React from 'react'
 import { NavLink } from 'react-router-dom'
+import { useI18n } from '../i18n/I18nContext'
 
 const Sidebar: React.FC = () => {
+  const { t } = useI18n()
+  
   const navItems = [
-    { path: '/', label: 'Overview', icon: '📊' },
-    { path: '/chat', label: 'Chat', icon: '💬' },
-    { path: '/channels', label: 'Channels', icon: '📡' },
-    { path: '/sessions', label: 'Sessions', icon: '👥' },
-    { path: '/cron', label: 'Cron Jobs', icon: '⏰' },
-    { path: '/roles', label: 'Roles', icon: '👤' },
-    { path: '/skills', label: 'Skills', icon: '🎯' },
-    { path: '/config', label: 'Config', icon: '⚙️' },
-    { path: '/logs', label: 'Logs', icon: '📝' },
+    { path: '/', label: t('sidebar.overview'), icon: '📊' },
+    { path: '/chat', label: t('sidebar.chat'), icon: '💬' },
+    { path: '/channels', label: t('sidebar.channels'), icon: '📡' },
+    { path: '/sessions', label: t('sidebar.sessions'), icon: '👥' },
+    { path: '/cron', label: t('sidebar.cron'), icon: '⏰' },
+    { path: '/roles', label: t('sidebar.roles'), icon: '👤' },
+    { path: '/skills', label: t('sidebar.skills'), icon: '🎯' },
+    { path: '/config', label: t('sidebar.config'), icon: '⚙️' },
+    { path: '/logs', label: t('sidebar.logs'), icon: '📝' },
   ]
 
   return (

@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect } from 'react';
 import { useWebSocket } from '../hooks/useWebSocket';
+import { useI18n } from '../i18n/I18nContext';
 
 export default function Chat() {
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const { t } = useI18n();
   
   const wsUrl = `ws://${window.location.hostname}:${window.location.port || '8080'}/ws/chat`;
   const { connected, messages, send, sessionId } = useWebSocket({
@@ -33,7 +35,7 @@ export default function Chat() {
   return (
     <div className="flex flex-col h-[calc(100vh-8rem)]">
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-text">Web Chat</h1>
+        <h1 className="text-2xl font-bold text-text">{t('chat.title')}</h1>
         <div className="mt-2 flex items-center gap-4">
           <div className="flex items-center gap-2">
             <div
@@ -42,12 +44,12 @@ export default function Chat() {
               }`}
             />
             <span className="text-sm text-text-secondary">
-              {connected ? 'Connected' : 'Disconnected'}
+              {connected ? t('common.connected') : t('common.disconnected')}
             </span>
           </div>
           {sessionId && (
             <span className="text-sm text-text-secondary">
-              Session: {sessionId.slice(0, 8)}...
+              {t('chat.session')}: {sessionId.slice(0, 8)}...
             </span>
           )}
         </div>
@@ -57,7 +59,7 @@ export default function Chat() {
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {messages.length === 0 ? (
             <div className="text-center text-text-secondary mt-8">
-              <p>No messages yet. Start a conversation!</p>
+              <p>{t('chat.noMessages')}</p>
             </div>
           ) : (
             messages.map((message) => (
@@ -99,8 +101,8 @@ export default function Chat() {
               onChange={(e) => setInput(e.target.value)}
               placeholder={
                 connected
-                  ? 'Type your message...'
-                  : 'Waiting for connection...'
+                  ? t('chat.typeMessage')
+                  : t('chat.waitingConnection')
               }
               disabled={!connected}
               className="flex-1 px-4 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-surface text-text disabled:bg-surface/50 disabled:cursor-not-allowed"
@@ -110,7 +112,7 @@ export default function Chat() {
               disabled={!connected || !input.trim()}
               className="px-6 py-2 bg-primary text-white rounded-lg hover:bg-secondary disabled:bg-border disabled:cursor-not-allowed transition-colors"
             >
-              Send
+              {t('chat.send')}
             </button>
           </form>
         </div>
