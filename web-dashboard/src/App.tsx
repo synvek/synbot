@@ -1,5 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import Layout from './components/Layout'
+import ProtectedRoute from './components/ProtectedRoute'
+import Login from './pages/Login'
 import Overview from './pages/Overview'
 import Channels from './pages/Channels'
 import Sessions from './pages/Sessions'
@@ -14,7 +16,15 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<Layout />}>
+        <Route path="/login" element={<Login />} />
+        <Route
+          path="/"
+          element={
+            <ProtectedRoute>
+              <Layout />
+            </ProtectedRoute>
+          }
+        >
           <Route index element={<Overview />} />
           <Route path="channels" element={<Channels />} />
           <Route path="sessions" element={<Sessions />} />

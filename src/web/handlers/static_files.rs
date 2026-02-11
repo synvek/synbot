@@ -15,7 +15,7 @@ pub struct Assets;
 /// This handler serves files from the embedded frontend build.
 /// If a file is not found, it falls back to serving index.html
 /// to support SPA client-side routing.
-pub async fn serve_static(_path: actix_web::web::Path<String>) -> impl Responder {
+pub async fn serve_static(path: actix_web::web::Path<String>) -> impl Responder {
     #[cfg(not(debug_assertions))]
     {
         let path = path.into_inner();
