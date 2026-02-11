@@ -248,6 +248,52 @@ pub struct WebToolConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Web server config
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebAuthConfig {
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_web_port")]
+    pub port: u16,
+    #[serde(default = "default_web_host")]
+    pub host: String,
+    #[serde(default)]
+    pub auth: Option<WebAuthConfig>,
+    #[serde(default)]
+    pub cors_origins: Vec<String>,
+}
+
+fn default_web_port() -> u16 {
+    8080
+}
+
+fn default_web_host() -> String {
+    "127.0.0.1".to_string()
+}
+
+impl Default for WebConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            port: default_web_port(),
+            host: default_web_host(),
+            auth: None,
+            cors_origins: Vec::new(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tools config
 // ---------------------------------------------------------------------------
 
@@ -275,6 +321,8 @@ pub struct Config {
     pub agent: AgentDefaults,
     #[serde(default)]
     pub tools: ToolsConfig,
+    #[serde(default)]
+    pub web: WebConfig,
     #[serde(default)]
     pub main_channel: String,
     #[serde(default)]

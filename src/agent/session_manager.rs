@@ -199,6 +199,14 @@ impl SessionManager {
     pub fn session_count(&self) -> usize {
         self.sessions.len()
     }
+
+    /// Get all sessions as a vector of (SessionMeta, message_count) tuples.
+    pub fn get_all_sessions(&self) -> Vec<(SessionMeta, usize)> {
+        self.sessions
+            .values()
+            .map(|(meta, messages)| (meta.clone(), messages.len()))
+            .collect()
+    }
 }
 
 // ── tests ───────────────────────────────────────────────────────────────

@@ -62,6 +62,22 @@ impl CronService {
         &self.store.jobs
     }
 
+    pub fn job_count(&self) -> usize {
+        self.store.jobs.len()
+    }
+
+    /// Update the enabled status of a job by ID.
+    pub fn update_job_enabled(&mut self, id: &str, enabled: bool) -> Result<bool> {
+        if let Some(job) = self.store.jobs.iter_mut().find(|j| j.id == id) {
+            job.enabled = enabled;
+            job.updated_at_ms = chrono::Utc::now().timestamp_millis();
+            self.save_store()?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
     /// Compute the next run time (in epoch milliseconds) for a given job.
     ///
     /// - `Schedule::Cron { expr, .. }`: parse the cron expression and find the
