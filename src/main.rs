@@ -8,6 +8,7 @@ mod config;
 mod cron;
 mod heartbeat;
 mod tools;
+mod web;
 
 #[tokio::main]
 async fn main() -> Result<()> {

@@ -285,6 +285,28 @@ async fn cmd_start() -> Result<()> {
     let inbound_tx = bus.inbound_sender();
     let inbound_rx = bus.take_inbound_receiver().unwrap();
 
+    // Initialize components for web server
+    let session_manager = std::sync::Arc::new(tokio::sync::RwLock::new(
+        crate::agent::session_manager::SessionManager::new(
+            cfg.groups.clone(),
+            cfg.topics.clone(),
+        ),
+    ));
+
+    let mut role_registry = crate::agent::role_registry::RoleRegistry::new();
+    role_registry.load_from_config(&cfg.agent.roles, &cfg.agent, &ws)?;
+    let role_registry = std::sync::Arc::new(role_registry);
+
+    let skills_loader = std::sync::Arc::new(crate::agent::skills::SkillsLoader::new(&ws));
+
+    let cron_store_path = config::config_dir().join("cron").join("jobs.json");
+    let cron_service = std::sync::Arc::new(tokio::sync::RwLock::new(
+        crate::cron::service::CronService::new(cron_store_path),
+    ));
+
+    // Create log buffer
+    let log_buffer = crate::web::create_log_buffer(1000);
+
     // Start agent loop
     let mut agent_loop = crate::agent::r#loop::AgentLoop::new(
         completion_model,
@@ -341,9 +363,36 @@ async fn cmd_start() -> Result<()> {
         });
     }
 
-    info!("🐈 synbot daemon running. Press Ctrl+C to stop.");
-    tokio::signal::ctrl_c().await?;
-    info!("Shutting down...");
+    // Start web server if enabled
+    if cfg.web.enabled {
+        let web_config = cfg.web.clone();
+        let web_state = crate::web::AppState::new(
+            std::sync::Arc::new(cfg.clone()),
+            session_manager,
+            cron_service,
+            role_registry,
+            skills_loader,
+            inbound_tx.clone(),
+            bus.outbound_tx_clone(),
+            log_buffer,
+        );
+
+        // Run web server in the main task (it will block until Ctrl+C)
+        tokio::select! {
+            result = crate::web::start_web_server(web_config, web_state) => {
+                if let Err(e) = result {
+                    tracing::error!("Web server error: {e:#}");
+                }
+            }
+            _ = tokio::signal::ctrl_c() => {
+                info!("Shutting down...");
+            }
+        }
+    } else {
+        info!("🐈 synbot daemon running. Press Ctrl+C to stop.");
+        tokio::signal::ctrl_c().await?;
+        info!("Shutting down...");
+    }
     Ok(())
 }
 

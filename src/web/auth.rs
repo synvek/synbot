@@ -12,6 +12,7 @@ use crate::config::WebAuthConfig;
 use crate::web::handlers::api::ErrorResponse;
 
 /// Middleware factory for Basic Authentication
+#[derive(Clone)]
 pub struct BasicAuth {
     config: Option<WebAuthConfig>,
 }
