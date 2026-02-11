@@ -38,6 +38,7 @@ export function useWebSocket({
     }
 
     try {
+      // Web channel uses a fixed global session for management
       const ws = new WebSocket(url);
       wsRef.current = ws;
 
@@ -54,6 +55,17 @@ export function useWebSocket({
           switch (message.type) {
             case 'connected':
               setSessionId(message.session_id);
+              break;
+            
+            case 'history':
+              // Load history messages
+              const historyMessages: ChatMessage[] = message.messages.map((msg, index) => ({
+                id: `history-${index}-${msg.timestamp}`,
+                role: msg.role as 'user' | 'assistant',
+                content: msg.content,
+                timestamp: msg.timestamp,
+              }));
+              setMessages(historyMessages);
               break;
             
             case 'chat_response':

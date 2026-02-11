@@ -39,6 +39,17 @@ pub enum WsServerMessage {
     Connected {
         session_id: String,
     },
+    History {
+        messages: Vec<HistoryMessage>,
+    },
+}
+
+/// Message in history
+#[derive(Debug, Serialize)]
+pub struct HistoryMessage {
+    pub role: String,
+    pub content: String,
+    pub timestamp: chrono::DateTime<Utc>,
 }
 
 /// WebSocket session actor
@@ -147,6 +158,43 @@ impl Actor for WsSession {
                 session_id: self.id.clone(),
             },
         );
+
+        // Load and send history
+        let state = self.state.clone();
+        let user_id = self.user_id.clone();
+        let addr = ctx.address();
+        ctx.spawn(
+            async move {
+                // Build session ID using the same logic as resolve_session
+                // For web channel, it will be: agent:main:web:dm:{user_id}
+                let session_id = {
+                    let sm = state.session_manager.read().await;
+                    sm.resolve_session("main", "web", &user_id, &serde_json::Value::Null)
+                };
+                
+                tracing::info!("Loading history for session: {}", session_id.format());
+                
+                // Get session history
+                let sm = state.session_manager.read().await;
+                if let Some(messages) = sm.get_history(&session_id) {
+                    tracing::info!("Found {} history messages for session {}", messages.len(), session_id.format());
+                    let history_messages: Vec<HistoryMessage> = messages
+                        .iter()
+                        .map(|msg| HistoryMessage {
+                            role: msg.role.clone(),
+                            content: msg.content.clone(),
+                            timestamp: msg.timestamp,
+                        })
+                        .collect();
+                    
+                    addr.do_send(HistoryMessageWrapper(history_messages));
+                } else {
+                    tracing::info!("No history found for session {}", session_id.format());
+                }
+            }
+            .into_actor(self)
+            .map(|_, _, _| {}),
+        );
     }
 
     fn stopped(&mut self, ctx: &mut Self::Context) {
@@ -252,15 +300,35 @@ impl Handler<OutboundMessageWrapper> for WsSession {
     }
 }
 
+/// Wrapper for history messages to be sent as actor messages
+#[derive(ActixMessage)]
+#[rtype(result = "()")]
+struct HistoryMessageWrapper(Vec<HistoryMessage>);
+
+/// Handle history messages
+impl Handler<HistoryMessageWrapper> for WsSession {
+    type Result = ();
+
+    fn handle(&mut self, msg: HistoryMessageWrapper, ctx: &mut Self::Context) {
+        let server_msg = WsServerMessage::History {
+            messages: msg.0,
+        };
+
+        self.send_message(ctx, server_msg);
+    }
+}
+
 /// WebSocket route handler
 pub async fn ws_chat(
     req: HttpRequest,
     stream: web::Payload,
     state: web::Data<AppState>,
 ) -> Result<HttpResponse, Error> {
-    // TODO: Extract user_id from authentication
-    // For now, generate a random user ID
-    let user_id = Uuid::new_v4().to_string();
+    // Use a fixed user_id for web channel since it's a global management interface
+    // All connections share the same session
+    let user_id = "web_admin".to_string();
+
+    tracing::info!("WebSocket connection for web admin interface");
 
     let ws_session = WsSession::new(user_id, state);
     let resp = ws::start(ws_session, &req, stream)?;

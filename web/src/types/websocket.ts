@@ -10,7 +10,14 @@ export type WsServerMessage =
   | { type: 'chat_response'; content: string; timestamp: string }
   | { type: 'error'; message: string }
   | { type: 'pong' }
-  | { type: 'connected'; session_id: string };
+  | { type: 'connected'; session_id: string }
+  | { type: 'history'; messages: HistoryMessage[] };
+
+export interface HistoryMessage {
+  role: string;
+  content: string;
+  timestamp: string;
+}
 
 export interface ChatMessage {
   id: string;
