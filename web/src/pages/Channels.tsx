@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react'
 import { apiClient } from '../api/client'
 import type { ChannelInfo } from '../types/api'
+import { useI18n } from '../i18n/I18nContext'
 
 const Channels: React.FC = () => {
   const [channels, setChannels] = useState<ChannelInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const { t } = useI18n()
 
   useEffect(() => {
     const fetchChannels = async () => {
@@ -15,7 +17,7 @@ const Channels: React.FC = () => {
         setChannels(data)
         setError(null)
       } catch (err) {
-        setError('Failed to fetch channels')
+        setError(t('channels.failedToFetch'))
         console.error(err)
       } finally {
         setLoading(false)
@@ -23,7 +25,7 @@ const Channels: React.FC = () => {
     }
 
     fetchChannels()
-  }, [])
+  }, [t])
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -58,7 +60,7 @@ const Channels: React.FC = () => {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-gray-500">Loading...</div>
+        <div className="text-gray-500">{t('common.loading')}</div>
       </div>
     )
   }
@@ -74,8 +76,8 @@ const Channels: React.FC = () => {
   return (
     <div>
       <div className="mb-6">
-        <h2 className="text-2xl font-bold text-gray-900">Channels</h2>
-        <p className="text-gray-600 mt-1">Manage messaging channels</p>
+        <h2 className="text-2xl font-bold text-gray-900">{t('channels.title')}</h2>
+        <p className="text-gray-600 mt-1">{t('channels.description')}</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -96,12 +98,12 @@ const Channels: React.FC = () => {
                     )}`}
                   >
                     {getStatusIcon(channel.status)}
-                    {channel.status}
+                    {t(`channels.${channel.status}` as keyof typeof t)}
                   </span>
                   {channel.enabled ? (
-                    <span className="text-xs text-green-600">Enabled</span>
+                    <span className="text-xs text-green-600">{t('channels.enabled')}</span>
                   ) : (
-                    <span className="text-xs text-gray-500">Disabled</span>
+                    <span className="text-xs text-gray-500">{t('channels.disabled')}</span>
                   )}
                 </div>
               </div>
@@ -110,7 +112,7 @@ const Channels: React.FC = () => {
             {channel.config && (
               <div className="mt-4 pt-4 border-t border-gray-200">
                 <p className="text-sm font-medium text-gray-700 mb-2">
-                  Configuration
+                  {t('channels.configuration')}
                 </p>
                 <div className="bg-gray-50 rounded p-3">
                   <pre className="text-xs text-gray-600 overflow-x-auto">
@@ -125,7 +127,7 @@ const Channels: React.FC = () => {
 
       {channels.length === 0 && (
         <div className="text-center py-12 text-gray-500">
-          No channels configured
+          {t('channels.noChannels')}
         </div>
       )}
     </div>

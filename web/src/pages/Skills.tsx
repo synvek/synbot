@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { apiClient } from '../api/client'
 import type { SkillInfo, SkillDetail } from '../types/api'
+import { useI18n } from '../i18n/I18nContext'
 
 const Skills: React.FC = () => {
   const [skills, setSkills] = useState<SkillInfo[]>([])
@@ -8,6 +9,7 @@ const Skills: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const { t } = useI18n()
 
   useEffect(() => {
     const fetchSkills = async () => {
@@ -17,7 +19,7 @@ const Skills: React.FC = () => {
         setSkills(data)
         setError(null)
       } catch (err) {
-        setError('Failed to fetch skills')
+        setError(t('skills.failedToFetch'))
         console.error(err)
       } finally {
         setLoading(false)
@@ -25,7 +27,7 @@ const Skills: React.FC = () => {
     }
 
     fetchSkills()
-  }, [])
+  }, [t])
 
   const handleSkillClick = async (skillName: string) => {
     try {
@@ -34,7 +36,7 @@ const Skills: React.FC = () => {
       setSelectedSkill(detail)
     } catch (err) {
       console.error('Failed to fetch skill detail:', err)
-      alert('Failed to load skill details')
+      alert(t('skills.failedToFetch'))
     } finally {
       setLoadingDetail(false)
     }
@@ -43,7 +45,7 @@ const Skills: React.FC = () => {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-gray-500">Loading...</div>
+        <div className="text-gray-500">{t('common.loading')}</div>
       </div>
     )
   }
@@ -59,8 +61,8 @@ const Skills: React.FC = () => {
   return (
     <div>
       <div className="mb-6">
-        <h2 className="text-2xl font-bold text-gray-900">Skills</h2>
-        <p className="text-gray-600 mt-1">Available agent skills</p>
+        <h2 className="text-2xl font-bold text-gray-900">{t('skills.title')}</h2>
+        <p className="text-gray-600 mt-1">{t('skills.description')}</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -76,7 +78,7 @@ const Skills: React.FC = () => {
               <h3 className="text-lg font-semibold text-gray-900">{skill.name}</h3>
               <div className="mt-2">
                 <p className="text-sm text-gray-600">
-                  Assigned to {skill.assigned_roles.length} role(s)
+                  {t('roles.assignedTo')} {skill.assigned_roles.length} {t('roles.role')}
                 </p>
                 {skill.assigned_roles.length > 0 && (
                   <div className="flex flex-wrap gap-2 mt-2">
@@ -98,7 +100,7 @@ const Skills: React.FC = () => {
         <div className="bg-white rounded-lg shadow p-6">
           {loadingDetail ? (
             <div className="flex items-center justify-center h-64">
-              <div className="text-gray-500">Loading skill details...</div>
+              <div className="text-gray-500">{t('skills.loadingDetails')}</div>
             </div>
           ) : selectedSkill ? (
             <>
@@ -107,7 +109,7 @@ const Skills: React.FC = () => {
               </h3>
 
               <div className="mb-4">
-                <h4 className="text-sm font-medium text-gray-700 mb-2">Assigned Roles</h4>
+                <h4 className="text-sm font-medium text-gray-700 mb-2">{t('skills.assignedRoles')}</h4>
                 <div className="flex flex-wrap gap-2">
                   {selectedSkill.assigned_roles.map((role) => (
                     <span
@@ -118,13 +120,13 @@ const Skills: React.FC = () => {
                     </span>
                   ))}
                   {selectedSkill.assigned_roles.length === 0 && (
-                    <span className="text-gray-500 text-sm">Not assigned to any role</span>
+                    <span className="text-gray-500 text-sm">{t('skills.notAssigned')}</span>
                   )}
                 </div>
               </div>
 
               <div>
-                <h4 className="text-sm font-medium text-gray-700 mb-2">SKILL.md Content</h4>
+                <h4 className="text-sm font-medium text-gray-700 mb-2">{t('skills.skillContent')}</h4>
                 <div className="bg-gray-50 rounded p-4 max-h-96 overflow-y-auto">
                   <pre className="text-sm text-gray-800 whitespace-pre-wrap font-mono">
                     {selectedSkill.content}
@@ -134,7 +136,7 @@ const Skills: React.FC = () => {
             </>
           ) : (
             <div className="flex items-center justify-center h-64 text-gray-500">
-              Select a skill to view details
+              {t('skills.selectSkill')}
             </div>
           )}
         </div>
@@ -142,7 +144,7 @@ const Skills: React.FC = () => {
 
       {skills.length === 0 && (
         <div className="text-center py-12 text-gray-500">
-          No skills available
+          {t('skills.noSkills')}
         </div>
       )}
     </div>

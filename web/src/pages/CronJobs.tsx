@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react'
 import { apiClient } from '../api/client'
 import type { CronJobInfo } from '../types/api'
+import { useI18n } from '../i18n/I18nContext'
 
 const CronJobs: React.FC = () => {
   const [jobs, setJobs] = useState<CronJobInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [updating, setUpdating] = useState<string | null>(null)
+  const { t } = useI18n()
 
   const fetchJobs = async () => {
     try {
@@ -15,7 +17,7 @@ const CronJobs: React.FC = () => {
       setJobs(data)
       setError(null)
     } catch (err) {
-      setError('Failed to fetch cron jobs')
+      setError(t('cron.failedToFetch'))
       console.error(err)
     } finally {
       setLoading(false)
@@ -33,21 +35,21 @@ const CronJobs: React.FC = () => {
       await fetchJobs()
     } catch (err) {
       console.error('Failed to update cron job:', err)
-      alert('Failed to update cron job')
+      alert(t('cron.failedToFetch'))
     } finally {
       setUpdating(null)
     }
   }
 
   const formatTimestamp = (ms: number | null | undefined) => {
-    if (!ms) return 'N/A'
+    if (!ms) return t('cron.na')
     return new Date(ms).toLocaleString()
   }
 
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-gray-500">Loading...</div>
+        <div className="text-gray-500">{t('common.loading')}</div>
       </div>
     )
   }
@@ -63,8 +65,8 @@ const CronJobs: React.FC = () => {
   return (
     <div>
       <div className="mb-6">
-        <h2 className="text-2xl font-bold text-gray-900">Cron Jobs</h2>
-        <p className="text-gray-600 mt-1">Manage scheduled tasks</p>
+        <h2 className="text-2xl font-bold text-gray-900">{t('cron.title')}</h2>
+        <p className="text-gray-600 mt-1">{t('cron.description')}</p>
       </div>
 
       <div className="space-y-4">
@@ -86,12 +88,12 @@ const CronJobs: React.FC = () => {
                         : 'bg-gray-100 text-gray-600'
                     }`}
                   >
-                    {job.enabled ? 'Enabled' : 'Disabled'}
+                    {job.enabled ? t('cron.enabled') : t('cron.disabled')}
                   </span>
                 </div>
-                <p className="text-sm text-gray-600 mt-1">ID: {job.id}</p>
+                <p className="text-sm text-gray-600 mt-1">{t('cron.id')}: {job.id}</p>
                 <p className="text-sm text-gray-600 mt-1">
-                  Schedule: <code className="bg-gray-100 px-2 py-0.5 rounded">{job.schedule}</code>
+                  {t('cron.schedule')}: <code className="bg-gray-100 px-2 py-0.5 rounded">{job.schedule}</code>
                 </p>
               </div>
 
@@ -105,35 +107,35 @@ const CronJobs: React.FC = () => {
                 } disabled:opacity-50 disabled:cursor-not-allowed`}
               >
                 {updating === job.id
-                  ? 'Updating...'
+                  ? t('cron.updating')
                   : job.enabled
-                  ? 'Disable'
-                  : 'Enable'}
+                  ? t('cron.disable')
+                  : t('cron.enable')}
               </button>
             </div>
 
             <div className="mt-4 pt-4 border-t border-gray-200 grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
-                <p className="text-sm font-medium text-gray-700">Last Run</p>
+                <p className="text-sm font-medium text-gray-700">{t('cron.lastRun')}</p>
                 <p className="text-sm text-gray-600 mt-1">
                   {formatTimestamp(job.state.last_run_at_ms)}
                 </p>
                 {job.state.last_status && (
                   <p className="text-xs text-gray-500 mt-1">
-                    Status: {job.state.last_status}
+                    {t('cron.status')}: {job.state.last_status}
                   </p>
                 )}
               </div>
 
               <div>
-                <p className="text-sm font-medium text-gray-700">Next Run</p>
+                <p className="text-sm font-medium text-gray-700">{t('cron.nextRun')}</p>
                 <p className="text-sm text-gray-600 mt-1">
                   {formatTimestamp(job.state.next_run_at_ms)}
                 </p>
               </div>
 
               <div>
-                <p className="text-sm font-medium text-gray-700">Payload</p>
+                <p className="text-sm font-medium text-gray-700">{t('cron.payload')}</p>
                 <div className="mt-1 bg-gray-50 rounded p-2">
                   <pre className="text-xs text-gray-600 overflow-x-auto">
                     {JSON.stringify(job.payload, null, 2)}
@@ -147,7 +149,7 @@ const CronJobs: React.FC = () => {
 
       {jobs.length === 0 && (
         <div className="text-center py-12 text-gray-500">
-          No cron jobs configured
+          {t('cron.noJobs')}
         </div>
       )}
     </div>

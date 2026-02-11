@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react'
 import { apiClient } from '../api/client'
 import type { LogEntry, LogQueryParams } from '../types/api'
+import { useI18n } from '../i18n/I18nContext'
 
 const LOG_LEVELS = ['error', 'warn', 'info', 'debug']
 
@@ -17,6 +18,7 @@ const Logs: React.FC = () => {
   const [isStreaming, setIsStreaming] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
   const logsEndRef = useRef<HTMLDivElement>(null)
+  const { t } = useI18n()
 
   const fetchLogs = async () => {
     try {
@@ -25,7 +27,7 @@ const Logs: React.FC = () => {
       setLogs(response.items)
       setError(null)
     } catch (err) {
-      setError('Failed to fetch logs')
+      setError(t('logs.failedToFetch'))
       console.error(err)
     } finally {
       setLoading(false)
@@ -62,7 +64,7 @@ const Logs: React.FC = () => {
     
     ws.onerror = (err) => {
       console.error('WebSocket error:', err)
-      setError('WebSocket connection error')
+      setError(t('logs.wsError'))
     }
     
     ws.onclose = () => {
@@ -111,35 +113,35 @@ const Logs: React.FC = () => {
   return (
     <div>
       <div className="mb-6">
-        <h2 className="text-2xl font-bold text-gray-900">Logs</h2>
-        <p className="text-gray-600 mt-1">System logs and events</p>
+        <h2 className="text-2xl font-bold text-gray-900">{t('logs.title')}</h2>
+        <p className="text-gray-600 mt-1">{t('logs.description')}</p>
       </div>
 
       <div className="bg-white rounded-lg shadow p-4 mb-4">
         <div className="flex flex-wrap gap-4 items-end">
           <div className="flex-1 min-w-[200px]">
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Search
+              {t('logs.search')}
             </label>
             <input
               type="text"
               value={filters.keyword || ''}
               onChange={(e) => setFilters({ ...filters, keyword: e.target.value })}
-              placeholder="Search logs..."
+              placeholder={t('logs.searchPlaceholder')}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>
 
           <div className="min-w-[150px]">
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Level
+              {t('logs.level')}
             </label>
             <select
               value={filters.level || ''}
               onChange={(e) => setFilters({ ...filters, level: e.target.value || undefined })}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
-              <option value="">All Levels</option>
+              <option value="">{t('logs.allLevels')}</option>
               {LOG_LEVELS.map((level) => (
                 <option key={level} value={level}>
                   {level.toUpperCase()}
@@ -154,7 +156,7 @@ const Logs: React.FC = () => {
               disabled={loading}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              {loading ? 'Loading...' : 'Refresh'}
+              {loading ? t('common.loading') : t('logs.refresh')}
             </button>
 
             <button
@@ -165,7 +167,7 @@ const Logs: React.FC = () => {
                   : 'bg-green-600 text-white hover:bg-green-700'
               }`}
             >
-              {isStreaming ? 'Stop Stream' : 'Start Stream'}
+              {isStreaming ? t('logs.stopStream') : t('logs.startStream')}
             </button>
           </div>
         </div>
@@ -180,11 +182,11 @@ const Logs: React.FC = () => {
       <div className="bg-white rounded-lg shadow">
         <div className="p-4 border-b border-gray-200 flex items-center justify-between">
           <div className="text-sm text-gray-600">
-            Showing {logs.length} log entries
+            {t('logs.showing')} {logs.length} {t('logs.logEntries')}
             {isStreaming && (
               <span className="ml-2 inline-flex items-center gap-1 text-green-600">
                 <span className="w-2 h-2 bg-green-600 rounded-full animate-pulse"></span>
-                Live
+                {t('logs.live')}
               </span>
             )}
           </div>
@@ -192,18 +194,18 @@ const Logs: React.FC = () => {
             onClick={scrollToBottom}
             className="text-sm text-blue-600 hover:text-blue-700"
           >
-            Scroll to bottom
+            {t('logs.scrollToBottom')}
           </button>
         </div>
 
         <div className="max-h-[600px] overflow-y-auto">
           {loading && logs.length === 0 ? (
             <div className="flex items-center justify-center h-64">
-              <div className="text-gray-500">Loading...</div>
+              <div className="text-gray-500">{t('common.loading')}</div>
             </div>
           ) : logs.length === 0 ? (
             <div className="text-center py-12 text-gray-500">
-              No logs found
+              {t('logs.noLogs')}
             </div>
           ) : (
             <div className="divide-y divide-gray-100">
