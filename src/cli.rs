@@ -463,21 +463,33 @@ async fn cmd_cron(action: CronAction) -> Result<()> {
 // ---------------------------------------------------------------------------
 
 fn resolve_provider(cfg: &config::Config) -> (String, Option<String>) {
-    // Priority: openrouter > anthropic > openai > deepseek
+    // Helper to convert empty string to None
+    let normalize_base = |base: &Option<String>| -> Option<String> {
+        base.as_ref().and_then(|s| {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        })
+    };
+
+    // Priority: openrouter > anthropic > openai > deepseek > ollama
     if !cfg.providers.openrouter.api_key.is_empty() {
-        return (cfg.providers.openrouter.api_key.clone(), cfg.providers.openrouter.api_base.clone());
+        return (cfg.providers.openrouter.api_key.clone(), normalize_base(&cfg.providers.openrouter.api_base));
     }
     if !cfg.providers.anthropic.api_key.is_empty() {
-        return (cfg.providers.anthropic.api_key.clone(), cfg.providers.anthropic.api_base.clone());
+        return (cfg.providers.anthropic.api_key.clone(), normalize_base(&cfg.providers.anthropic.api_base));
     }
     if !cfg.providers.openai.api_key.is_empty() {
-        return (cfg.providers.openai.api_key.clone(), cfg.providers.openai.api_base.clone());
+        return (cfg.providers.openai.api_key.clone(), normalize_base(&cfg.providers.openai.api_base));
     }
     if !cfg.providers.deepseek.api_key.is_empty() {
-        return (cfg.providers.deepseek.api_key.clone(), cfg.providers.deepseek.api_base.clone());
+        return (cfg.providers.deepseek.api_key.clone(), normalize_base(&cfg.providers.deepseek.api_base));
     }
     if !cfg.providers.ollama.api_key.is_empty() {
-        return (cfg.providers.ollama.api_key.clone(), cfg.providers.ollama.api_base.clone());
+        return (cfg.providers.ollama.api_key.clone(), normalize_base(&cfg.providers.ollama.api_base));
     }
     (String::new(), None)
 }

@@ -6,7 +6,7 @@ use rust_embed::RustEmbed;
 
 #[cfg(not(debug_assertions))]
 #[derive(RustEmbed)]
-#[folder = "web-dashboard/dist"]
+#[folder = "web/dist"]
 #[prefix = ""]
 pub struct Assets;
 

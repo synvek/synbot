@@ -20,7 +20,7 @@ fn main() {
     if profile == "release" {
         println!("cargo:warning=Building frontend for release...");
         
-        let frontend_dir = Path::new("web-dashboard");
+        let frontend_dir = Path::new("web");
         
         // Check if frontend directory exists
         if !frontend_dir.exists() {
@@ -88,7 +88,7 @@ fn main() {
     }
     
     // Tell cargo to rerun this script if frontend files change
-    println!("cargo:rerun-if-changed=web-dashboard/src");
-    println!("cargo:rerun-if-changed=web-dashboard/package.json");
-    println!("cargo:rerun-if-changed=web-dashboard/vite.config.ts");
+    println!("cargo:rerun-if-changed=web/src");
+    println!("cargo:rerun-if-changed=web/package.json");
+    println!("cargo:rerun-if-changed=web/vite.config.ts");
 }
