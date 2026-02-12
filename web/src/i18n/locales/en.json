@@ -101,6 +101,18 @@
     "user": "User",
     "assistant": "Assistant"
   },
+  "approval": {
+    "title": "Command Approval Request",
+    "command": "Command",
+    "workingDir": "Working Directory",
+    "context": "Context",
+    "requestTime": "Request Time",
+    "timeout": "Timeout",
+    "approve": "Approve",
+    "reject": "Reject",
+    "approved": "Approved",
+    "rejected": "Rejected"
+  },
   "config": {
     "title": "Configuration",
     "description": "System configuration (sensitive values are masked)",

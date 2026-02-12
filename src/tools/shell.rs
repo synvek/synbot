@@ -3,8 +3,10 @@
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::process::Command;
+use tracing::{info, warn, error};
 
 use crate::tools::truncation::smart_truncate_streams;
 use crate::tools::DynTool;
@@ -176,6 +178,11 @@ pub struct ExecTool {
     pub timeout_secs: u64,
     pub restrict_to_workspace: bool,
     pub policy: CommandPolicy,
+    pub permission_policy: Option<Arc<crate::tools::permission::CommandPermissionPolicy>>,
+    pub approval_manager: Option<Arc<crate::tools::approval::ApprovalManager>>,
+    pub session_id: Option<String>,
+    pub channel: Option<String>,
+    pub chat_id: Option<String>,
 }
 
 #[async_trait::async_trait]
@@ -203,6 +210,63 @@ impl DynTool for ExecTool {
         self.policy
             .validate(cmd_str)
             .map_err(|e| anyhow::anyhow!(e))?;
+
+        // Check permission level if permission policy is enabled
+        if let Some(permission_policy) = &self.permission_policy {
+            let permission = permission_policy.check_permission(cmd_str);
+            
+            match permission {
+                crate::tools::permission::PermissionLevel::Deny => {
+                    return Err(anyhow::anyhow!(
+                        "命令被拒绝执行：{}。该命令已被策略禁止。",
+                        cmd_str
+                    ));
+                }
+                crate::tools::permission::PermissionLevel::RequireApproval => {
+                    // Request approval if approval manager is available
+                    if let (Some(approval_manager), Some(session_id), Some(channel), Some(chat_id)) = 
+                        (&self.approval_manager, &self.session_id, &self.channel, &self.chat_id) 
+                    {
+                        let cwd = args["working_dir"]
+                            .as_str()
+                            .unwrap_or_else(|| self.workspace.to_str().unwrap_or("."));
+                        
+                        let context = format!(
+                            "Agent 请求执行命令。\n会话: {}\n渠道: {}",
+                            session_id, channel
+                        );
+                        
+                        let approved = approval_manager
+                            .request_approval(
+                                session_id.clone(),
+                                channel.clone(),
+                                chat_id.clone(),
+                                cmd_str.to_string(),
+                                cwd.to_string(),
+                                context,
+                                300, // 5 分钟超时
+                            )
+                            .await?;
+                        
+                        if !approved {
+                            return Err(anyhow::anyhow!(
+                                "命令执行被拒绝：{}。用户未批准或请求超时。",
+                                cmd_str
+                            ));
+                        }
+                    } else {
+                        // If approval manager or session info is not available, deny by default
+                        return Err(anyhow::anyhow!(
+                            "命令需要审批但审批系统未配置：{}",
+                            cmd_str
+                        ));
+                    }
+                }
+                crate::tools::permission::PermissionLevel::Allow => {
+                    // Allow execution, continue
+                }
+            }
+        }
 
         // Resolve working directory
         let cwd = args["working_dir"]
@@ -254,16 +318,76 @@ impl DynTool for ExecTool {
 
         let exec_result = ExecResult {
             exit_code: output.status.code().unwrap_or(-1),
-            stdout: truncated_stdout,
-            stderr: truncated_stderr,
+            stdout: truncated_stdout.clone(),
+            stderr: truncated_stderr.clone(),
             duration_ms,
-            working_dir,
+            working_dir: working_dir.clone(),
             truncated: needs_truncation,
             original_size,
         };
 
+        // Log command execution result
+        if exec_result.exit_code == 0 {
+            info!(
+                command = %cmd_str,
+                exit_code = exec_result.exit_code,
+                duration_ms = exec_result.duration_ms,
+                working_dir = %working_dir,
+                stdout_len = truncated_stdout.len(),
+                stderr_len = truncated_stderr.len(),
+                truncated = needs_truncation,
+                session_id = ?self.session_id,
+                channel = ?self.channel,
+                "Command executed successfully"
+            );
+        } else {
+            warn!(
+                command = %cmd_str,
+                exit_code = exec_result.exit_code,
+                duration_ms = exec_result.duration_ms,
+                working_dir = %working_dir,
+                stderr = %mask_sensitive_info(&truncated_stderr),
+                session_id = ?self.session_id,
+                channel = ?self.channel,
+                "Command execution failed"
+            );
+        }
+
         Ok(exec_result.to_display_string())
     }
+}
+
+/// Mask sensitive information in log output
+fn mask_sensitive_info(text: &str) -> String {
+    let mut masked = text.to_string();
+    
+    // Simple pattern matching for common sensitive data
+    // Replace common patterns with masked versions
+    let keywords = ["api_key", "apikey", "api-key", "token", "password", "secret", "Bearer", "Basic"];
+    
+    for keyword in &keywords {
+        if let Some(pos) = masked.to_lowercase().find(&keyword.to_lowercase()) {
+            // Find the end of the value (next space or end of string)
+            let start = pos + keyword.len();
+            if let Some(rest) = masked.get(start..) {
+                if let Some(space_pos) = rest.find(|c: char| c.is_whitespace()) {
+                    let end = start + space_pos;
+                    if let Some(prefix) = masked.get(..start) {
+                        if let Some(suffix) = masked.get(end..) {
+                            masked = format!("{}***{}", prefix, suffix);
+                        }
+                    }
+                } else {
+                    // No space found, mask to end
+                    if let Some(prefix) = masked.get(..start) {
+                        masked = format!("{}***", prefix);
+                    }
+                }
+            }
+        }
+    }
+    
+    masked
 }
 
 // ---------------------------------------------------------------------------
@@ -460,5 +584,201 @@ mod tests {
         let target = PathBuf::from("subdir");
         let result = validate_workspace_path(&ws, &target);
         assert!(result.is_ok());
+    }
+
+    // ---- Permission Integration tests ----
+
+    #[tokio::test]
+    async fn permission_deny_blocks_command() {
+        use crate::tools::permission::{CommandPermissionPolicy, PermissionLevel, PermissionRule};
+        
+        let policy = CommandPermissionPolicy::new(
+            vec![
+                PermissionRule {
+                    pattern: "rm*".to_string(),
+                    level: PermissionLevel::Deny,
+                    description: None,
+                },
+            ],
+            PermissionLevel::Allow,
+        );
+
+        let tool = ExecTool {
+            workspace: PathBuf::from("."),
+            timeout_secs: 10,
+            restrict_to_workspace: false,
+            policy: CommandPolicy::default(),
+            permission_policy: Some(Arc::new(policy)),
+            approval_manager: None,
+            session_id: None,
+            channel: None,
+            chat_id: None,
+        };
+
+        let args = json!({
+            "command": "rm -rf test.txt"
+        });
+
+        let result = tool.call(args).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("命令被拒绝执行"));
+    }
+
+    #[tokio::test]
+    async fn permission_allow_executes_command() {
+        use crate::tools::permission::{CommandPermissionPolicy, PermissionLevel, PermissionRule};
+        
+        let policy = CommandPermissionPolicy::new(
+            vec![
+                PermissionRule {
+                    pattern: "echo*".to_string(),
+                    level: PermissionLevel::Allow,
+                    description: None,
+                },
+            ],
+            PermissionLevel::Deny,
+        );
+
+        let tool = ExecTool {
+            workspace: PathBuf::from("."),
+            timeout_secs: 10,
+            restrict_to_workspace: false,
+            policy: CommandPolicy::default(),
+            permission_policy: Some(Arc::new(policy)),
+            approval_manager: None,
+            session_id: None,
+            channel: None,
+            chat_id: None,
+        };
+
+        let args = json!({
+            "command": "echo test"
+        });
+
+        let result = tool.call(args).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn permission_require_approval_without_manager_fails() {
+        use crate::tools::permission::{CommandPermissionPolicy, PermissionLevel, PermissionRule};
+        
+        let policy = CommandPermissionPolicy::new(
+            vec![
+                PermissionRule {
+                    pattern: "git push*".to_string(),
+                    level: PermissionLevel::RequireApproval,
+                    description: None,
+                },
+            ],
+            PermissionLevel::Allow,
+        );
+
+        let tool = ExecTool {
+            workspace: PathBuf::from("."),
+            timeout_secs: 10,
+            restrict_to_workspace: false,
+            policy: CommandPolicy::default(),
+            permission_policy: Some(Arc::new(policy)),
+            approval_manager: None,
+            session_id: None,
+            channel: None,
+            chat_id: None,
+        };
+
+        let args = json!({
+            "command": "git push origin main"
+        });
+
+        let result = tool.call(args).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("审批系统未配置"));
+    }
+
+    #[tokio::test]
+    async fn permission_require_approval_with_manager_configured() {
+        use crate::tools::approval::ApprovalManager;
+        use crate::tools::permission::{CommandPermissionPolicy, PermissionLevel, PermissionRule};
+        
+        let policy = CommandPermissionPolicy::new(
+            vec![
+                PermissionRule {
+                    pattern: "curl*".to_string(),
+                    level: PermissionLevel::RequireApproval,
+                    description: None,
+                },
+            ],
+            PermissionLevel::Allow,
+        );
+
+        let approval_manager = Arc::new(ApprovalManager::new());
+        
+        let tool = ExecTool {
+            workspace: PathBuf::from("."),
+            timeout_secs: 10,
+            restrict_to_workspace: false,
+            policy: CommandPolicy::default(),
+            permission_policy: Some(Arc::new(policy)),
+            approval_manager: Some(approval_manager.clone()),
+            session_id: Some("test-session".to_string()),
+            channel: Some("test".to_string()),
+            chat_id: Some("test-chat".to_string()),
+        };
+
+        // Verify that the tool has approval manager configured
+        assert!(tool.approval_manager.is_some());
+        assert!(tool.session_id.is_some());
+    }
+
+    #[tokio::test]
+    async fn permission_no_policy_allows_execution() {
+        let tool = ExecTool {
+            workspace: PathBuf::from("."),
+            timeout_secs: 10,
+            restrict_to_workspace: false,
+            policy: CommandPolicy::default(),
+            permission_policy: None,
+            approval_manager: None,
+            session_id: None,
+            channel: None,
+            chat_id: None,
+        };
+
+        let args = json!({
+            "command": "echo test"
+        });
+
+        let result = tool.call(args).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn permission_default_level_applied() {
+        use crate::tools::permission::{CommandPermissionPolicy, PermissionLevel};
+        
+        let policy = CommandPermissionPolicy::new(
+            vec![],
+            PermissionLevel::Deny,
+        );
+
+        let tool = ExecTool {
+            workspace: PathBuf::from("."),
+            timeout_secs: 10,
+            restrict_to_workspace: false,
+            policy: CommandPolicy::default(),
+            permission_policy: Some(Arc::new(policy)),
+            approval_manager: None,
+            session_id: None,
+            channel: None,
+            chat_id: None,
+        };
+
+        let args = json!({
+            "command": "echo test"
+        });
+
+        let result = tool.call(args).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("命令被拒绝执行"));
     }
 }

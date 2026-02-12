@@ -39,13 +39,13 @@ impl DynTool for MessageTool {
             .unwrap_or(&self.default_chat_id)
             .to_string();
 
-        let msg = OutboundMessage {
+        let msg = OutboundMessage::chat(
             channel,
             chat_id,
             content,
-            reply_to: None,
-            media: vec![],
-        };
+            vec![],
+            None,
+        );
         let _ = self.outbound_tx.send(msg);
         Ok("Message sent.".into())
     }

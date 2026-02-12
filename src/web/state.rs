@@ -19,6 +19,8 @@ pub struct AppState {
     pub inbound_tx: mpsc::Sender<InboundMessage>,
     pub outbound_tx: broadcast::Sender<OutboundMessage>,
     pub log_buffer: SharedLogBuffer,
+    pub approval_manager: Arc<crate::tools::approval::ApprovalManager>,
+    pub permission_policy: Option<Arc<crate::tools::permission::CommandPermissionPolicy>>,
 }
 
 impl AppState {
@@ -31,6 +33,8 @@ impl AppState {
         inbound_tx: mpsc::Sender<InboundMessage>,
         outbound_tx: broadcast::Sender<OutboundMessage>,
         log_buffer: SharedLogBuffer,
+        approval_manager: Arc<crate::tools::approval::ApprovalManager>,
+        permission_policy: Option<Arc<crate::tools::permission::CommandPermissionPolicy>>,
     ) -> Self {
         Self {
             config,
@@ -41,6 +45,8 @@ impl AppState {
             inbound_tx,
             outbound_tx,
             log_buffer,
+            approval_manager,
+            permission_policy,
         }
     }
 }

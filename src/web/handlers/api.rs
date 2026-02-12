@@ -720,3 +720,223 @@ pub async fn get_logs(
     Ok(HttpResponse::Ok().json(ApiResponse::success(response)))
 }
 
+/// Approval history entry DTO
+#[derive(Serialize)]
+pub struct ApprovalHistoryDto {
+    pub id: String,
+    pub session_id: String,
+    pub channel: String,
+    pub chat_id: String,
+    pub command: String,
+    pub working_dir: String,
+    pub context: String,
+    pub timestamp: DateTime<Utc>,
+    pub timeout_secs: u64,
+    pub status: String,
+    pub responder: Option<String>,
+    pub completed_at: Option<DateTime<Utc>>,
+}
+
+/// Query parameters for approval history
+#[derive(Deserialize)]
+pub struct ApprovalHistoryQuery {
+    #[serde(default = "default_page")]
+    pub page: usize,
+    #[serde(default = "default_page_size")]
+    pub page_size: usize,
+    pub session_id: Option<String>,
+    pub channel: Option<String>,
+    pub status: Option<String>,
+}
+
+/// GET /api/approvals/history - Returns approval history with filtering
+pub async fn get_approval_history(
+    state: web::Data<AppState>,
+    query: web::Query<ApprovalHistoryQuery>,
+) -> Result<HttpResponse> {
+    use crate::tools::approval::ApprovalStatus;
+    
+    // Get approval history from manager
+    let history = state.approval_manager.get_history().await;
+    
+    // Apply filters
+    let filtered: Vec<ApprovalHistoryDto> = history
+        .into_iter()
+        .filter(|(request, status)| {
+            // Filter by session_id
+            if let Some(ref sid) = query.session_id {
+                if &request.session_id != sid {
+                    return false;
+                }
+            }
+            
+            // Filter by channel
+            if let Some(ref ch) = query.channel {
+                if &request.channel != ch {
+                    return false;
+                }
+            }
+            
+            // Filter by status
+            if let Some(ref st) = query.status {
+                let status_str = match status {
+                    ApprovalStatus::Pending => "pending",
+                    ApprovalStatus::Approved(_) => "approved",
+                    ApprovalStatus::Rejected(_) => "rejected",
+                    ApprovalStatus::Timeout => "timeout",
+                };
+                if status_str != st {
+                    return false;
+                }
+            }
+            
+            true
+        })
+        .map(|(request, status)| {
+            let (status_str, responder, completed_at) = match status {
+                ApprovalStatus::Pending => ("pending".to_string(), None, None),
+                ApprovalStatus::Approved(response) => {
+                    ("approved".to_string(), Some(response.responder.clone()), Some(response.timestamp))
+                }
+                ApprovalStatus::Rejected(response) => {
+                    ("rejected".to_string(), Some(response.responder.clone()), Some(response.timestamp))
+                }
+                ApprovalStatus::Timeout => ("timeout".to_string(), None, None),
+            };
+            
+            ApprovalHistoryDto {
+                id: request.id.clone(),
+                session_id: request.session_id.clone(),
+                channel: request.channel.clone(),
+                chat_id: request.chat_id.clone(),
+                command: request.command.clone(),
+                working_dir: request.working_dir.clone(),
+                context: request.context.clone(),
+                timestamp: request.timestamp,
+                timeout_secs: request.timeout_secs,
+                status: status_str,
+                responder,
+                completed_at,
+            }
+        })
+        .collect();
+    
+    let total = filtered.len();
+    let page = query.page.max(1);
+    let page_size = query.page_size.min(100).max(1);
+    let start = (page - 1) * page_size;
+    
+    let items = filtered
+        .into_iter()
+        .skip(start)
+        .take(page_size)
+        .collect();
+    
+    let response = PaginatedResponse {
+        items,
+        total,
+        page,
+        page_size,
+    };
+    
+    Ok(HttpResponse::Ok().json(ApiResponse::success(response)))
+}
+
+/// Pending approval request DTO
+#[derive(Serialize)]
+pub struct PendingApprovalDto {
+    pub id: String,
+    pub session_id: String,
+    pub channel: String,
+    pub chat_id: String,
+    pub command: String,
+    pub working_dir: String,
+    pub context: String,
+    pub timestamp: DateTime<Utc>,
+    pub timeout_secs: u64,
+}
+
+/// GET /api/approvals/pending - Returns pending approval requests
+pub async fn get_pending_approvals(
+    state: web::Data<AppState>,
+) -> Result<HttpResponse> {
+    // Get all pending requests from approval manager
+    let history = state.approval_manager.get_history().await;
+    
+    // Filter only pending requests
+    let pending: Vec<PendingApprovalDto> = history
+        .into_iter()
+        .filter_map(|(request, status)| {
+            match status {
+                crate::tools::approval::ApprovalStatus::Pending => {
+                    Some(PendingApprovalDto {
+                        id: request.id.clone(),
+                        session_id: request.session_id.clone(),
+                        channel: request.channel.clone(),
+                        chat_id: request.chat_id.clone(),
+                        command: request.command.clone(),
+                        working_dir: request.working_dir.clone(),
+                        context: request.context.clone(),
+                        timestamp: request.timestamp,
+                        timeout_secs: request.timeout_secs,
+                    })
+                }
+                _ => None,
+            }
+        })
+        .collect();
+    
+    Ok(HttpResponse::Ok().json(ApiResponse::success(pending)))
+}
+
+/// Request body for approval response
+#[derive(Deserialize)]
+pub struct ApprovalResponseRequest {
+    pub approved: bool,
+    pub responder: String,
+}
+
+/// POST /api/approvals/{id}/respond - Submit approval response
+pub async fn submit_approval_response(
+    state: web::Data<AppState>,
+    path: web::Path<String>,
+    body: web::Json<ApprovalResponseRequest>,
+) -> Result<HttpResponse> {
+    let request_id = path.into_inner();
+    
+    // Check if the request exists and is pending
+    let pending_request = state.approval_manager.get_pending_request(&request_id).await;
+    
+    if pending_request.is_none() {
+        return Err(ApiError::NotFound(format!("Approval request not found or already processed: {}", request_id)).into());
+    }
+    
+    // Create approval response
+    let response = crate::tools::approval::ApprovalResponse {
+        request_id: request_id.clone(),
+        approved: body.approved,
+        responder: body.responder.clone(),
+        timestamp: Utc::now(),
+    };
+    
+    // Submit response to approval manager
+    state.approval_manager.submit_response(response).await
+        .map_err(|e| ApiError::InternalError(format!("Failed to submit approval response: {}", e)))?;
+    
+    #[derive(Serialize)]
+    struct ResponseResult {
+        success: bool,
+        message: String,
+    }
+    
+    let result = ResponseResult {
+        success: true,
+        message: if body.approved {
+            "Approval granted".to_string()
+        } else {
+            "Approval rejected".to_string()
+        },
+    };
+    
+    Ok(HttpResponse::Ok().json(ApiResponse::success(result)))
+}

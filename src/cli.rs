@@ -167,8 +167,21 @@ async fn cmd_agent(message: Option<String>, provider: Option<String>, model: Opt
         ),
     );
 
-    // Build tools (pass subagent manager to SpawnTool)
-    let tools = build_default_tools(&cfg, &ws, std::sync::Arc::clone(&subagent_mgr));
+    // Create approval manager
+    let approval_manager = std::sync::Arc::new(crate::tools::approval::ApprovalManager::new());
+
+    // Load permission policy if enabled
+    let permission_policy = if cfg.tools.exec.permissions.enabled {
+        Some(std::sync::Arc::new(crate::tools::permission::CommandPermissionPolicy::new(
+            cfg.tools.exec.permissions.rules.clone(),
+            cfg.tools.exec.permissions.default_level,
+        )))
+    } else {
+        None
+    };
+
+    // Build tools (pass subagent manager, approval manager, and permission policy)
+    let tools = build_default_tools(&cfg, &ws, std::sync::Arc::clone(&subagent_mgr), approval_manager, permission_policy);
     let tools = std::sync::Arc::new(tools);
 
     // Set up bus
@@ -215,7 +228,14 @@ async fn cmd_agent(message: Option<String>, provider: Option<String>, model: Opt
         let mut rx = bus.subscribe_outbound();
         let printer = tokio::spawn(async move {
             if let Ok(out) = rx.recv().await {
-                println!("{}", out.content);
+                match out.message_type {
+                    crate::bus::OutboundMessageType::Chat { content, .. } => {
+                        println!("{}", content);
+                    }
+                    crate::bus::OutboundMessageType::ApprovalRequest { request } => {
+                        println!("Approval request: {}", request.command);
+                    }
+                }
             }
         });
 
@@ -288,7 +308,20 @@ async fn cmd_start() -> Result<()> {
         ),
     );
 
-    let tools = std::sync::Arc::new(build_default_tools(&cfg, &ws, std::sync::Arc::clone(&subagent_mgr)));
+    // Create approval manager
+    let approval_manager = std::sync::Arc::new(crate::tools::approval::ApprovalManager::new());
+
+    // Load permission policy if enabled
+    let permission_policy = if cfg.tools.exec.permissions.enabled {
+        Some(std::sync::Arc::new(crate::tools::permission::CommandPermissionPolicy::new(
+            cfg.tools.exec.permissions.rules.clone(),
+            cfg.tools.exec.permissions.default_level,
+        )))
+    } else {
+        None
+    };
+
+    let tools = std::sync::Arc::new(build_default_tools(&cfg, &ws, std::sync::Arc::clone(&subagent_mgr), std::sync::Arc::clone(&approval_manager), permission_policy.clone()));
 
     let mut bus = crate::bus::MessageBus::new();
     let inbound_tx = bus.inbound_sender();
@@ -385,6 +418,8 @@ async fn cmd_start() -> Result<()> {
             inbound_tx.clone(),
             bus.outbound_tx_clone(),
             log_buffer,
+            approval_manager,
+            permission_policy,
         );
 
         // Run web server in the main task (it will block until Ctrl+C)
@@ -529,6 +564,8 @@ fn build_default_tools(
     cfg: &config::Config,
     ws: &std::path::Path,
     subagent_mgr: std::sync::Arc<tokio::sync::Mutex<crate::agent::subagent::SubagentManager>>,
+    approval_manager: std::sync::Arc<crate::tools::approval::ApprovalManager>,
+    permission_policy: Option<std::sync::Arc<crate::tools::permission::CommandPermissionPolicy>>,
 ) -> crate::tools::ToolRegistry {
     use crate::tools::*;
     let restrict = cfg.tools.exec.restrict_to_workspace;
@@ -547,6 +584,11 @@ fn build_default_tools(
             cfg.tools.exec.deny_patterns.clone(),
             cfg.tools.exec.allow_patterns.clone(),
         ),
+        permission_policy,
+        approval_manager: Some(approval_manager),
+        session_id: None,
+        channel: None,
+        chat_id: None,
     })).expect("register ExecTool");
     if !cfg.tools.web.brave_api_key.is_empty() {
         reg.register(std::sync::Arc::new(web::WebSearchTool {

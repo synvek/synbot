@@ -4,6 +4,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc};
 
+use crate::tools::approval::{ApprovalRequest, ApprovalResponse};
+
 // ---------------------------------------------------------------------------
 // Event types
 // ---------------------------------------------------------------------------
@@ -28,14 +30,74 @@ impl InboundMessage {
     }
 }
 
+/// 审批请求消息（Agent → 用户）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApprovalRequestMessage {
+    pub request: ApprovalRequest,
+}
+
+/// 审批响应消息（用户 → Agent）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApprovalResponseMessage {
+    pub response: ApprovalResponse,
+}
+
+/// 出站消息类型枚举
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum OutboundMessageType {
+    /// 普通聊天消息
+    Chat {
+        content: String,
+        #[serde(default)]
+        media: Vec<String>,
+    },
+    /// 审批请求消息
+    ApprovalRequest {
+        request: ApprovalRequest,
+    },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutboundMessage {
     pub channel: String,
     pub chat_id: String,
-    pub content: String,
+    #[serde(flatten)]
+    pub message_type: OutboundMessageType,
     pub reply_to: Option<String>,
-    #[serde(default)]
-    pub media: Vec<String>,
+}
+
+impl OutboundMessage {
+    /// 创建普通聊天消息
+    pub fn chat(
+        channel: String,
+        chat_id: String,
+        content: String,
+        media: Vec<String>,
+        reply_to: Option<String>,
+    ) -> Self {
+        Self {
+            channel,
+            chat_id,
+            message_type: OutboundMessageType::Chat { content, media },
+            reply_to,
+        }
+    }
+
+    /// 创建审批请求消息
+    pub fn approval_request(
+        channel: String,
+        chat_id: String,
+        request: ApprovalRequest,
+        reply_to: Option<String>,
+    ) -> Self {
+        Self {
+            channel,
+            chat_id,
+            message_type: OutboundMessageType::ApprovalRequest { request },
+            reply_to,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -86,5 +148,227 @@ impl MessageBus {
     /// Clone the outbound sender (needed by AgentLoop).
     pub fn outbound_tx_clone(&self) -> broadcast::Sender<OutboundMessage> {
         self.outbound_tx.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tools::approval::{ApprovalRequest, ApprovalResponse};
+
+    #[test]
+    fn test_chat_message_serialization() {
+        let msg = OutboundMessage::chat(
+            "web".to_string(),
+            "chat123".to_string(),
+            "Hello, world!".to_string(),
+            vec![],
+            None,
+        );
+
+        // 序列化
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("\"type\":\"chat\""));
+        assert!(json.contains("\"content\":\"Hello, world!\""));
+        assert!(json.contains("\"channel\":\"web\""));
+        assert!(json.contains("\"chat_id\":\"chat123\""));
+
+        // 反序列化
+        let deserialized: OutboundMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.channel, "web");
+        assert_eq!(deserialized.chat_id, "chat123");
+        match deserialized.message_type {
+            OutboundMessageType::Chat { content, media } => {
+                assert_eq!(content, "Hello, world!");
+                assert_eq!(media.len(), 0);
+            }
+            _ => panic!("Expected Chat message type"),
+        }
+    }
+
+    #[test]
+    fn test_chat_message_with_media_serialization() {
+        let msg = OutboundMessage::chat(
+            "telegram".to_string(),
+            "chat456".to_string(),
+            "Check this out!".to_string(),
+            vec!["image1.png".to_string(), "image2.jpg".to_string()],
+            Some("msg123".to_string()),
+        );
+
+        // 序列化
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("\"type\":\"chat\""));
+        assert!(json.contains("\"content\":\"Check this out!\""));
+        assert!(json.contains("\"media\""));
+        assert!(json.contains("image1.png"));
+        assert!(json.contains("image2.jpg"));
+        assert!(json.contains("\"reply_to\":\"msg123\""));
+
+        // 反序列化
+        let deserialized: OutboundMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.channel, "telegram");
+        assert_eq!(deserialized.reply_to, Some("msg123".to_string()));
+        match deserialized.message_type {
+            OutboundMessageType::Chat { content, media } => {
+                assert_eq!(content, "Check this out!");
+                assert_eq!(media.len(), 2);
+                assert_eq!(media[0], "image1.png");
+                assert_eq!(media[1], "image2.jpg");
+            }
+            _ => panic!("Expected Chat message type"),
+        }
+    }
+
+    #[test]
+    fn test_approval_request_message_serialization() {
+        let request = ApprovalRequest {
+            id: "req123".to_string(),
+            session_id: "session456".to_string(),
+            channel: "web".to_string(),
+            chat_id: "chat789".to_string(),
+            command: "rm -rf /tmp/test".to_string(),
+            working_dir: "/home/user".to_string(),
+            context: "Test approval".to_string(),
+            timestamp: Utc::now(),
+            timeout_secs: 300,
+        };
+
+        let msg = OutboundMessage::approval_request(
+            "web".to_string(),
+            "chat789".to_string(),
+            request.clone(),
+            None,
+        );
+
+        // 序列化
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("\"type\":\"approval_request\""));
+        assert!(json.contains("\"request\""));
+        assert!(json.contains("\"id\":\"req123\""));
+        assert!(json.contains("\"command\":\"rm -rf /tmp/test\""));
+        assert!(json.contains("\"session_id\":\"session456\""));
+
+        // 反序列化
+        let deserialized: OutboundMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.channel, "web");
+        assert_eq!(deserialized.chat_id, "chat789");
+        match deserialized.message_type {
+            OutboundMessageType::ApprovalRequest { request: req } => {
+                assert_eq!(req.id, "req123");
+                assert_eq!(req.command, "rm -rf /tmp/test");
+                assert_eq!(req.session_id, "session456");
+                assert_eq!(req.working_dir, "/home/user");
+                assert_eq!(req.timeout_secs, 300);
+            }
+            _ => panic!("Expected ApprovalRequest message type"),
+        }
+    }
+
+    #[test]
+    fn test_approval_request_message_struct_serialization() {
+        let request = ApprovalRequest {
+            id: "req456".to_string(),
+            session_id: "session789".to_string(),
+            channel: "telegram".to_string(),
+            chat_id: "chat123".to_string(),
+            command: "git push origin main".to_string(),
+            working_dir: "/home/user/project".to_string(),
+            context: "Push to production".to_string(),
+            timestamp: Utc::now(),
+            timeout_secs: 600,
+        };
+
+        let msg = ApprovalRequestMessage {
+            request: request.clone(),
+        };
+
+        // 序列化
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("\"request\""));
+        assert!(json.contains("\"id\":\"req456\""));
+        assert!(json.contains("\"command\":\"git push origin main\""));
+
+        // 反序列化
+        let deserialized: ApprovalRequestMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.request.id, "req456");
+        assert_eq!(deserialized.request.command, "git push origin main");
+        assert_eq!(deserialized.request.session_id, "session789");
+    }
+
+    #[test]
+    fn test_approval_response_message_struct_serialization() {
+        let response = ApprovalResponse {
+            request_id: "req789".to_string(),
+            approved: true,
+            responder: "user123".to_string(),
+            timestamp: Utc::now(),
+        };
+
+        let msg = ApprovalResponseMessage {
+            response: response.clone(),
+        };
+
+        // 序列化
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("\"response\""));
+        assert!(json.contains("\"request_id\":\"req789\""));
+        assert!(json.contains("\"approved\":true"));
+        assert!(json.contains("\"responder\":\"user123\""));
+
+        // 反序列化
+        let deserialized: ApprovalResponseMessage = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.response.request_id, "req789");
+        assert!(deserialized.response.approved);
+        assert_eq!(deserialized.response.responder, "user123");
+    }
+
+    #[test]
+    fn test_approval_response_rejected_serialization() {
+        let response = ApprovalResponse {
+            request_id: "req999".to_string(),
+            approved: false,
+            responder: "user456".to_string(),
+            timestamp: Utc::now(),
+        };
+
+        let msg = ApprovalResponseMessage { response };
+
+        // 序列化
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("\"approved\":false"));
+
+        // 反序列化
+        let deserialized: ApprovalResponseMessage = serde_json::from_str(&json).unwrap();
+        assert!(!deserialized.response.approved);
+    }
+
+    #[test]
+    fn test_outbound_message_type_enum_serialization() {
+        // 测试 Chat 类型
+        let chat_type = OutboundMessageType::Chat {
+            content: "Test".to_string(),
+            media: vec![],
+        };
+        let json = serde_json::to_string(&chat_type).unwrap();
+        assert!(json.contains("\"type\":\"chat\""));
+        assert!(json.contains("\"content\":\"Test\""));
+
+        // 测试 ApprovalRequest 类型
+        let request = ApprovalRequest {
+            id: "test".to_string(),
+            session_id: "session".to_string(),
+            channel: "web".to_string(),
+            chat_id: "chat".to_string(),
+            command: "test".to_string(),
+            working_dir: "/".to_string(),
+            context: "test".to_string(),
+            timestamp: Utc::now(),
+            timeout_secs: 300,
+        };
+        let approval_type = OutboundMessageType::ApprovalRequest { request };
+        let json = serde_json::to_string(&approval_type).unwrap();
+        assert!(json.contains("\"type\":\"approval_request\""));
+        assert!(json.contains("\"request\""));
     }
 }

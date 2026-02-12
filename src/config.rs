@@ -192,6 +192,49 @@ impl Default for AgentDefaults {
 }
 
 // ---------------------------------------------------------------------------
+// Permission config
+// ---------------------------------------------------------------------------
+
+use crate::tools::permission::{PermissionLevel, PermissionRule};
+
+/// 权限配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionConfig {
+    /// 是否启用权限控制
+    #[serde(default)]
+    pub enabled: bool,
+    /// 默认权限级别（未匹配任何规则时使用）
+    #[serde(default = "default_permission_level")]
+    pub default_level: PermissionLevel,
+    /// 审批请求超时时间（秒）
+    #[serde(default = "default_approval_timeout")]
+    pub approval_timeout_secs: u64,
+    /// 权限规则列表（按顺序匹配）
+    #[serde(default)]
+    pub rules: Vec<PermissionRule>,
+}
+
+fn default_permission_level() -> PermissionLevel {
+    PermissionLevel::RequireApproval
+}
+
+fn default_approval_timeout() -> u64 {
+    60 // 5 minutes
+}
+
+impl Default for PermissionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            default_level: default_permission_level(),
+            approval_timeout_secs: default_approval_timeout(),
+            rules: Vec::new(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Exec tool config
 // ---------------------------------------------------------------------------
 
@@ -206,6 +249,8 @@ pub struct ExecToolConfig {
     pub deny_patterns: Vec<String>,
     #[serde(default)]
     pub allow_patterns: Option<Vec<String>>,
+    #[serde(default)]
+    pub permissions: PermissionConfig,
 }
 
 fn default_timeout() -> u64 {
@@ -232,6 +277,7 @@ impl Default for ExecToolConfig {
             restrict_to_workspace: false,
             deny_patterns: default_deny_patterns(),
             allow_patterns: None,
+            permissions: PermissionConfig::default(),
         }
     }
 }
@@ -400,6 +446,28 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
             value: config.tools.exec.timeout_secs.to_string(),
             constraint: "must be greater than 0".into(),
         });
+    }
+
+    // --- Permission config validation ---
+    if config.tools.exec.permissions.enabled {
+        if config.tools.exec.permissions.approval_timeout_secs == 0 {
+            errors.push(ValidationError {
+                field: "tools.exec.permissions.approval_timeout_secs".into(),
+                value: config.tools.exec.permissions.approval_timeout_secs.to_string(),
+                constraint: "must be greater than 0".into(),
+            });
+        }
+
+        // Validate permission rules
+        for (i, rule) in config.tools.exec.permissions.rules.iter().enumerate() {
+            if rule.pattern.is_empty() {
+                errors.push(ValidationError {
+                    field: format!("tools.exec.permissions.rules[{}].pattern", i),
+                    value: String::new(),
+                    constraint: "pattern must be non-empty".into(),
+                });
+            }
+        }
     }
 
     // --- Channel credentials ---
@@ -980,4 +1048,197 @@ mod tests {
         assert!(msg.contains("3.0"));
         assert!(msg.contains("must be between 0.0 and 2.0"));
     }
+
+    // --- Permission config loading tests ---
+
+    #[test]
+    fn permission_config_default_is_disabled() {
+        let cfg = valid_config();
+        assert!(!cfg.tools.exec.permissions.enabled);
+        assert_eq!(cfg.tools.exec.permissions.default_level, PermissionLevel::RequireApproval);
+        assert_eq!(cfg.tools.exec.permissions.approval_timeout_secs, 300);
+        assert!(cfg.tools.exec.permissions.rules.is_empty());
+    }
+
+    #[test]
+    fn permission_config_loads_from_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config_with_permissions.json");
+        let json = r#"{
+            "tools": {
+                "exec": {
+                    "permissions": {
+                        "enabled": true,
+                        "defaultLevel": "require_approval",
+                        "approvalTimeoutSecs": 600,
+                        "rules": [
+                            {
+                                "pattern": "ls*",
+                                "level": "allow",
+                                "description": "Allow ls commands"
+                            },
+                            {
+                                "pattern": "rm*",
+                                "level": "deny"
+                            }
+                        ]
+                    }
+                }
+            }
+        }"#;
+        std::fs::write(&path, json).unwrap();
+
+        let cfg = load_config(Some(&path)).unwrap();
+        assert!(cfg.tools.exec.permissions.enabled);
+        assert_eq!(cfg.tools.exec.permissions.default_level, PermissionLevel::RequireApproval);
+        assert_eq!(cfg.tools.exec.permissions.approval_timeout_secs, 600);
+        assert_eq!(cfg.tools.exec.permissions.rules.len(), 2);
+        assert_eq!(cfg.tools.exec.permissions.rules[0].pattern, "ls*");
+        assert_eq!(cfg.tools.exec.permissions.rules[0].level, PermissionLevel::Allow);
+        assert_eq!(cfg.tools.exec.permissions.rules[1].pattern, "rm*");
+        assert_eq!(cfg.tools.exec.permissions.rules[1].level, PermissionLevel::Deny);
+    }
+
+    #[test]
+    fn permission_config_with_minimal_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config_minimal_permissions.json");
+        let json = r#"{
+            "tools": {
+                "exec": {
+                    "permissions": {
+                        "enabled": true
+                    }
+                }
+            }
+        }"#;
+        std::fs::write(&path, json).unwrap();
+
+        let cfg = load_config(Some(&path)).unwrap();
+        assert!(cfg.tools.exec.permissions.enabled);
+        assert_eq!(cfg.tools.exec.permissions.default_level, PermissionLevel::RequireApproval);
+        assert_eq!(cfg.tools.exec.permissions.approval_timeout_secs, 300);
+        assert!(cfg.tools.exec.permissions.rules.is_empty());
+    }
+
+    #[test]
+    fn permission_config_serialization_roundtrip() {
+        let mut cfg = valid_config();
+        cfg.tools.exec.permissions.enabled = true;
+        cfg.tools.exec.permissions.default_level = PermissionLevel::Deny;
+        cfg.tools.exec.permissions.approval_timeout_secs = 600;
+        cfg.tools.exec.permissions.rules = vec![
+            PermissionRule {
+                pattern: "git*".to_string(),
+                level: PermissionLevel::Allow,
+                description: Some("Allow git commands".to_string()),
+            },
+            PermissionRule {
+                pattern: "sudo*".to_string(),
+                level: PermissionLevel::Deny,
+                description: None,
+            },
+        ];
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("roundtrip.json");
+        save_config(&cfg, Some(&path)).unwrap();
+        let loaded = load_config(Some(&path)).unwrap();
+
+        assert_eq!(loaded.tools.exec.permissions.enabled, cfg.tools.exec.permissions.enabled);
+        assert_eq!(loaded.tools.exec.permissions.default_level, cfg.tools.exec.permissions.default_level);
+        assert_eq!(loaded.tools.exec.permissions.approval_timeout_secs, cfg.tools.exec.permissions.approval_timeout_secs);
+        assert_eq!(loaded.tools.exec.permissions.rules.len(), cfg.tools.exec.permissions.rules.len());
+    }
+
+    // --- Permission config validation tests ---
+
+    #[test]
+    fn permission_approval_timeout_zero_is_rejected() {
+        let mut cfg = valid_config();
+        cfg.tools.exec.permissions.enabled = true;
+        cfg.tools.exec.permissions.approval_timeout_secs = 0;
+        let errors = validate_config(&cfg).unwrap_err();
+        let err = find_error(&errors, "tools.exec.permissions.approval_timeout_secs")
+            .expect("expected error for approval_timeout_secs");
+        assert_eq!(err.value, "0");
+        assert!(err.constraint.contains("greater than 0"));
+    }
+
+    #[test]
+    fn permission_approval_timeout_positive_is_accepted() {
+        let mut cfg = valid_config();
+        cfg.tools.exec.permissions.enabled = true;
+        cfg.tools.exec.permissions.approval_timeout_secs = 300;
+        assert!(validate_config(&cfg).is_ok());
+    }
+
+    #[test]
+    fn permission_disabled_with_zero_timeout_is_accepted() {
+        let mut cfg = valid_config();
+        cfg.tools.exec.permissions.enabled = false;
+        cfg.tools.exec.permissions.approval_timeout_secs = 0;
+        // Validation only checks when enabled
+        assert!(validate_config(&cfg).is_ok());
+    }
+
+    #[test]
+    fn permission_rule_empty_pattern_is_rejected() {
+        let mut cfg = valid_config();
+        cfg.tools.exec.permissions.enabled = true;
+        cfg.tools.exec.permissions.rules = vec![
+            PermissionRule {
+                pattern: String::new(),
+                level: PermissionLevel::Allow,
+                description: None,
+            },
+        ];
+        let errors = validate_config(&cfg).unwrap_err();
+        assert!(errors.iter().any(|e| e.field.contains("tools.exec.permissions.rules[0].pattern")));
+        assert!(errors.iter().any(|e| e.constraint.contains("pattern must be non-empty")));
+    }
+
+    #[test]
+    fn permission_rule_valid_pattern_is_accepted() {
+        let mut cfg = valid_config();
+        cfg.tools.exec.permissions.enabled = true;
+        cfg.tools.exec.permissions.rules = vec![
+            PermissionRule {
+                pattern: "ls*".to_string(),
+                level: PermissionLevel::Allow,
+                description: Some("Allow ls commands".to_string()),
+            },
+            PermissionRule {
+                pattern: "rm -rf*".to_string(),
+                level: PermissionLevel::Deny,
+                description: None,
+            },
+        ];
+        assert!(validate_config(&cfg).is_ok());
+    }
+
+    #[test]
+    fn permission_multiple_validation_errors_collected() {
+        let mut cfg = valid_config();
+        cfg.tools.exec.permissions.enabled = true;
+        cfg.tools.exec.permissions.approval_timeout_secs = 0;
+        cfg.tools.exec.permissions.rules = vec![
+            PermissionRule {
+                pattern: String::new(),
+                level: PermissionLevel::Allow,
+                description: None,
+            },
+            PermissionRule {
+                pattern: String::new(),
+                level: PermissionLevel::Deny,
+                description: None,
+            },
+        ];
+        let errors = validate_config(&cfg).unwrap_err();
+        assert!(errors.len() >= 3, "expected at least 3 errors, got {}", errors.len());
+        assert!(find_error(&errors, "tools.exec.permissions.approval_timeout_secs").is_some());
+        assert!(errors.iter().any(|e| e.field.contains("tools.exec.permissions.rules[0].pattern")));
+        assert!(errors.iter().any(|e| e.field.contains("tools.exec.permissions.rules[1].pattern")));
+    }
 }
+

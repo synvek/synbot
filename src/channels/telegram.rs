@@ -8,12 +8,15 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use serde::Deserialize;
-use tokio::sync::{broadcast, mpsc};
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::{broadcast, mpsc, RwLock};
 use tracing::{error, info, warn};
 
 use crate::bus::{InboundMessage, OutboundMessage};
-use crate::channels::{Channel, RetryPolicy, RetryState};
+use crate::channels::{approval_parser, Channel, RetryPolicy, RetryState};
 use crate::config::TelegramConfig;
+use crate::tools::approval::{ApprovalManager, ApprovalResponse};
 
 const API_BASE: &str = "https://api.telegram.org/bot";
 
@@ -23,6 +26,9 @@ pub struct TelegramChannel {
     outbound_rx: Option<broadcast::Receiver<OutboundMessage>>,
     client: reqwest::Client,
     running: bool,
+    approval_manager: Option<Arc<ApprovalManager>>,
+    /// 用户待处理审批请求映射：user_id -> (request_id, chat_id)
+    pending_approvals: Arc<RwLock<HashMap<String, (String, String)>>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -79,7 +85,53 @@ impl TelegramChannel {
             outbound_rx: Some(outbound_rx),
             client,
             running: false,
+            approval_manager: None,
+            pending_approvals: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    /// 设置审批管理器
+    pub fn with_approval_manager(mut self, manager: Arc<ApprovalManager>) -> Self {
+        self.approval_manager = Some(manager);
+        self
+    }
+
+    /// 记录用户的待处理审批请求
+    async fn register_pending_approval(&self, user_id: String, request_id: String, chat_id: String) {
+        let mut pending = self.pending_approvals.write().await;
+        pending.insert(user_id, (request_id, chat_id));
+    }
+
+    /// 获取并移除用户的待处理审批请求
+    async fn take_pending_approval(&self, user_id: &str) -> Option<(String, String)> {
+        let mut pending = self.pending_approvals.write().await;
+        pending.remove(user_id)
+    }
+
+    /// 检查用户是否有待处理的审批请求
+    async fn has_pending_approval(&self, user_id: &str) -> bool {
+        let pending = self.pending_approvals.read().await;
+        pending.contains_key(user_id)
+    }
+
+    /// 格式化审批请求消息
+    fn format_approval_request(request: &crate::tools::approval::ApprovalRequest) -> String {
+        format!(
+            "🔐 <b>命令执行审批请求</b>\n\n\
+            <b>命令：</b><code>{}</code>\n\
+            <b>工作目录：</b><code>{}</code>\n\
+            <b>上下文：</b>{}\n\
+            <b>请求时间：</b>{}\n\n\
+            请回复以下关键词进行审批：\n\
+            • 同意 / 批准 / yes / y - 批准执行\n\
+            • 拒绝 / 不同意 / no / n - 拒绝执行\n\n\
+            ⏱️ 请求将在 {} 秒后超时",
+            request.command,
+            request.working_dir,
+            request.context,
+            request.timestamp.format("%Y-%m-%d %H:%M:%S UTC"),
+            request.timeout_secs
+        )
     }
 
     fn api_url(&self, method: &str) -> String {
@@ -208,6 +260,7 @@ impl Channel for TelegramChannel {
         let mut outbound_rx = self.outbound_rx.take().unwrap();
         let client = self.client.clone();
         let token = self.config.token.clone();
+        let pending_approvals = self.pending_approvals.clone();
         tokio::spawn(async move {
             while let Ok(msg) = outbound_rx.recv().await {
                 if msg.channel != "telegram" {
@@ -215,7 +268,36 @@ impl Channel for TelegramChannel {
                 }
                 if let Ok(chat_id) = msg.chat_id.parse::<i64>() {
                     let url = format!("{}{}/sendMessage", API_BASE, token);
-                    for chunk in msg.content.as_bytes().chunks(4000) {
+                    let content = match &msg.message_type {
+                        crate::bus::OutboundMessageType::Chat { content, .. } => content.clone(),
+                        crate::bus::OutboundMessageType::ApprovalRequest { request } => {
+                            // 注册待处理的审批请求
+                            // 从 session_id 中提取 user_id (格式: agent:role:channel:type:user_id)
+                            let user_id = request.session_id.split(':').last().unwrap_or("").to_string();
+                            if !user_id.is_empty() {
+                                let mut pending = pending_approvals.write().await;
+                                pending.insert(user_id, (request.id.clone(), msg.chat_id.clone()));
+                            }
+                            
+                            format!(
+                                "🔐 <b>命令执行审批请求</b>\n\n\
+                                <b>命令：</b><code>{}</code>\n\
+                                <b>工作目录：</b><code>{}</code>\n\
+                                <b>上下文：</b>{}\n\
+                                <b>请求时间：</b>{}\n\n\
+                                请回复以下关键词进行审批：\n\
+                                • 同意 / 批准 / yes / y - 批准执行\n\
+                                • 拒绝 / 不同意 / no / n - 拒绝执行\n\n\
+                                ⏱️ 请求将在 {} 秒后超时",
+                                request.command,
+                                request.working_dir,
+                                request.context,
+                                request.timestamp.format("%Y-%m-%d %H:%M:%S UTC"),
+                                request.timeout_secs
+                            )
+                        }
+                    };
+                    for chunk in content.as_bytes().chunks(4000) {
                         let chunk_str = String::from_utf8_lossy(chunk);
                         let _ = client
                             .post(&url)
@@ -254,6 +336,51 @@ impl Channel for TelegramChannel {
                                 continue;
                             }
                             if let Some(text) = m.text {
+                                // 检查是否为审批响应
+                                if let Some(approved) = approval_parser::is_approval_response(&text) {
+                                    // 检查用户是否有待处理的审批请求
+                                    if let Some((request_id, chat_id_str)) = self.take_pending_approval(&sender).await {
+                                        if let Some(ref manager) = self.approval_manager {
+                                            let response = ApprovalResponse {
+                                                request_id: request_id.clone(),
+                                                approved,
+                                                responder: sender.clone(),
+                                                timestamp: chrono::Utc::now(),
+                                            };
+                                            
+                                            if let Err(e) = manager.submit_response(response).await {
+                                                error!("Failed to submit approval response: {}", e);
+                                                // 发送错误反馈
+                                                if let Ok(chat_id) = chat_id_str.parse::<i64>() {
+                                                    let _ = self.send_text(
+                                                        chat_id,
+                                                        "❌ 审批响应提交失败，请重试。"
+                                                    ).await;
+                                                }
+                                            } else {
+                                                info!(
+                                                    user_id = %sender,
+                                                    request_id = %request_id,
+                                                    approved = approved,
+                                                    "Approval response submitted"
+                                                );
+                                                
+                                                // 发送成功反馈
+                                                if let Ok(chat_id) = chat_id_str.parse::<i64>() {
+                                                    let feedback = if approved {
+                                                        "✅ <b>审批已通过</b>\n\n命令将继续执行。"
+                                                    } else {
+                                                        "🚫 <b>审批已拒绝</b>\n\n命令执行已取消。"
+                                                    };
+                                                    let _ = self.send_text(chat_id, feedback).await;
+                                                }
+                                            }
+                                        }
+                                        continue; // 不将审批响应作为普通消息发送
+                                    }
+                                }
+                                
+                                // 普通消息处理
                                 let _ = self
                                     .inbound_tx
                                     .send(InboundMessage {
@@ -328,6 +455,13 @@ impl Channel for TelegramChannel {
 
     async fn send(&self, msg: &OutboundMessage) -> Result<()> {
         let chat_id: i64 = msg.chat_id.parse()?;
-        self.send_text(chat_id, &msg.content).await
+        let content = match &msg.message_type {
+            crate::bus::OutboundMessageType::Chat { content, .. } => content.clone(),
+            crate::bus::OutboundMessageType::ApprovalRequest { request } => {
+                format!("🔐 命令执行审批请求\n\n命令：{}\n工作目录：{}\n上下文：{}\n\n请回复以下关键词进行审批：\n• 同意 / 批准 / yes / y - 批准执行\n• 拒绝 / 不同意 / no / n - 拒绝执行\n\n⏱️ 请求将在 {} 秒后超时", 
+                    request.command, request.working_dir, request.context, request.timeout_secs)
+            }
+        };
+        self.send_text(chat_id, &content).await
     }
 }

@@ -12,6 +12,7 @@ interface UseWebSocketReturn {
   connected: boolean;
   messages: ChatMessage[];
   send: (content: string) => void;
+  sendApprovalResponse: (requestId: string, approved: boolean) => void;
   disconnect: () => void;
   connect: () => void;
   sessionId: string | null;
@@ -78,6 +79,36 @@ export function useWebSocket({
                   timestamp: message.timestamp,
                 },
               ]);
+              break;
+            
+            case 'approval_request':
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: `approval-${message.request.id}`,
+                  role: 'approval',
+                  content: '',
+                  timestamp: message.request.timestamp,
+                  approvalRequest: message.request,
+                },
+              ]);
+              break;
+            
+            case 'approval_result':
+              // Update the approval message with the result
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === `approval-${message.request_id}`
+                    ? {
+                        ...msg,
+                        approvalResult: {
+                          approved: message.approved,
+                          message: message.message,
+                        },
+                      }
+                    : msg
+                )
+              );
               break;
             
             case 'error':
@@ -167,6 +198,26 @@ export function useWebSocket({
     }
   }, []);
 
+  const sendApprovalResponse = useCallback((requestId: string, approved: boolean) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      console.error('WebSocket is not connected');
+      return;
+    }
+
+    const message: WsClientMessage = {
+      type: 'approval_response',
+      request_id: requestId,
+      approved,
+    };
+
+    try {
+      wsRef.current.send(JSON.stringify(message));
+      console.log(`Sent approval response: ${approved ? 'approved' : 'rejected'}`);
+    } catch (error) {
+      console.error('Failed to send approval response:', error);
+    }
+  }, []);
+
   useEffect(() => {
     if (autoConnect) {
       shouldReconnectRef.current = true;
@@ -190,6 +241,7 @@ export function useWebSocket({
     connected,
     messages,
     send,
+    sendApprovalResponse,
     disconnect,
     connect,
     sessionId,

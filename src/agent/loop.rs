@@ -383,13 +383,13 @@ impl AgentLoop {
                         error = %e,
                         "Failed to spawn parallel directive task"
                     );
-                    let _ = self.outbound_tx.send(OutboundMessage {
-                        channel: msg.channel.clone(),
-                        chat_id: msg.chat_id.clone(),
-                        content: format!("Role '{}' is busy, please retry later", agent_id),
-                        reply_to: None,
-                        media: vec![],
-                    });
+                    let _ = self.outbound_tx.send(OutboundMessage::chat(
+                        msg.channel.clone(),
+                        msg.chat_id.clone(),
+                        format!("Role '{}' is busy, please retry later", agent_id),
+                        vec![],
+                        None,
+                    ));
                 }
             }
         }
@@ -427,13 +427,13 @@ impl AgentLoop {
         } else {
             available.join(", ")
         };
-        let _ = self.outbound_tx.send(OutboundMessage {
-            channel: msg.channel.clone(),
-            chat_id: msg.chat_id.clone(),
-            content: format!("Unknown role '{}'. Available: {}", unknown_role, role_list),
-            reply_to: None,
-            media: vec![],
-        });
+        let _ = self.outbound_tx.send(OutboundMessage::chat(
+            msg.channel.clone(),
+            msg.chat_id.clone(),
+            format!("Unknown role '{}'. Available: {}", unknown_role, role_list),
+            vec![],
+            None,
+        ));
     }
 }
 
@@ -520,13 +520,13 @@ async fn run_completion_loop(
             let reply = text_parts.join("");
             if !reply.is_empty() {
                 history.push(Message::assistant(&reply));
-                let _ = outbound_tx.send(OutboundMessage {
-                    channel: channel.to_string(),
-                    chat_id: chat_id.to_string(),
-                    content: reply,
-                    reply_to: None,
-                    media: vec![],
-                });
+                let _ = outbound_tx.send(OutboundMessage::chat(
+                    channel.to_string(),
+                    chat_id.to_string(),
+                    reply,
+                    vec![],
+                    None,
+                ));
             }
             break;
         }

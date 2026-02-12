@@ -101,6 +101,18 @@
     "user": "用户",
     "assistant": "助手"
   },
+  "approval": {
+    "title": "命令审批请求",
+    "command": "命令",
+    "workingDir": "工作目录",
+    "context": "上下文",
+    "requestTime": "请求时间",
+    "timeout": "超时时间",
+    "approve": "同意",
+    "reject": "拒绝",
+    "approved": "已批准",
+    "rejected": "已拒绝"
+  },
   "config": {
     "title": "配置",
     "description": "系统配置（敏感值已屏蔽）",

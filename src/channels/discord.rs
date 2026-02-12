@@ -11,17 +11,20 @@
 //! Messages exceeding Discord's 2000-character limit are automatically
 //! split into sequential messages.
 
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, RwLock};
 use tracing::{error, info, warn};
 
 use crate::bus::{InboundMessage, OutboundMessage};
-use crate::channels::{Channel, RetryPolicy, RetryState};
+use crate::channels::{approval_parser, Channel, RetryPolicy, RetryState};
 use crate::config::DiscordConfig;
+use crate::tools::approval::{ApprovalManager, ApprovalResponse};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -199,6 +202,9 @@ pub struct DiscordChannel {
     outbound_rx: Option<broadcast::Receiver<OutboundMessage>>,
     client: reqwest::Client,
     running: bool,
+    approval_manager: Option<Arc<ApprovalManager>>,
+    /// 用户待处理审批请求映射：user_id -> (request_id, chat_id)
+    pending_approvals: Arc<RwLock<HashMap<String, (String, String)>>>,
 }
 
 impl DiscordChannel {
@@ -217,7 +223,89 @@ impl DiscordChannel {
             outbound_rx: Some(outbound_rx),
             client,
             running: false,
+            approval_manager: None,
+            pending_approvals: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    /// 设置审批管理器
+    pub fn with_approval_manager(mut self, manager: Arc<ApprovalManager>) -> Self {
+        self.approval_manager = Some(manager);
+        self
+    }
+
+    /// 记录用户的待处理审批请求
+    async fn register_pending_approval(&self, user_id: String, request_id: String, chat_id: String) {
+        let mut pending = self.pending_approvals.write().await;
+        pending.insert(user_id, (request_id, chat_id));
+    }
+
+    /// 获取并移除用户的待处理审批请求
+    async fn take_pending_approval(&self, user_id: &str) -> Option<(String, String)> {
+        let mut pending = self.pending_approvals.write().await;
+        pending.remove(user_id)
+    }
+
+    /// 检查用户是否有待处理的审批请求
+    #[allow(dead_code)]
+    async fn has_pending_approval(&self, user_id: &str) -> bool {
+        let pending = self.pending_approvals.read().await;
+        pending.contains_key(user_id)
+    }
+
+    /// 格式化审批请求消息
+    fn format_approval_request(request: &crate::tools::approval::ApprovalRequest) -> String {
+        format!(
+            "🔐 **命令执行审批请求**\n\n\
+            **命令：**`{}`\n\
+            **工作目录：**`{}`\n\
+            **上下文：**{}\n\
+            **请求时间：**{}\n\n\
+            请回复以下关键词进行审批：\n\
+            • 同意 / 批准 / yes / y - 批准执行\n\
+            • 拒绝 / 不同意 / no / n - 拒绝执行\n\n\
+            ⏱️ 请求将在 {} 秒后超时",
+            request.command,
+            request.working_dir,
+            request.context,
+            request.timestamp.format("%Y-%m-%d %H:%M:%S UTC"),
+            request.timeout_secs
+        )
+    }
+
+    /// 发送审批结果反馈消息
+    async fn send_approval_feedback(
+        client: &reqwest::Client,
+        token: &str,
+        channel_id: &str,
+        approved: bool,
+    ) -> Result<()> {
+        let feedback = if approved {
+            "✅ **审批已通过**\n\n命令将继续执行。"
+        } else {
+            "🚫 **审批已拒绝**\n\n命令执行已取消。"
+        };
+        
+        let url = format!("{}/channels/{}/messages", API_BASE, channel_id);
+        let resp = client
+            .post(&url)
+            .header("Authorization", format!("Bot {}", token))
+            .json(&serde_json::json!({ "content": feedback }))
+            .send()
+            .await?;
+            
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            error!(
+                channel_id = %channel_id,
+                status = %status,
+                "Discord send_approval_feedback failed: {body}"
+            );
+            anyhow::bail!("Discord send failed: HTTP {status}: {body}");
+        }
+        
+        Ok(())
     }
 
     /// Send a system notification to the Agent via the MessageBus.
@@ -274,6 +362,9 @@ impl DiscordChannel {
         inbound_tx: &mpsc::Sender<InboundMessage>,
         allow_from: &[String],
         resume: &mut ResumeState,
+        approval_manager: &Option<Arc<ApprovalManager>>,
+        pending_approvals: &Arc<RwLock<HashMap<String, (String, String)>>>,
+        client: &reqwest::Client,
     ) -> std::result::Result<(), DiscordGatewayError> {
         // Choose URL: use resume_gateway_url if we have one, else default.
         let ws_url = resume
@@ -454,6 +545,52 @@ impl DiscordChannel {
                                         if let Some(inbound) =
                                             discord_event_to_inbound(d, allow_from)
                                         {
+                                            // 检查是否为审批响应
+                                            if let Some(approved) = approval_parser::is_approval_response(&inbound.content) {
+                                                // 检查用户是否有待处理的审批请求
+                                                let mut pending = pending_approvals.write().await;
+                                                if let Some((request_id, chat_id_str)) = pending.remove(&inbound.sender_id) {
+                                                    if let Some(ref manager) = approval_manager {
+                                                        let response = ApprovalResponse {
+                                                            request_id: request_id.clone(),
+                                                            approved,
+                                                            responder: inbound.sender_id.clone(),
+                                                            timestamp: chrono::Utc::now(),
+                                                        };
+                                                        
+                                                        if let Err(e) = manager.submit_response(response).await {
+                                                            error!("Failed to submit approval response: {}", e);
+                                                            // 发送错误反馈
+                                                            let _ = Self::send_approval_feedback(
+                                                                client,
+                                                                token,
+                                                                &chat_id_str,
+                                                                false,
+                                                            ).await;
+                                                        } else {
+                                                            info!(
+                                                                user_id = %inbound.sender_id,
+                                                                request_id = %request_id,
+                                                                approved = approved,
+                                                                "Discord approval response submitted"
+                                                            );
+                                                            
+                                                            // 发送成功反馈
+                                                            let _ = Self::send_approval_feedback(
+                                                                client,
+                                                                token,
+                                                                &chat_id_str,
+                                                                approved,
+                                                            ).await;
+                                                        }
+                                                    }
+                                                    drop(pending); // 释放锁
+                                                    continue; // 不将审批响应作为普通消息发送
+                                                }
+                                                drop(pending); // 释放锁
+                                            }
+                                            
+                                            // 普通消息处理
                                             info!(
                                                 sender = %inbound.sender_id,
                                                 chat_id = %inbound.chat_id,
@@ -527,12 +664,42 @@ impl Channel for DiscordChannel {
         let mut outbound_rx = self.outbound_rx.take().unwrap();
         let outbound_client = self.client.clone();
         let outbound_token = self.config.token.clone();
+        let pending_approvals_clone = self.pending_approvals.clone();
         tokio::spawn(async move {
             while let Ok(msg) = outbound_rx.recv().await {
                 if msg.channel != "discord" {
                     continue;
                 }
-                let chunks = split_message(&msg.content, DISCORD_MAX_MESSAGE_LEN);
+                let content = match msg.message_type {
+                    crate::bus::OutboundMessageType::Chat { content, .. } => content,
+                    crate::bus::OutboundMessageType::ApprovalRequest { request } => {
+                        // 注册待处理的审批请求
+                        // 从 session_id 中提取 user_id (格式: agent:role:channel:type:user_id)
+                        let user_id = request.session_id.split(':').last().unwrap_or("").to_string();
+                        if !user_id.is_empty() {
+                            let mut pending = pending_approvals_clone.write().await;
+                            pending.insert(user_id, (request.id.clone(), msg.chat_id.clone()));
+                        }
+                        
+                        format!(
+                            "🔐 **命令执行审批请求**\n\n\
+                            **命令：**`{}`\n\
+                            **工作目录：**`{}`\n\
+                            **上下文：**{}\n\
+                            **请求时间：**{}\n\n\
+                            请回复以下关键词进行审批：\n\
+                            • 同意 / 批准 / yes / y - 批准执行\n\
+                            • 拒绝 / 不同意 / no / n - 拒绝执行\n\n\
+                            ⏱️ 请求将在 {} 秒后超时",
+                            request.command,
+                            request.working_dir,
+                            request.context,
+                            request.timestamp.format("%Y-%m-%d %H:%M:%S UTC"),
+                            request.timeout_secs
+                        )
+                    }
+                };
+                let chunks = split_message(&content, DISCORD_MAX_MESSAGE_LEN);
                 for chunk in &chunks {
                     let url = format!(
                         "{}/channels/{}/messages",
@@ -565,6 +732,9 @@ impl Channel for DiscordChannel {
                 &self.inbound_tx,
                 &self.config.allow_from,
                 &mut resume,
+                &self.approval_manager,
+                &self.pending_approvals,
+                &self.client,
             )
             .await;
 
@@ -648,7 +818,14 @@ impl Channel for DiscordChannel {
     }
 
     async fn send(&self, msg: &OutboundMessage) -> Result<()> {
-        self.send_message(&msg.chat_id, &msg.content).await
+        let content = match &msg.message_type {
+            crate::bus::OutboundMessageType::Chat { content, .. } => content.clone(),
+            crate::bus::OutboundMessageType::ApprovalRequest { request } => {
+                format!("🔐 命令执行审批请求\n\n命令：{}\n工作目录：{}\n上下文：{}\n\n请回复以下关键词进行审批：\n• 同意 / 批准 / yes / y - 批准执行\n• 拒绝 / 不同意 / no / n - 拒绝执行\n\n⏱️ 请求将在 {} 秒后超时", 
+                    request.command, request.working_dir, request.context, request.timeout_secs)
+            }
+        };
+        self.send_message(&msg.chat_id, &content).await
     }
 }
 

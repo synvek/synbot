@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useI18n } from '../i18n/I18nContext';
+import ApprovalRequest from '../components/ApprovalRequest';
 
 export default function Chat() {
   const [input, setInput] = useState('');
@@ -8,7 +9,7 @@ export default function Chat() {
   const { t } = useI18n();
   
   const wsUrl = `ws://${window.location.hostname}:${window.location.port || '8080'}/ws/chat`;
-  const { connected, messages, send, sessionId } = useWebSocket({
+  const { connected, messages, send, sendApprovalResponse, sessionId } = useWebSocket({
     url: wsUrl,
     autoConnect: true,
   });
@@ -69,24 +70,33 @@ export default function Chat() {
                   message.role === 'user' ? 'justify-end' : 'justify-start'
                 }`}
               >
-                <div
-                  className={`max-w-[70%] rounded-lg px-4 py-2 shadow-sm ${
-                    message.role === 'user'
-                      ? 'bg-primary text-white'
-                      : 'bg-background border border-border text-text'
-                  }`}
-                >
-                  <div className="text-sm whitespace-pre-wrap break-words">
-                    {message.content}
-                  </div>
+                {message.role === 'approval' && message.approvalRequest ? (
+                  <ApprovalRequest
+                    request={message.approvalRequest}
+                    onApprove={(requestId) => sendApprovalResponse(requestId, true)}
+                    onReject={(requestId) => sendApprovalResponse(requestId, false)}
+                    result={message.approvalResult}
+                  />
+                ) : (
                   <div
-                    className={`text-xs mt-1 opacity-70 ${
-                      message.role === 'user' ? 'text-white' : 'text-text-secondary'
+                    className={`max-w-[70%] rounded-lg px-4 py-2 shadow-sm ${
+                      message.role === 'user'
+                        ? 'bg-primary text-white'
+                        : 'bg-background border border-border text-text'
                     }`}
                   >
-                    {new Date(message.timestamp).toLocaleTimeString()}
+                    <div className="text-sm whitespace-pre-wrap break-words">
+                      {message.content}
+                    </div>
+                    <div
+                      className={`text-xs mt-1 opacity-70 ${
+                        message.role === 'user' ? 'text-white' : 'text-text-secondary'
+                      }`}
+                    >
+                      {new Date(message.timestamp).toLocaleTimeString()}
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             ))
           )}

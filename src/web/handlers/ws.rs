@@ -21,6 +21,10 @@ const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WsClientMessage {
     Chat { content: String },
+    ApprovalResponse {
+        request_id: String,
+        approved: bool,
+    },
     Ping,
 }
 
@@ -31,6 +35,14 @@ pub enum WsServerMessage {
     ChatResponse {
         content: String,
         timestamp: chrono::DateTime<Utc>,
+    },
+    ApprovalRequest {
+        request: crate::tools::approval::ApprovalRequest,
+    },
+    ApprovalResult {
+        request_id: String,
+        approved: bool,
+        message: String,
     },
     Error {
         message: String,
@@ -255,6 +267,46 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsSession {
                             .map(|_, _, _| {}),
                         );
                     }
+                    Ok(WsClientMessage::ApprovalResponse { request_id, approved }) => {
+                        // Handle approval response
+                        let approval_manager = self.state.approval_manager.clone();
+                        let user_id = self.user_id.clone();
+                        
+                        ctx.spawn(
+                            async move {
+                                let response = crate::tools::approval::ApprovalResponse {
+                                    request_id: request_id.clone(),
+                                    approved,
+                                    responder: user_id,
+                                    timestamp: Utc::now(),
+                                };
+                                
+                                if let Err(e) = approval_manager.submit_response(response).await {
+                                    tracing::error!("Failed to submit approval response: {}", e);
+                                }
+                                
+                                (request_id, approved)
+                            }
+                            .into_actor(self)
+                            .map(move |result, actor, ctx| {
+                                let (request_id, approved) = result;
+                                // Send confirmation back to client
+                                let message = if approved {
+                                    "审批已批准".to_string()
+                                } else {
+                                    "审批已拒绝".to_string()
+                                };
+                                actor.send_message(
+                                    ctx,
+                                    WsServerMessage::ApprovalResult {
+                                        request_id,
+                                        approved,
+                                        message,
+                                    },
+                                );
+                            }),
+                        );
+                    }
                     Ok(WsClientMessage::Ping) => {
                         self.send_message(ctx, WsServerMessage::Pong);
                     }
@@ -291,9 +343,16 @@ impl Handler<OutboundMessageWrapper> for WsSession {
     type Result = ();
 
     fn handle(&mut self, msg: OutboundMessageWrapper, ctx: &mut Self::Context) {
-        let server_msg = WsServerMessage::ChatResponse {
-            content: msg.0.content,
-            timestamp: Utc::now(),
+        let server_msg = match msg.0.message_type {
+            crate::bus::OutboundMessageType::Chat { content, .. } => {
+                WsServerMessage::ChatResponse {
+                    content,
+                    timestamp: Utc::now(),
+                }
+            }
+            crate::bus::OutboundMessageType::ApprovalRequest { request } => {
+                WsServerMessage::ApprovalRequest { request }
+            }
         };
 
         self.send_message(ctx, server_msg);
