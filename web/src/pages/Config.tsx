@@ -3,6 +3,14 @@ import { apiClient } from '../api/client'
 import type { SanitizedConfig } from '../types/api'
 import ThemePreview from '../components/ThemePreview'
 import { useI18n } from '../i18n/I18nContext'
+import {
+  ChannelsIcon,
+  ProvidersIcon,
+  AgentIcon,
+  ToolsIcon,
+  ThemeIcon,
+  WebIcon
+} from '../components/icons'
 
 const Config: React.FC = () => {
   const [config, setConfig] = useState<SanitizedConfig | null>(null)
@@ -96,6 +104,27 @@ const Config: React.FC = () => {
     const isExpanded = expandedSections.has(title)
     const isEmpty = !data || Object.keys(data).length === 0
 
+    const getIcon = (sectionTitle: string) => {
+      switch (sectionTitle) {
+        case 'channels':
+          return ChannelsIcon
+        case 'providers':
+          return ProvidersIcon
+        case 'agent':
+          return AgentIcon
+        case 'tools':
+          return ToolsIcon
+        case 'theme':
+          return ThemeIcon
+        case 'web':
+          return WebIcon
+        default:
+          return ChannelsIcon
+      }
+    }
+
+    const IconComponent = getIcon(title)
+
     return (
       <div key={title} className="bg-surface border border-border rounded-lg">
         <button
@@ -103,13 +132,7 @@ const Config: React.FC = () => {
           className="w-full px-6 py-4 flex items-center justify-between hover:bg-surface/80 transition-colors"
         >
           <div className="flex items-center gap-3">
-            <span className="text-xl">
-              {title === 'channels' && '📡'}
-              {title === 'providers' && '🔌'}
-              {title === 'agent' && '🤖'}
-              {title === 'tools' && '🔧'}
-              {title === 'theme' && '🎨'}
-            </span>
+            <IconComponent className="w-5 h-5 text-text-secondary" />
             <h3 className="text-lg font-semibold text-text capitalize">
               {title}
             </h3>

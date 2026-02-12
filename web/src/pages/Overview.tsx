@@ -2,6 +2,13 @@ import React, { useEffect, useState } from 'react'
 import { apiClient } from '../api/client'
 import type { SystemStatus } from '../types/api'
 import { useI18n } from '../i18n/I18nContext'
+import {
+  SystemStatusIcon,
+  ActiveSessionsIcon,
+  ChannelsIcon,
+  CronIcon,
+  RolesIcon
+} from '../components/icons'
 
 const Overview: React.FC = () => {
   const [status, setStatus] = useState<SystemStatus | null>(null)
@@ -55,31 +62,31 @@ const Overview: React.FC = () => {
       title: t('overview.systemStatus'),
       value: status.running ? t('common.running') : t('common.stopped'),
       color: status.running ? 'success' : 'error',
-      icon: '🟢',
+      icon: SystemStatusIcon,
     },
     {
       title: t('overview.activeSessions'),
       value: status.session_count,
       color: 'primary',
-      icon: '💬',
+      icon: ActiveSessionsIcon,
     },
     {
       title: t('overview.channels'),
       value: status.channel_count,
       color: 'accent',
-      icon: '📡',
+      icon: ChannelsIcon,
     },
     {
       title: t('overview.cronJobs'),
       value: status.cron_job_count,
       color: 'warning',
-      icon: '⏰',
+      icon: CronIcon,
     },
     {
       title: t('overview.roles'),
       value: status.role_count,
       color: 'secondary',
-      icon: '👤',
+      icon: RolesIcon,
     },
   ]
 
@@ -113,7 +120,7 @@ const Overview: React.FC = () => {
                 <p className="text-sm text-text-secondary mb-1">{card.title}</p>
                 <p className={`text-3xl font-bold text-${card.color}`}>{card.value}</p>
               </div>
-              <div className="text-4xl">{card.icon}</div>
+              <card.icon className="w-10 h-10 text-text-secondary" />
             </div>
           </div>
         ))}

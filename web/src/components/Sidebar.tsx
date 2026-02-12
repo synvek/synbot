@@ -1,20 +1,31 @@
 import React from 'react'
 import { NavLink } from 'react-router-dom'
 import { useI18n } from '../i18n/I18nContext'
+import {
+  OverviewIcon,
+  ChatIcon,
+  ChannelsIcon,
+  SessionsIcon,
+  CronIcon,
+  RolesIcon,
+  SkillsIcon,
+  ConfigIcon,
+  LogsIcon
+} from './icons'
 
 const Sidebar: React.FC = () => {
   const { t } = useI18n()
   
   const navItems = [
-    { path: '/', label: t('sidebar.overview'), icon: '📊' },
-    { path: '/chat', label: t('sidebar.chat'), icon: '💬' },
-    { path: '/channels', label: t('sidebar.channels'), icon: '📡' },
-    { path: '/sessions', label: t('sidebar.sessions'), icon: '👥' },
-    { path: '/cron', label: t('sidebar.cron'), icon: '⏰' },
-    { path: '/roles', label: t('sidebar.roles'), icon: '👤' },
-    { path: '/skills', label: t('sidebar.skills'), icon: '🎯' },
-    { path: '/config', label: t('sidebar.config'), icon: '⚙️' },
-    { path: '/logs', label: t('sidebar.logs'), icon: '📝' },
+    { path: '/', label: t('sidebar.overview'), icon: OverviewIcon },
+    { path: '/chat', label: t('sidebar.chat'), icon: ChatIcon },
+    { path: '/channels', label: t('sidebar.channels'), icon: ChannelsIcon },
+    { path: '/sessions', label: t('sidebar.sessions'), icon: SessionsIcon },
+    { path: '/cron', label: t('sidebar.cron'), icon: CronIcon },
+    { path: '/roles', label: t('sidebar.roles'), icon: RolesIcon },
+    { path: '/skills', label: t('sidebar.skills'), icon: SkillsIcon },
+    { path: '/config', label: t('sidebar.config'), icon: ConfigIcon },
+    { path: '/logs', label: t('sidebar.logs'), icon: LogsIcon },
   ]
 
   return (
@@ -34,7 +45,7 @@ const Sidebar: React.FC = () => {
                   }`
                 }
               >
-                <span className="text-xl">{item.icon}</span>
+                <item.icon className="w-5 h-5" />
                 <span>{item.label}</span>
               </NavLink>
             </li>
