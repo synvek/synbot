@@ -32,13 +32,25 @@ export function useWebSocket({
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimeoutRef = useRef<number | null>(null);
   const shouldReconnectRef = useRef(autoConnect);
+  const isConnectingRef = useRef(false);
+  const connectFnRef = useRef<(() => void) | null>(null);
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
+      console.log('WebSocket already connected, skipping');
+      return;
+    }
+
+    // Prevent multiple simultaneous connection attempts
+    if (wsRef.current?.readyState === WebSocket.CONNECTING || isConnectingRef.current) {
+      console.log('WebSocket connection in progress, skipping');
       return;
     }
 
     try {
+      console.log('Creating new WebSocket connection to:', url);
+      isConnectingRef.current = true;
+      
       // Web channel uses a fixed global session for management
       const ws = new WebSocket(url);
       wsRef.current = ws;
@@ -47,18 +59,22 @@ export function useWebSocket({
         console.log('WebSocket connected');
         setConnected(true);
         reconnectAttemptsRef.current = 0;
+        isConnectingRef.current = false;
       };
 
       ws.onmessage = (event) => {
+        console.log('WebSocket message received:', event.data.substring(0, 100));
         try {
           const message: WsServerMessage = JSON.parse(event.data);
           
           switch (message.type) {
             case 'connected':
+              console.log('Connected with session_id:', message.session_id);
               setSessionId(message.session_id);
               break;
             
             case 'history':
+              console.log('Received history with', message.messages.length, 'messages');
               // Load history messages
               const historyMessages: ChatMessage[] = message.messages.map((msg, index) => ({
                 id: `history-${index}-${msg.timestamp}`,
@@ -70,15 +86,37 @@ export function useWebSocket({
               break;
             
             case 'chat_response':
-              setMessages((prev) => [
-                ...prev,
-                {
-                  id: `${Date.now()}-assistant`,
-                  role: 'assistant',
-                  content: message.content,
-                  timestamp: message.timestamp,
-                },
-              ]);
+              console.log('Received chat_response:', {
+                content: message.content.substring(0, 50),
+                timestamp: message.timestamp,
+              });
+              
+              setMessages((prev) => {
+                console.log('Current messages count:', prev.length);
+                
+                // Strong deduplication: check by content and role
+                // This prevents duplicate assistant messages with same content
+                const exists = prev.some(msg => 
+                  msg.role === 'assistant' && 
+                  msg.content === message.content
+                );
+                
+                if (exists) {
+                  console.log('Duplicate assistant message detected (same content), skipping');
+                  return prev;
+                }
+                
+                console.log('Adding new assistant message');
+                return [
+                  ...prev,
+                  {
+                    id: `${message.timestamp}-assistant-${Date.now()}`,
+                    role: 'assistant',
+                    content: message.content,
+                    timestamp: message.timestamp,
+                  },
+                ];
+              });
               break;
             
             case 'approval_request':
@@ -125,12 +163,14 @@ export function useWebSocket({
 
       ws.onerror = (error) => {
         console.error('WebSocket error:', error);
+        isConnectingRef.current = false;
       };
 
       ws.onclose = () => {
         console.log('WebSocket disconnected');
         setConnected(false);
         wsRef.current = null;
+        isConnectingRef.current = false;
 
         if (
           shouldReconnectRef.current &&
@@ -144,12 +184,13 @@ export function useWebSocket({
           );
           
           reconnectTimeoutRef.current = setTimeout(() => {
-            connect();
+            connectFnRef.current?.();
           }, delay);
         }
       };
     } catch (error) {
       console.error('Failed to create WebSocket connection:', error);
+      isConnectingRef.current = false;
     }
   }, [url, reconnectInterval, maxReconnectAttempts]);
 
@@ -182,15 +223,16 @@ export function useWebSocket({
     };
 
     try {
+      const timestamp = new Date().toISOString();
       wsRef.current.send(JSON.stringify(message));
       
       setMessages((prev) => [
         ...prev,
         {
-          id: `${Date.now()}-user`,
+          id: `${timestamp}-user`,
           role: 'user',
           content,
-          timestamp: new Date().toISOString(),
+          timestamp,
         },
       ]);
     } catch (error) {
@@ -218,6 +260,9 @@ export function useWebSocket({
     }
   }, []);
 
+  // Store connect function in ref to avoid dependency issues
+  connectFnRef.current = connect;
+
   useEffect(() => {
     if (autoConnect) {
       shouldReconnectRef.current = true;
@@ -225,17 +270,33 @@ export function useWebSocket({
     }
 
     return () => {
+      console.log('useWebSocket cleanup: closing connection');
       shouldReconnectRef.current = false;
+      isConnectingRef.current = false;
       
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
       }
       
       if (wsRef.current) {
-        wsRef.current.close();
+        // Close the WebSocket connection immediately
+        const ws = wsRef.current;
+        wsRef.current = null;
+        
+        // Remove event handlers to prevent them from firing during cleanup
+        ws.onopen = null;
+        ws.onmessage = null;
+        ws.onerror = null;
+        ws.onclose = null;
+        
+        if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+          ws.close();
+        }
       }
     };
-  }, [autoConnect, connect]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoConnect]);
 
   return {
     connected,
