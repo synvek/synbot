@@ -7,6 +7,7 @@ mod cli;
 mod config;
 mod cron;
 mod heartbeat;
+mod logging;
 mod tools;
 mod web;
 

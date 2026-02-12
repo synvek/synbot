@@ -294,6 +294,126 @@ pub struct WebToolConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Log config
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogConfig {
+    /// Log level: trace, debug, info, warn, error
+    #[serde(default = "default_log_level")]
+    pub level: String,
+    /// Log format: json, text, compact, pretty
+    #[serde(default = "default_log_format")]
+    pub format: String,
+    /// Log directory path
+    #[serde(default = "default_log_dir")]
+    pub dir: String,
+    /// Maximum number of log files to keep
+    #[serde(default = "default_max_log_files")]
+    pub max_files: u32,
+    /// Maximum size of each log file in MB
+    #[serde(default = "default_max_log_file_size")]
+    pub max_file_size_mb: u32,
+    /// Show timestamps in logs
+    #[serde(default = "default_show_timestamp")]
+    pub show_timestamp: bool,
+    /// Show log level in logs
+    #[serde(default = "default_show_level")]
+    pub show_level: bool,
+    /// Show target module in logs
+    #[serde(default = "default_show_target")]
+    pub show_target: bool,
+    /// Show thread names in logs
+    #[serde(default = "default_show_thread_names")]
+    pub show_thread_names: bool,
+    /// Show thread IDs in logs
+    #[serde(default = "default_show_thread_ids")]
+    pub show_thread_ids: bool,
+    /// Show file and line number in logs
+    #[serde(default = "default_show_file")]
+    pub show_file: bool,
+    /// Timestamp format: rfc3339, local, utc, custom
+    #[serde(default = "default_timestamp_format")]
+    pub timestamp_format: String,
+    /// Custom timestamp format string (e.g., "%Y-%m-%d %H:%M:%S")
+    #[serde(default)]
+    pub custom_timestamp_format: Option<String>,
+    /// Module-specific log levels (e.g., {"synbot": "debug", "open_lark": "info"})
+    #[serde(default)]
+    pub module_levels: std::collections::HashMap<String, String>,
+}
+
+fn default_log_level() -> String {
+    "info".to_string()
+}
+
+fn default_log_format() -> String {
+    "text".to_string()
+}
+
+fn default_log_dir() -> String {
+    "logs".to_string()
+}
+
+fn default_max_log_files() -> u32 {
+    20
+}
+
+fn default_max_log_file_size() -> u32 {
+    50
+}
+
+fn default_show_timestamp() -> bool {
+    true
+}
+
+fn default_show_level() -> bool {
+    true
+}
+
+fn default_show_target() -> bool {
+    true
+}
+
+fn default_show_thread_names() -> bool {
+    false
+}
+
+fn default_show_thread_ids() -> bool {
+    false
+}
+
+fn default_show_file() -> bool {
+    false
+}
+
+fn default_timestamp_format() -> String {
+    "local".to_string()
+}
+
+impl Default for LogConfig {
+    fn default() -> Self {
+        Self {
+            level: default_log_level(),
+            format: default_log_format(),
+            dir: default_log_dir(),
+            max_files: default_max_log_files(),
+            max_file_size_mb: default_max_log_file_size(),
+            show_timestamp: default_show_timestamp(),
+            show_level: default_show_level(),
+            show_target: default_show_target(),
+            show_thread_names: default_show_thread_names(),
+            show_thread_ids: default_show_thread_ids(),
+            show_file: default_show_file(),
+            timestamp_format: default_timestamp_format(),
+            custom_timestamp_format: None,
+            module_levels: std::collections::HashMap::new(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Web server config
 // ---------------------------------------------------------------------------
 
@@ -369,6 +489,8 @@ pub struct Config {
     pub tools: ToolsConfig,
     #[serde(default)]
     pub web: WebConfig,
+    #[serde(default)]
+    pub log: LogConfig,
     #[serde(default)]
     pub main_channel: String,
     #[serde(default)]
@@ -446,6 +568,52 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
             value: config.tools.exec.timeout_secs.to_string(),
             constraint: "must be greater than 0".into(),
         });
+    }
+
+    // --- Log config validation ---
+    let valid_log_levels = ["trace", "debug", "info", "warn", "error"];
+    if !valid_log_levels.contains(&config.log.level.to_lowercase().as_str()) {
+        errors.push(ValidationError {
+            field: "log.level".into(),
+            value: config.log.level.clone(),
+            constraint: format!("must be one of: {}", valid_log_levels.join(", ")),
+        });
+    }
+
+    let valid_log_formats = ["json", "text", "compact", "pretty"];
+    if !valid_log_formats.contains(&config.log.format.to_lowercase().as_str()) {
+        errors.push(ValidationError {
+            field: "log.format".into(),
+            value: config.log.format.clone(),
+            constraint: format!("must be one of: {}", valid_log_formats.join(", ")),
+        });
+    }
+
+    if config.log.max_files == 0 {
+        errors.push(ValidationError {
+            field: "log.max_files".into(),
+            value: config.log.max_files.to_string(),
+            constraint: "must be greater than 0".into(),
+        });
+    }
+
+    if config.log.max_file_size_mb == 0 {
+        errors.push(ValidationError {
+            field: "log.max_file_size_mb".into(),
+            value: config.log.max_file_size_mb.to_string(),
+            constraint: "must be greater than 0".into(),
+        });
+    }
+
+    // Validate module-specific log levels
+    for (module, level) in &config.log.module_levels {
+        if !valid_log_levels.contains(&level.to_lowercase().as_str()) {
+            errors.push(ValidationError {
+                field: format!("log.module_levels.{}", module),
+                value: level.clone(),
+                constraint: format!("must be one of: {}", valid_log_levels.join(", ")),
+            });
+        }
     }
 
     // --- Permission config validation ---
@@ -655,6 +823,21 @@ pub fn workspace_path(cfg: &Config) -> PathBuf {
             .join(raw.trim_start_matches("~/"))
     } else {
         PathBuf::from(raw)
+    }
+}
+
+pub fn log_dir_path(cfg: &Config) -> PathBuf {
+    let raw = &cfg.log.dir;
+    if raw.starts_with('~') {
+        dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(raw.trim_start_matches("~/"))
+    } else if raw.starts_with('/') || raw.contains(':') {
+        // Absolute path
+        PathBuf::from(raw)
+    } else {
+        // Relative path - relative to config_dir
+        config_dir().join(raw)
     }
 }
 

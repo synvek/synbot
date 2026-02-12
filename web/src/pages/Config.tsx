@@ -9,7 +9,8 @@ import {
   AgentIcon,
   ToolsIcon,
   ThemeIcon,
-  WebIcon
+  WebIcon,
+  LogsIcon
 } from '../components/icons'
 
 const Config: React.FC = () => {
@@ -118,6 +119,8 @@ const Config: React.FC = () => {
           return ThemeIcon
         case 'web':
           return WebIcon
+        case 'log':
+          return LogsIcon
         default:
           return ChannelsIcon
       }
@@ -208,6 +211,7 @@ const Config: React.FC = () => {
         {renderSection('agent', config.agent)}
         {renderSection('tools', config.tools)}
         {config.web && renderSection('web', config.web as Record<string, unknown>)}
+        {config.log && renderSection('log', config.log as Record<string, unknown>)}
         {renderSection('theme', { preview: 'theme_preview' })}
       </div>
 

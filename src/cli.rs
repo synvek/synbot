@@ -6,6 +6,7 @@ use tracing::{info, warn};
 
 use crate::channels::Channel;
 use crate::config;
+use crate::logging;
 
 #[derive(Parser)]
 #[command(name = "synbot", about = "synbot — Personal AI Assistant")]
@@ -68,13 +69,6 @@ enum CronAction {
 }
 
 pub async fn run() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "synbot=debug,open_lark=debug".into()),
-        )
-        .init();
-
     let cli = Cli::parse();
 
     match cli.command {
@@ -138,6 +132,10 @@ fn create_workspace_templates(ws: &std::path::Path) -> Result<()> {
 
 async fn cmd_agent(message: Option<String>, provider: Option<String>, model: Option<String>) -> Result<()> {
     let cfg = config::load_config(None)?;
+    
+    // Initialize logging with config
+    logging::init_logging(&cfg)?;
+    
     let ws = config::workspace_path(&cfg);
 
     // Resolve provider
@@ -286,6 +284,10 @@ async fn cmd_agent(message: Option<String>, provider: Option<String>, model: Opt
 
 async fn cmd_start() -> Result<()> {
     let cfg = config::load_config(None)?;
+    
+    // Initialize logging with config
+    logging::init_logging(&cfg)?;
+    
     let ws = config::workspace_path(&cfg);
 
     let (api_key, api_base) = resolve_provider(&cfg);

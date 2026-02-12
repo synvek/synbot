@@ -473,6 +473,8 @@ async fn run_completion_loop(
             additional_params: None,
         };
 
+        tracing::debug!("Request prompt: {}", system_prompt);
+
         let response = model.completion(request).await?;
 
         let mut has_tool_calls = false;
