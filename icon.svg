@@ -1,0 +1,41 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <!-- 背景圆 -->
+  <rect x="5" y="5" width="90" height="90" rx="15" ry="15" fill="url(#bgGradient)" stroke="#2C3E50" stroke-width="1.5"/>
+  
+  <!-- 机器人的头部主体 -->
+  <rect x="20" y="38" width="60" height="40" rx="12" ry="12" fill="url(#bgGradient)" stroke="#2C3E50" stroke-width="2.5"/>
+  <path d="M35 83 L65 83" stroke="#2C3E50" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  
+  <!-- 天线，象征快速/信号 -->
+  <rect x="42" y="22" width="16" height="10" rx="7" ry="5" fill="url(#bgGradient)" stroke="#2C3E50" stroke-width="2.5"/>
+  
+  <!-- 眼睛：专注、科技感 -->
+  <circle cx="38" cy="55" r="5" fill="url(#eyeGradient)"/>
+  <circle cx="62" cy="55" r="5" fill="url(#eyeGradient)"/>
+
+  <!-- 瞳孔高光 -->
+  <circle cx="40" cy="53" r="2" fill="url(#bgGradient)"/>
+  <circle cx="64" cy="53" r="2" fill="url(#bgGradient)"/>
+  
+  <!-- 嘴部：微笑且带有速度感 -->
+  <path d="M40 67 Q50 75, 60 67" stroke="#2C3E50" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+  
+  <!-- 闪电符号，代表快速 -->
+  <path d="M54 48 L48 55 L54 55 L48 64" stroke="#FFAA33" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- 定义渐变 -->
+  <defs>
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F0F7FF"/>
+      <stop offset="100%" stop-color="#E0EFFA"/>
+    </linearGradient>
+    <linearGradient id="strokeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#5A7D9C"/>
+      <stop offset="100%" stop-color="#2C3E50"/>
+    </linearGradient>
+    <linearGradient id="eyeGradient" x1="20%" y1="20%" x2="80%" y2="80%">
+      <stop offset="0%" stop-color="#1E2B38"/>
+      <stop offset="100%" stop-color="#2C3E50"/>
+    </linearGradient>
+  </defs>
+</svg>
