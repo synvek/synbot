@@ -11,7 +11,7 @@ hero:
   actions:
     - theme: brand
       text: Get Started
-      link: /en/getting-started/installation
+      link: /getting-started/installation
     - theme: alt
       text: View on GitHub
       link: https://github.com/synbot/synbot
@@ -45,7 +45,7 @@ warning:
 <div class="language-selector">
   <h3>Choose Language</h3>
   <div class="buttons">
-    <a class="btn primary" href="/en/">English</a>
+    <a class="btn primary" href="/">English</a>
     <a class="btn secondary" href="/zh/">中文</a>
   </div>
 </div>
@@ -136,22 +136,22 @@ Synbot is currently in research & experiment stage. Please:
 ## Quick Links
 
 <div class="quick-links">
-  <a class="quick-link-card" href="/en/getting-started/installation">
+  <a class="quick-link-card" href="/getting-started/installation">
     <h3>🚀 Installation</h3>
     <p>Get Synbot running on your system</p>
   </a>
   
-  <a class="quick-link-card" href="/en/getting-started/configuration">
+  <a class="quick-link-card" href="/getting-started/configuration">
     <h3>⚙️ Configuration</h3>
     <p>Configure Synbot for your needs</p>
   </a>
   
-  <a class="quick-link-card" href="/en/user-guide/tools">
+  <a class="quick-link-card" href="/user-guide/tools">
     <h3>🛠️ Tools Guide</h3>
     <p>Learn about available tools</p>
   </a>
   
-  <a class="quick-link-card" href="/en/developer-guide/architecture">
+  <a class="quick-link-card" href="/developer-guide/architecture">
     <h3>🏗️ Architecture</h3>
     <p>Understand how Synbot works</p>
   </a>

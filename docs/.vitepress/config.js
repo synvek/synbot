@@ -4,57 +4,74 @@ export default defineConfig({
   // Site metadata
   title: 'Synbot Documentation',
   description: 'Personal AI Assistant built with Rust',
+  // Head configuration
+  head: [
+    ['link', { rel: 'icon', href: '/favicon.ico' }],
+    ['meta', { name: 'theme-color', content: '#3eaf7c' }],
+    ['meta', { name: 'og:type', content: 'website' }],
+    ['meta', { name: 'og:locale', content: 'en_US' }],
+    ['meta', { name: 'og:site_name', content: 'Synbot Documentation' }],
+    // Script for theme switching
+    ['script', { src: '/.vitepress/theme/scripts/theme.js' }]
+  ],
   lang: 'en-US',
-  base: '/docs/',
-
-  // Theme configuration
-  themeConfig: {
-    // Site navigation
-    nav: [
-      { text: 'Home', link: '/' },
-      { text: 'English', link: '/en/' },
-      { text: '中文', link: '/zh/' },
-      { text: 'GitHub', link: 'https://github.com/synbot/synbot' }
-    ],
-
-    // Sidebar configuration
-    sidebar: {
-      '/en/': [
-        {
-          text: 'Getting Started',
-          collapsed: false,
-          items: [
-            { text: 'Installation', link: '/en/getting-started/installation' },
-            { text: 'Configuration', link: '/en/getting-started/configuration' },
-            { text: 'Running Synbot', link: '/en/getting-started/running' },
-            { text: 'First Steps', link: '/en/getting-started/first-steps' }
-          ]
-        },
-        {
-          text: 'User Guide',
-          collapsed: false,
-          items: [
-            { text: 'Channels', link: '/en/user-guide/channels' },
-            { text: 'Tools', link: '/en/user-guide/tools' },
-            { text: 'Permissions', link: '/en/user-guide/permissions' }
-          ]
-        },
-        {
-          text: 'Developer Guide',
-          collapsed: false,
-          items: [
-            { text: 'Architecture', link: '/en/developer-guide/architecture' }
-          ]
-        },
-        {
-          text: 'Examples',
-          collapsed: false,
-          items: [
-            { text: 'Basic Configuration', link: '/en/examples/basic-config' }
-          ]
-        }
-      ],
-      '/zh/': [
+  base: '',
+  locales: {
+    root: {
+      label: 'English',
+      lang: 'en',
+      themeConfig: {
+        nav: [
+          { text: 'Home', link: '/' },
+          { text: 'Document', link: '/getting-started/installation' }
+        ],
+        sidebar: [
+          {
+            text: 'Getting Started',
+            collapsed: false,
+            items: [
+              { text: 'Installation', link: '/getting-started/installation' },
+              { text: 'Configuration', link: '/getting-started/configuration' },
+              { text: 'Running Synbot', link: '/getting-started/running' },
+              { text: 'First Steps', link: '/getting-started/first-steps' }
+            ]
+          },
+          {
+            text: 'User Guide',
+            collapsed: false,
+            items: [
+              { text: 'Channels', link: '/user-guide/channels' },
+              { text: 'Tools', link: '/user-guide/tools' },
+              { text: 'Permissions', link: '/user-guide/permissions' }
+            ]
+          },
+          {
+            text: 'Developer Guide',
+            collapsed: false,
+            items: [
+              { text: 'Architecture', link: '/developer-guide/architecture' }
+            ]
+          },
+          {
+            text: 'Examples',
+            collapsed: false,
+            items: [
+              { text: 'Basic Configuration', link: '/examples/basic-config' }
+            ]
+          }
+        ],
+      }
+    },
+    zh: {
+      label: '中文',
+      lang: 'zh',
+      link: '/zh/',
+      themeConfig: {
+        nav: [
+          { text: '首页', link: '/zh/' },
+          { text: '文档', link: '/zh/getting-started/installation' }
+        ],
+        sidebar: [
         {
           text: '入门指南',
           collapsed: false,
@@ -88,9 +105,12 @@ export default defineConfig({
             { text: '基本配置', link: '/zh/examples/basic-config' }
           ]
         }
-      ]
-    },
-
+        ],
+      }
+    }
+  },
+  // Theme configuration
+  themeConfig: {
     // Social links
     socialLinks: [
       { icon: 'github', link: 'https://github.com/synbot/synbot' }
@@ -166,16 +186,6 @@ export default defineConfig({
     }
   },
 
-  // Head configuration
-  head: [
-    ['link', { rel: 'icon', href: '/docs/favicon.ico', type: 'image/x-icon' }],
-    ['meta', { name: 'theme-color', content: '#3eaf7c' }],
-    ['meta', { name: 'og:type', content: 'website' }],
-    ['meta', { name: 'og:locale', content: 'en_US' }],
-    ['meta', { name: 'og:site_name', content: 'Synbot Documentation' }],
-    // Script for theme switching
-    ['script', { src: '/docs/.vitepress/theme/scripts/theme.js' }]
-  ],
 
   // Appearance
   appearance: 'dark',

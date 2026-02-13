@@ -39,7 +39,7 @@ if exist .vitepress\dist (
     echo.
     echo 6. 启动预览服务器
     echo 启动预览服务器...
-    start "" "http://localhost:4173/docs/"
+    start "" "http://localhost:4173"
     npm run preview
 ) else (
     echo 错误：构建输出目录不存在
