@@ -151,6 +151,7 @@ fn discord_event_to_inbound(
     let author = data.get("author")?;
     // Ignore bot messages
     if author.get("bot").and_then(|b| b.as_bool()).unwrap_or(false) {
+        info!("Discord: Ignoring bot message");
         return None;
     }
     let sender_id = author.get("id")?.as_str()?.to_string();
@@ -158,6 +159,7 @@ fn discord_event_to_inbound(
     let content = data.get("content")?.as_str()?.to_string();
 
     if content.is_empty() {
+        info!("Discord: Ignoring empty content");
         return None;
     }
 
@@ -177,6 +179,13 @@ fn discord_event_to_inbound(
         .and_then(|v| v.as_str())
         .unwrap_or_default()
         .to_string();
+
+    info!(
+        sender_id = %sender_id,
+        chat_id = %chat_id,
+        content_len = content.len(),
+        "Discord: Converting event to inbound message"
+    );
 
     Some(InboundMessage {
         channel: "discord".into(),
@@ -542,6 +551,7 @@ impl DiscordChannel {
                                 }
                                 "MESSAGE_CREATE" => {
                                     if let Some(d) = payload.get("d") {
+                                        info!("Discord MESSAGE_CREATE event received");
                                         if let Some(inbound) =
                                             discord_event_to_inbound(d, allow_from)
                                         {
