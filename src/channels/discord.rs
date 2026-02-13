@@ -49,8 +49,8 @@ mod opcode {
     pub const HEARTBEAT_ACK: u64 = 11;
 }
 
-/// Gateway intents: GUILDS (1<<0) | GUILD_MESSAGES (1<<9) | MESSAGE_CONTENT (1<<15).
-const GATEWAY_INTENTS: u64 = (1 << 0) | (1 << 9) | (1 << 15);
+/// Gateway intents: GUILDS (1<<0) | GUILD_MESSAGES (1<<9) | DIRECT_MESSAGES (1<<12) | MESSAGE_CONTENT (1<<15).
+const GATEWAY_INTENTS: u64 = (1 << 0) | (1 << 9) | (1 << 12) | (1 << 15);
 
 // ---------------------------------------------------------------------------
 // Error classification
@@ -143,20 +143,44 @@ pub fn split_message(content: &str, max_len: usize) -> Vec<String> {
 /// Convert a Discord MESSAGE_CREATE event payload into an InboundMessage.
 ///
 /// Returns `None` if the message is from a bot, has no text content,
-/// or the sender is not in the allow list.
+/// the sender is not in the allow list, or required fields are missing.
 fn discord_event_to_inbound(
     data: &serde_json::Value,
     allow_from: &[String],
 ) -> Option<InboundMessage> {
-    let author = data.get("author")?;
+    let author = match data.get("author") {
+        Some(a) => a,
+        None => {
+            warn!("Discord MESSAGE_CREATE: missing 'author' field, ignoring");
+            return None;
+        }
+    };
     // Ignore bot messages
     if author.get("bot").and_then(|b| b.as_bool()).unwrap_or(false) {
         info!("Discord: Ignoring bot message");
         return None;
     }
-    let sender_id = author.get("id")?.as_str()?.to_string();
-    let chat_id = data.get("channel_id")?.as_str()?.to_string();
-    let content = data.get("content")?.as_str()?.to_string();
+    let sender_id = match author.get("id").and_then(|v| v.as_str()) {
+        Some(id) => id.to_string(),
+        None => {
+            warn!("Discord MESSAGE_CREATE: missing author.id, ignoring");
+            return None;
+        }
+    };
+    let chat_id = match data.get("channel_id").and_then(|v| v.as_str()) {
+        Some(id) => id.to_string(),
+        None => {
+            warn!("Discord MESSAGE_CREATE: missing 'channel_id', ignoring");
+            return None;
+        }
+    };
+    let content = match data.get("content").and_then(|v| v.as_str()) {
+        Some(s) => s.to_string(),
+        None => {
+            warn!("Discord MESSAGE_CREATE: missing 'content' field (enable Message Content Intent in Developer Portal if needed), ignoring");
+            return None;
+        }
+    };
 
     if content.is_empty() {
         info!("Discord: Ignoring empty content");
@@ -165,7 +189,7 @@ fn discord_event_to_inbound(
 
     // Access control: empty allow_from means allow all
     if !allow_from.is_empty() && !allow_from.iter().any(|a| a == &sender_id) {
-        warn!(sender = %sender_id, "Discord access denied");
+        warn!(sender = %sender_id, "Discord access denied (sender not in allow_from)");
         return None;
     }
 
@@ -528,6 +552,8 @@ impl DiscordChannel {
                                 .get("t")
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("");
+
+                            tracing::debug!(event = %event_name, "Discord Gateway DISPATCH");
 
                             match event_name {
                                 "READY" => {
