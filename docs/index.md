@@ -4,7 +4,7 @@ layout: home
 hero:
   name: Synbot
   text: Personal AI Assistant
-  tagline: Built with Rust. Inspired by nanobot and Openclaw.
+  tagline: Built with Rust. Inspired by nanobot & Openclaw.
   image:
     src: /logo.png
     alt: Synbot Logo

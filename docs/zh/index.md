@@ -1,6 +1,6 @@
 ﻿---
-title: Synbot 文档
-description: 基于 Rust 构建的个人 AI 助手
+title: Synbot文档
+description: 基于Rust构建的个人 AI 助手
 ---
 
 # Synbot 文档

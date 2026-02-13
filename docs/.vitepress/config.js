@@ -2,7 +2,7 @@ import { defineConfig } from 'vitepress'
 
 export default defineConfig({
   // Site metadata
-  title: 'Synbot Documentation',
+  title: 'Synbot',
   description: 'Personal AI Assistant built with Rust',
   // Head configuration
   head: [
