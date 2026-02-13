@@ -60,7 +60,7 @@ const Channels: React.FC = () => {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-gray-500">{t('common.loading')}</div>
+        <div className="text-text-secondary">{t('common.loading')}</div>
       </div>
     )
   }
@@ -76,8 +76,8 @@ const Channels: React.FC = () => {
   return (
     <div>
       <div className="mb-6">
-        <h2 className="text-2xl font-bold text-gray-900">{t('channels.title')}</h2>
-        <p className="text-gray-600 mt-1">{t('channels.description')}</p>
+        <h2 className="text-2xl font-bold text-text">{t('channels.title')}</h2>
+        <p className="text-text-secondary mt-1">{t('channels.description')}</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -88,7 +88,7 @@ const Channels: React.FC = () => {
           >
             <div className="flex items-start justify-between mb-4">
               <div>
-                <h3 className="text-lg font-semibold text-gray-900 capitalize">
+                <h3 className="text-lg font-semibold text-text capitalize">
                   {channel.name}
                 </h3>
                 <div className="flex items-center gap-2 mt-2">
@@ -126,7 +126,7 @@ const Channels: React.FC = () => {
       </div>
 
       {channels.length === 0 && (
-        <div className="text-center py-12 text-gray-500">
+        <div className="text-center py-12 text-text-secondary">
           {t('channels.noChannels')}
         </div>
       )}

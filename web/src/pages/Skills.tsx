@@ -45,7 +45,7 @@ const Skills: React.FC = () => {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-gray-500">{t('common.loading')}</div>
+        <div className="text-text-secondary">{t('common.loading')}</div>
       </div>
     )
   }
@@ -61,8 +61,8 @@ const Skills: React.FC = () => {
   return (
     <div>
       <div className="mb-6">
-        <h2 className="text-2xl font-bold text-gray-900">{t('skills.title')}</h2>
-        <p className="text-gray-600 mt-1">{t('skills.description')}</p>
+        <h2 className="text-2xl font-bold text-text">{t('skills.title')}</h2>
+        <p className="text-text-secondary mt-1">{t('skills.description')}</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -75,9 +75,9 @@ const Skills: React.FC = () => {
                 selectedSkill?.name === skill.name ? 'ring-2 ring-blue-500' : ''
               }`}
             >
-              <h3 className="text-lg font-semibold text-gray-900">{skill.name}</h3>
+              <h3 className="text-lg font-semibold text-text">{skill.name}</h3>
               <div className="mt-2">
-                <p className="text-sm text-gray-600">
+                <p className="text-sm text-text-secondary">
                   {t('roles.assignedTo')} {skill.assigned_roles.length} {t('roles.role')}
                 </p>
                 {skill.assigned_roles.length > 0 && (
@@ -100,11 +100,11 @@ const Skills: React.FC = () => {
         <div className="bg-surface rounded-lg shadow p-6">
           {loadingDetail ? (
             <div className="flex items-center justify-center h-64">
-              <div className="text-gray-500">{t('skills.loadingDetails')}</div>
+              <div className="text-text-secondary">{t('skills.loadingDetails')}</div>
             </div>
           ) : selectedSkill ? (
             <>
-              <h3 className="text-xl font-bold text-gray-900 mb-4">
+              <h3 className="text-xl font-bold text-text mb-4">
                 {selectedSkill.name}
               </h3>
 
@@ -120,7 +120,7 @@ const Skills: React.FC = () => {
                     </span>
                   ))}
                   {selectedSkill.assigned_roles.length === 0 && (
-                    <span className="text-gray-500 text-sm">{t('skills.notAssigned')}</span>
+                    <span className="text-text-secondary text-sm">{t('skills.notAssigned')}</span>
                   )}
                 </div>
               </div>
@@ -135,7 +135,7 @@ const Skills: React.FC = () => {
               </div>
             </>
           ) : (
-            <div className="flex items-center justify-center h-64 text-gray-500">
+            <div className="flex items-center justify-center h-64 text-text-secondary">
               {t('skills.selectSkill')}
             </div>
           )}
@@ -143,7 +143,7 @@ const Skills: React.FC = () => {
       </div>
 
       {skills.length === 0 && (
-        <div className="text-center py-12 text-gray-500">
+        <div className="text-center py-12 text-text-secondary">
           {t('skills.noSkills')}
         </div>
       )}

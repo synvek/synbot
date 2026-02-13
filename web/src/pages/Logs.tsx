@@ -113,14 +113,14 @@ const Logs: React.FC = () => {
   return (
     <div>
       <div className="mb-6">
-        <h2 className="text-2xl font-bold text-gray-900">{t('logs.title')}</h2>
-        <p className="text-gray-600 mt-1">{t('logs.description')}</p>
+        <h2 className="text-2xl font-bold text-text">{t('logs.title')}</h2>
+        <p className="text-text-secondary mt-1">{t('logs.description')}</p>
       </div>
 
       <div className="bg-surface rounded-lg shadow p-4 mb-4">
         <div className="flex flex-wrap gap-4 items-end">
           <div className="flex-1 min-w-[200px]">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-text mb-1">
               {t('logs.search')}
             </label>
             <input
@@ -128,18 +128,18 @@ const Logs: React.FC = () => {
               value={filters.keyword || ''}
               onChange={(e) => setFilters({ ...filters, keyword: e.target.value })}
               placeholder={t('logs.searchPlaceholder')}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full px-3 py-2 bg-background border border-border rounded-lg text-text placeholder:text-text-secondary focus:ring-2 focus:ring-primary focus:border-transparent"
             />
           </div>
 
           <div className="min-w-[150px]">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-text mb-1">
               {t('logs.level')}
             </label>
             <select
               value={filters.level || ''}
               onChange={(e) => setFilters({ ...filters, level: e.target.value || undefined })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              className="w-full px-3 py-2 bg-background border border-border rounded-lg text-text focus:ring-2 focus:ring-primary focus:border-transparent"
             >
               <option value="">{t('logs.allLevels')}</option>
               {LOG_LEVELS.map((level) => (
@@ -154,17 +154,17 @@ const Logs: React.FC = () => {
             <button
               onClick={fetchLogs}
               disabled={loading}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="px-4 py-2 bg-primary text-white rounded-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {loading ? t('common.loading') : t('logs.refresh')}
             </button>
 
             <button
               onClick={isStreaming ? stopStreaming : startStreaming}
-              className={`px-4 py-2 rounded-lg transition-colors ${
+              className={`px-4 py-2 rounded-lg text-white transition-colors ${
                 isStreaming
-                  ? 'bg-red-600 text-white hover:bg-red-700'
-                  : 'bg-green-600 text-white hover:bg-green-700'
+                  ? 'bg-error hover:opacity-90'
+                  : 'bg-success hover:opacity-90'
               }`}
             >
               {isStreaming ? t('logs.stopStream') : t('logs.startStream')}
@@ -174,25 +174,25 @@ const Logs: React.FC = () => {
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
-          <p className="text-red-800">{error}</p>
+        <div className="bg-error/10 border border-error/30 rounded-lg p-4 mb-4">
+          <p className="text-error">{error}</p>
         </div>
       )}
 
       <div className="bg-surface rounded-lg shadow">
-        <div className="p-4 border-b border-gray-200 flex items-center justify-between">
-          <div className="text-sm text-gray-600">
+        <div className="p-4 border-b border-border flex items-center justify-between">
+          <div className="text-sm text-text-secondary">
             {t('logs.showing')} {logs.length} {t('logs.logEntries')}
             {isStreaming && (
-              <span className="ml-2 inline-flex items-center gap-1 text-green-600">
-                <span className="w-2 h-2 bg-green-600 rounded-full animate-pulse"></span>
+              <span className="ml-2 inline-flex items-center gap-1 text-success">
+                <span className="w-2 h-2 bg-success rounded-full animate-pulse"></span>
                 {t('logs.live')}
               </span>
             )}
           </div>
           <button
             onClick={scrollToBottom}
-            className="text-sm text-blue-600 hover:text-blue-700"
+            className="text-sm text-primary hover:opacity-90"
           >
             {t('logs.scrollToBottom')}
           </button>
@@ -201,21 +201,21 @@ const Logs: React.FC = () => {
         <div className="max-h-[600px] overflow-y-auto">
           {loading && logs.length === 0 ? (
             <div className="flex items-center justify-center h-64">
-              <div className="text-gray-500">{t('common.loading')}</div>
+              <div className="text-text-secondary">{t('common.loading')}</div>
             </div>
           ) : logs.length === 0 ? (
-            <div className="text-center py-12 text-gray-500">
+            <div className="text-center py-12 text-text-secondary">
               {t('logs.noLogs')}
             </div>
           ) : (
-            <div className="divide-y divide-gray-100">
+            <div className="divide-y divide-border">
               {logs.map((log, idx) => (
                 <div
                   key={`${log.timestamp}-${idx}`}
-                  className="p-3 hover:bg-gray-50 transition-colors font-mono text-sm"
+                  className="p-3 hover:bg-surface transition-colors font-mono text-sm"
                 >
                   <div className="flex items-start gap-3">
-                    <span className="text-gray-500 text-xs whitespace-nowrap">
+                    <span className="text-text-secondary text-xs whitespace-nowrap">
                       {formatTimestamp(log.timestamp)}
                     </span>
                     <span
@@ -225,10 +225,10 @@ const Logs: React.FC = () => {
                     >
                       {log.level}
                     </span>
-                    <span className="text-gray-600 text-xs whitespace-nowrap">
+                    <span className="text-text-secondary text-xs whitespace-nowrap">
                       {log.target}
                     </span>
-                    <span className="text-gray-900 flex-1 break-words">
+                    <span className="text-text flex-1 break-words">
                       {log.message}
                     </span>
                   </div>

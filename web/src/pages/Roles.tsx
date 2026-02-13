@@ -31,7 +31,7 @@ const Roles: React.FC = () => {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-gray-500">{t('common.loading')}</div>
+        <div className="text-text-secondary">{t('common.loading')}</div>
       </div>
     )
   }
@@ -47,8 +47,8 @@ const Roles: React.FC = () => {
   return (
     <div>
       <div className="mb-6">
-        <h2 className="text-2xl font-bold text-gray-900">{t('roles.title')}</h2>
-        <p className="text-gray-600 mt-1">{t('roles.description')}</p>
+        <h2 className="text-2xl font-bold text-text">{t('roles.title')}</h2>
+        <p className="text-text-secondary mt-1">{t('roles.description')}</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -61,8 +61,8 @@ const Roles: React.FC = () => {
                 selectedRole?.name === role.name ? 'ring-2 ring-blue-500' : ''
               }`}
             >
-              <h3 className="text-lg font-semibold text-gray-900">{role.name}</h3>
-              <div className="mt-2 space-y-1 text-sm text-gray-600">
+              <h3 className="text-lg font-semibold text-text">{role.name}</h3>
+              <div className="mt-2 space-y-1 text-sm text-text-secondary">
                 <p>{t('roles.model')}: {role.provider}/{role.model}</p>
                 <p>{t('roles.skills')}: {role.skills.length}</p>
                 <p>{t('roles.tools')}: {role.tools.length}</p>
@@ -73,7 +73,7 @@ const Roles: React.FC = () => {
 
         {selectedRole && (
           <div className="bg-surface rounded-lg shadow p-6">
-            <h3 className="text-xl font-bold text-gray-900 mb-4">
+            <h3 className="text-xl font-bold text-text mb-4">
               {selectedRole.name}
             </h3>
 
@@ -141,7 +141,7 @@ const Roles: React.FC = () => {
       </div>
 
       {roles.length === 0 && (
-        <div className="text-center py-12 text-gray-500">
+        <div className="text-center py-12 text-text-secondary">
           {t('roles.noRoles')}
         </div>
       )}
