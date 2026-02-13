@@ -1,0 +1,47 @@
+{
+  "name": "synbot-docs",
+  "version": "0.1.0",
+  "description": "Synbot Documentation",
+  "type": "module",
+  "scripts": {
+    "dev": "vitepress dev",
+    "build": "vitepress build",
+    "preview": "vitepress preview",
+    "deploy": "npm run build && gh-pages -d .vitepress/dist",
+    "clean": "rm -rf .vitepress/dist",
+    "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "vitepress": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "eslint": "^8.0.0",
+    "gh-pages": "^6.0.0",
+    "prettier": "^3.0.0",
+    "sass": "^1.0.0",
+    "terser": "^5.0.0",
+    "vue": "^3.3.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/synbot/synbot.git"
+  },
+  "keywords": [
+    "synbot",
+    "documentation",
+    "ai",
+    "assistant",
+    "rust"
+  ],
+  "author": "Synbot Team",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/synbot/synbot/issues"
+  },
+  "homepage": "https://synbot.github.io/docs"
+}

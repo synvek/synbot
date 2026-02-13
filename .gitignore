@@ -4,4 +4,7 @@
 /.kiro
 /.docs
 /.test
+/docs/.vitepress/cache
+/docs/.vitepress/dist
+/docs/node_modules
 

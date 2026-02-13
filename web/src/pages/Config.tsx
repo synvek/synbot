@@ -217,7 +217,7 @@ const Config: React.FC = () => {
 
       <div className="mt-6 bg-warning/10 border border-warning/20 rounded-lg p-4">
         <p className="text-sm text-warning">
-          <span className="font-medium">{t('common.note')}:</span> {t('config.note')}
+          {t('config.note')}
         </p>
       </div>
     </div>
