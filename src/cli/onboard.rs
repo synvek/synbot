@@ -30,11 +30,11 @@ pub async fn cmd_onboard() -> Result<()> {
 /// 编译时从 crate 根目录的 templates/ 读取模板内容
 fn create_workspace_templates(ws: &std::path::Path) -> Result<()> {
     let templates: &[(&str, &str)] = &[
-        ("AGENTS.md", include_str!("../../templates/AGENTS.md")),
-        ("SOUL.md", include_str!("../../templates/SOUL.md")),
-        ("USER.md", include_str!("../../templates/USER.md")),
-        ("TOOLS.md", include_str!("../../templates/TOOLS.md")),
-        ("HEARTBEAT.md", include_str!("../../templates/HEARTBEAT.md")),
+        ("AGENTS.md", include_str!("../../templates/agent/AGENTS.md")),
+        ("SOUL.md", include_str!("../../templates/agent/SOUL.md")),
+        ("USER.md", include_str!("../../templates/agent/USER.md")),
+        ("TOOLS.md", include_str!("../../templates/agent/TOOLS.md")),
+        ("HEARTBEAT.md", include_str!("../../templates/agent/HEARTBEAT.md")),
     ];
     for (name, content) in templates {
         let path = ws.join(name);
