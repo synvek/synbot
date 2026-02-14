@@ -110,8 +110,17 @@ pub fn init_logging(cfg: &Config, buffer_tx: LogBufferTx) -> Result<()> {
             EnvFilter::new(filter_str)
         });
     
-    // Create file appender with rotation
-    let file_appender = tracing_appender::rolling::daily(&log_dir, "synbot");
+    // File name: synbot.yyyy-MM-dd.log 或 synbot.yyyy-MM-dd.json（日期在中间，后缀在最后）
+    let log_file_suffix = match cfg.log.format.to_lowercase().as_str() {
+        "json" => "json",
+        _ => "log", // text, compact, pretty
+    };
+    let file_appender = tracing_appender::rolling::RollingFileAppender::builder()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .filename_prefix("synbot")
+        .filename_suffix(log_file_suffix)
+        .build(&log_dir)
+        .map_err(|e| anyhow::anyhow!("Failed to create rolling file appender: {}", e))?;
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
     
     // Determine timestamp format
