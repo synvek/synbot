@@ -154,7 +154,7 @@ const Logs: React.FC = () => {
             <button
               onClick={fetchLogs}
               disabled={loading}
-              className="px-4 py-2 bg-primary text-white rounded-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="px-4 py-2 border border-border bg-surface text-text rounded-lg hover:bg-background disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {loading ? t('common.loading') : t('logs.refresh')}
             </button>
@@ -164,7 +164,7 @@ const Logs: React.FC = () => {
               className={`px-4 py-2 rounded-lg text-white transition-colors ${
                 isStreaming
                   ? 'bg-error hover:opacity-90'
-                  : 'bg-success hover:opacity-90'
+                  : 'bg-primary hover:opacity-90'
               }`}
             >
               {isStreaming ? t('logs.stopStream') : t('logs.startStream')}
