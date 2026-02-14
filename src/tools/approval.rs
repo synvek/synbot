@@ -5,8 +5,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::sync::{mpsc, RwLock};
+use tokio::time::sleep;
 use uuid::Uuid;
-use tracing::{info, warn, error};
+use tracing::{info, warn};
 
 /// 审批请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -623,7 +624,7 @@ mod tests {
 
     // 测试辅助方法
     impl ApprovalManager {
-        fn clone_for_test(&self) -> Self {
+        pub(crate) fn clone_for_test(&self) -> Self {
             Self {
                 pending: Arc::clone(&self.pending),
                 history: Arc::clone(&self.history),
@@ -817,7 +818,7 @@ mod tests {
 
         // 创建一个批准的请求
         let manager_clone = manager.clone_for_test();
-        let handle1 = tokio::spawn(async move {
+        let handle1: tokio::task::JoinHandle<anyhow::Result<bool>> = tokio::spawn(async move {
             manager_clone
                 .request_approval(
                     "session1".to_string(),
@@ -850,7 +851,7 @@ mod tests {
 
         // 创建一个拒绝的请求
         let manager_clone = manager.clone_for_test();
-        let handle2 = tokio::spawn(async move {
+        let handle2: tokio::task::JoinHandle<anyhow::Result<bool>> = tokio::spawn(async move {
             manager_clone
                 .request_approval(
                     "session2".to_string(),

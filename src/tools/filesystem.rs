@@ -2,7 +2,7 @@
 
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-use tracing::{debug, info};
+use tracing::info;
 use crate::tools::DynTool;
 
 fn resolve_path(path: &str, workspace: &Path, restrict: bool) -> anyhow::Result<PathBuf> {

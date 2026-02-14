@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::process::Command;
-use tracing::{info, warn, error};
+use tracing::{info, warn};
 
 use crate::tools::truncation::smart_truncate_streams;
 use crate::tools::DynTool;

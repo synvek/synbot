@@ -32,6 +32,7 @@ reqwest = { version = "0.12", features = ["json"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "chrono"] }
 tracing-appender = "0.2"
+log = "0.4"
 
 # Error handling
 anyhow = "1"
@@ -73,6 +74,20 @@ rust-embed = "8"
 mime_guess = "2"
 base64 = "0.22"
 
+# Sandbox dependencies
+num_cpus = "1"
+bollard = "0.18"
+nix = { version = "0.29", features = ["process", "sched", "mount"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Threading",
+    "Win32_System_ProcessStatus",
+    "Win32_System_JobObjects",
+] }
+
 [dev-dependencies]
 # Property-based testing
 proptest = "1"
@@ -80,3 +95,28 @@ proptest = "1"
 tokio-test = "0.4"
 # Temporary directories for test isolation
 tempfile = "3"
+# Benchmarking
+criterion = { version = "0.5", features = ["async_tokio", "html_reports"] }
+# Async utilities
+futures-util = "0.3"
+
+[[bench]]
+name = "sandbox_benchmarks"
+harness = false
+
+# Examples
+[[example]]
+name = "basic_sandbox"
+path = "examples/basic_sandbox.rs"
+
+[[example]]
+name = "tool_execution"
+path = "examples/tool_execution.rs"
+
+[[example]]
+name = "dual_layer_isolation"
+path = "examples/dual_layer_isolation.rs"
+
+[[example]]
+name = "advanced_configuration"
+path = "examples/advanced_configuration.rs"
