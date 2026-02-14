@@ -1,10 +1,77 @@
 //! Logging initialization and configuration.
 
 use anyhow::Result;
+use std::sync::Arc;
+use tracing::field::Visit;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use tracing_subscriber::fmt::time::{ChronoLocal, ChronoUtc, FormatTime};
+use tracing_subscriber::Layer;
 
 use crate::config::{Config, log_dir_path};
+
+/// Optional sender to push log entries to the in-memory buffer for the web UI.
+/// When provided, a layer is added that forwards each event to the buffer.
+pub type LogBufferTx = Option<Arc<tokio::sync::mpsc::Sender<crate::web::log_buffer::LogEntry>>>;
+
+/// Visitor to capture the "message" field from a tracing event.
+struct MessageVisitor(String);
+
+impl Visit for MessageVisitor {
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        if field.name() == "message" {
+            self.0 = value.to_string();
+        }
+    }
+
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "message" {
+            self.0 = format!("{:?}", value);
+        }
+    }
+}
+
+/// Layer that forwards tracing events to the in-memory log buffer for the web UI.
+struct LogBufferLayer {
+    tx: LogBufferTx,
+}
+
+impl LogBufferLayer {
+    fn new(tx: LogBufferTx) -> Self {
+        Self { tx }
+    }
+}
+
+impl<S> Layer<S> for LogBufferLayer
+where
+    S: tracing::Subscriber,
+{
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        let tx = match &self.tx {
+            Some(t) => t,
+            None => return,
+        };
+        let mut visitor = MessageVisitor(String::new());
+        event.record(&mut visitor);
+        let message = if visitor.0.is_empty() {
+            event.metadata().name().to_string()
+        } else {
+            visitor.0
+        };
+        let level = *event.metadata().level();
+        let target = event.metadata().target().to_string();
+        let entry = crate::web::log_buffer::LogEntry {
+            timestamp: chrono::Utc::now(),
+            level: level.to_string(),
+            target,
+            message,
+        };
+        let _ = tx.try_send(entry);
+    }
+}
 
 /// Custom time formatter that uses a custom format string
 struct CustomTimeFormat {
@@ -19,7 +86,8 @@ impl FormatTime for CustomTimeFormat {
 }
 
 /// Initialize the logging system based on configuration.
-pub fn init_logging(cfg: &Config) -> Result<()> {
+/// When `buffer_tx` is `Some`, log entries are also sent to the in-memory buffer for the web UI.
+pub fn init_logging(cfg: &Config, buffer_tx: LogBufferTx) -> Result<()> {
     // Parse log level
     let level = parse_log_level(&cfg.log.level)?;
     
@@ -52,16 +120,16 @@ pub fn init_logging(cfg: &Config) -> Result<()> {
     // Determine format and configure layers
     match cfg.log.format.to_lowercase().as_str() {
         "json" => {
-            init_json_logging(cfg, env_filter, non_blocking, &timestamp_format)?;
+            init_json_logging(cfg, env_filter, non_blocking, &timestamp_format, buffer_tx)?;
         }
         "compact" => {
-            init_compact_logging(cfg, env_filter, non_blocking, &timestamp_format)?;
+            init_compact_logging(cfg, env_filter, non_blocking, &timestamp_format, buffer_tx)?;
         }
         "pretty" => {
-            init_pretty_logging(cfg, env_filter, non_blocking, &timestamp_format)?;
+            init_pretty_logging(cfg, env_filter, non_blocking, &timestamp_format, buffer_tx)?;
         }
         _ => {
-            init_text_logging(cfg, env_filter, non_blocking, &timestamp_format)?;
+            init_text_logging(cfg, env_filter, non_blocking, &timestamp_format, buffer_tx)?;
         }
     }
     
@@ -97,6 +165,7 @@ fn init_json_logging(
     env_filter: EnvFilter,
     non_blocking: tracing_appender::non_blocking::NonBlocking,
     timestamp_format: &str,
+    buffer_tx: LogBufferTx,
 ) -> Result<()> {
     match timestamp_format {
         "rfc3339" => {
@@ -124,6 +193,7 @@ fn init_json_logging(
             
             tracing_subscriber::registry()
                 .with(env_filter)
+                .with(LogBufferLayer::new(buffer_tx))
                 .with(file_layer)
                 .with(stdout_layer)
                 .init();
@@ -153,6 +223,7 @@ fn init_json_logging(
             
             tracing_subscriber::registry()
                 .with(env_filter)
+                .with(LogBufferLayer::new(buffer_tx.clone()))
                 .with(file_layer)
                 .with(stdout_layer)
                 .init();
@@ -188,6 +259,7 @@ fn init_json_logging(
             
             tracing_subscriber::registry()
                 .with(env_filter)
+                .with(LogBufferLayer::new(buffer_tx.clone()))
                 .with(file_layer)
                 .with(stdout_layer)
                 .init();
@@ -217,6 +289,7 @@ fn init_json_logging(
             
             tracing_subscriber::registry()
                 .with(env_filter)
+                .with(LogBufferLayer::new(buffer_tx.clone()))
                 .with(file_layer)
                 .with(stdout_layer)
                 .init();
@@ -231,6 +304,7 @@ fn init_compact_logging(
     env_filter: EnvFilter,
     non_blocking: tracing_appender::non_blocking::NonBlocking,
     timestamp_format: &str,
+    buffer_tx: LogBufferTx,
 ) -> Result<()> {
     match timestamp_format {
         "rfc3339" => {
@@ -259,6 +333,7 @@ fn init_compact_logging(
             
             tracing_subscriber::registry()
                 .with(env_filter)
+                .with(LogBufferLayer::new(buffer_tx.clone()))
                 .with(file_layer)
                 .with(stdout_layer)
                 .init();
@@ -289,6 +364,7 @@ fn init_compact_logging(
             
             tracing_subscriber::registry()
                 .with(env_filter)
+                .with(LogBufferLayer::new(buffer_tx.clone()))
                 .with(file_layer)
                 .with(stdout_layer)
                 .init();
@@ -324,6 +400,7 @@ fn init_compact_logging(
             
             tracing_subscriber::registry()
                 .with(env_filter)
+                .with(LogBufferLayer::new(buffer_tx.clone()))
                 .with(file_layer)
                 .with(stdout_layer)
                 .init();
@@ -354,6 +431,7 @@ fn init_compact_logging(
             
             tracing_subscriber::registry()
                 .with(env_filter)
+                .with(LogBufferLayer::new(buffer_tx.clone()))
                 .with(file_layer)
                 .with(stdout_layer)
                 .init();
@@ -368,6 +446,7 @@ fn init_pretty_logging(
     env_filter: EnvFilter,
     non_blocking: tracing_appender::non_blocking::NonBlocking,
     timestamp_format: &str,
+    buffer_tx: LogBufferTx,
 ) -> Result<()> {
     match timestamp_format {
         "rfc3339" => {
@@ -395,6 +474,7 @@ fn init_pretty_logging(
             
             tracing_subscriber::registry()
                 .with(env_filter)
+                .with(LogBufferLayer::new(buffer_tx.clone()))
                 .with(file_layer)
                 .with(stdout_layer)
                 .init();
@@ -424,6 +504,7 @@ fn init_pretty_logging(
             
             tracing_subscriber::registry()
                 .with(env_filter)
+                .with(LogBufferLayer::new(buffer_tx.clone()))
                 .with(file_layer)
                 .with(stdout_layer)
                 .init();
@@ -458,6 +539,7 @@ fn init_pretty_logging(
             
             tracing_subscriber::registry()
                 .with(env_filter)
+                .with(LogBufferLayer::new(buffer_tx.clone()))
                 .with(file_layer)
                 .with(stdout_layer)
                 .init();
@@ -487,6 +569,7 @@ fn init_pretty_logging(
             
             tracing_subscriber::registry()
                 .with(env_filter)
+                .with(LogBufferLayer::new(buffer_tx.clone()))
                 .with(file_layer)
                 .with(stdout_layer)
                 .init();
@@ -501,6 +584,7 @@ fn init_text_logging(
     env_filter: EnvFilter,
     non_blocking: tracing_appender::non_blocking::NonBlocking,
     timestamp_format: &str,
+    buffer_tx: LogBufferTx,
 ) -> Result<()> {
     match timestamp_format {
         "rfc3339" => {
@@ -527,6 +611,7 @@ fn init_text_logging(
             
             tracing_subscriber::registry()
                 .with(env_filter)
+                .with(LogBufferLayer::new(buffer_tx.clone()))
                 .with(file_layer)
                 .with(stdout_layer)
                 .init();
@@ -555,6 +640,7 @@ fn init_text_logging(
             
             tracing_subscriber::registry()
                 .with(env_filter)
+                .with(LogBufferLayer::new(buffer_tx.clone()))
                 .with(file_layer)
                 .with(stdout_layer)
                 .init();
@@ -588,6 +674,7 @@ fn init_text_logging(
             
             tracing_subscriber::registry()
                 .with(env_filter)
+                .with(LogBufferLayer::new(buffer_tx.clone()))
                 .with(file_layer)
                 .with(stdout_layer)
                 .init();
@@ -616,6 +703,7 @@ fn init_text_logging(
             
             tracing_subscriber::registry()
                 .with(env_filter)
+                .with(LogBufferLayer::new(buffer_tx.clone()))
                 .with(file_layer)
                 .with(stdout_layer)
                 .init();

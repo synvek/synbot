@@ -10,7 +10,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
     let cfg = config::load_config(None)?;
     
     // Initialize logging with config
-    logging::init_logging(&cfg)?;
+    logging::init_logging(&cfg, None)?;
     
     let ws = config::workspace_path(&cfg);
 

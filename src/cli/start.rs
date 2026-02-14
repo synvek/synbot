@@ -10,8 +10,19 @@ use super::helpers::{resolve_provider, detect_rig_provider, build_default_tools}
 pub async fn cmd_start() -> Result<()> {
     let cfg = config::load_config(None)?;
     
-    // Initialize logging with config
-    logging::init_logging(&cfg)?;
+    // Create log buffer and channel for web UI before logging init
+    let log_buffer = crate::web::create_log_buffer(1000);
+    let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(256);
+    let log_buffer_clone = std::sync::Arc::clone(&log_buffer);
+    tokio::spawn(async move {
+        while let Some(entry) = log_rx.recv().await {
+            let mut guard = log_buffer_clone.write().await;
+            guard.push(entry);
+        }
+    });
+    
+    // Initialize logging with config (and feed events to log buffer for web UI)
+    logging::init_logging(&cfg, Some(std::sync::Arc::new(log_tx)))?;
     
     let ws = config::workspace_path(&cfg);
 
@@ -72,9 +83,6 @@ pub async fn cmd_start() -> Result<()> {
     let cron_service = std::sync::Arc::new(tokio::sync::RwLock::new(
         crate::cron::service::CronService::new(cron_store_path),
     ));
-
-    // Create log buffer
-    let log_buffer = crate::web::create_log_buffer(1000);
 
     // Start agent loop
     let mut agent_loop = crate::agent::r#loop::AgentLoop::new(
