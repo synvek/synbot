@@ -23,7 +23,8 @@ use crate::tools::ToolRegistry;
 
 pub struct AgentLoop {
     model: Arc<dyn CompletionModel>,
-    context: ContextBuilder,
+    /// Main agent workspace (for bootstrap files and session store). Memory for "main" is at ~/.synbot/memory/main.
+    workspace: PathBuf,
     tools: Arc<ToolRegistry>,
     max_iterations: u32,
     inbound_rx: mpsc::Receiver<InboundMessage>,
@@ -96,7 +97,7 @@ impl AgentLoop {
             }
         }
         Self {
-            context: ContextBuilder::new(&workspace),
+            workspace,
             model: Arc::from(model),
             tools,
             max_iterations,
@@ -166,7 +167,8 @@ impl AgentLoop {
             let session_key = session_id.format();
 
             let (system_prompt, model_max_iterations) = if agent_id == "main" {
-                (self.context.build_system_prompt(), self.max_iterations)
+                let context = ContextBuilder::new(&self.workspace, "main");
+                (context.build_system_prompt(), self.max_iterations)
             } else {
                 let role = self.role_registry.get(&agent_id).unwrap();
                 (role.system_prompt.clone(), role.params.max_iterations)
@@ -275,7 +277,8 @@ impl AgentLoop {
             let session_key = session_id.format();
 
             let (system_prompt, model_max_iterations) = if agent_id == "main" {
-                (self.context.build_system_prompt(), self.max_iterations)
+                let context = ContextBuilder::new(&self.workspace, "main");
+                (context.build_system_prompt(), self.max_iterations)
             } else {
                 let role = self.role_registry.get(&agent_id).unwrap();
                 (role.system_prompt.clone(), role.params.max_iterations)

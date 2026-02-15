@@ -78,6 +78,15 @@ pub async fn cmd_start() -> Result<()> {
     role_registry.load_from_config(&cfg.agent.roles, &cfg.agent, &ws, &roles_dir)?;
     let role_registry = std::sync::Arc::new(role_registry);
 
+    // Ensure memory dirs and MEMORY.md exist under ~/.synbot/memory/{agentId} (main + each role)
+    crate::agent::memory::ensure_memory_dirs(&cfg);
+
+    // Create main agent's SQLite index file so it exists and can be populated by reindex later
+    #[cfg(feature = "memory-index")]
+    {
+        let _ = crate::agent::memory_index::open_index("main");
+    }
+
     let skills_loader = std::sync::Arc::new(crate::agent::skills::SkillsLoader::new(&ws));
 
     let cron_store_path = config::config_dir().join("cron").join("jobs.json");

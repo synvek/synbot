@@ -1,6 +1,7 @@
 pub mod approval;
 pub mod approval_store;
 pub mod filesystem;
+pub mod memory_tool;
 pub mod message;
 pub mod permission;
 pub mod shell;

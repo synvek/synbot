@@ -1,6 +1,10 @@
 pub mod context;
 pub mod directive;
 pub mod memory;
+#[cfg(feature = "memory-index")]
+pub mod memory_backend;
+#[cfg(feature = "memory-index")]
+pub mod memory_index;
 pub mod r#loop;
 pub mod role_registry;
 pub mod session;

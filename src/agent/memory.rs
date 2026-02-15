@@ -1,7 +1,17 @@
 //! Memory system — daily notes + long-term MEMORY.md.
+//!
+//! **Not the same as sessions.** Sessions (in `{workspace}/sessions/*.json`) store
+//! raw conversation history (each message). Memory here is long-term and daily
+//! notes used to build context for the model, stored under `~/.synbot/memory/{agentId}/`.
+//!
+//! Storage root is `~/.synbot/memory/{agentId}` (see `crate::config::memory_dir`).
+//! Per agent: `MEMORY.md` (long-term), `memory/YYYY-MM-DD.md` (daily notes),
+//! and optionally `{agentId}.sqlite` for index.
 
 use chrono::{Local, NaiveDate};
 use std::path::{Path, PathBuf};
+
+use crate::config;
 
 /// A parsed memory entry from a daily note file.
 #[derive(Debug, Clone, PartialEq)]
@@ -11,8 +21,12 @@ pub struct MemoryEntry {
     pub tags: Vec<String>,
 }
 
+/// Root directory for one agent's memory: `~/.synbot/memory/{agentId}`.
 pub struct MemoryStore {
-    memory_dir: PathBuf,
+    /// Agent memory root (e.g. ~/.synbot/memory/main).
+    agent_root: PathBuf,
+    /// Daily notes subdir: agent_root.join("memory").
+    notes_dir: PathBuf,
 }
 
 /// Parse YAML front matter from a markdown file's content.
@@ -111,19 +125,65 @@ fn date_from_filename(filename: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(stem, "%Y-%m-%d").ok()
 }
 
+/// Ensures memory dirs and MEMORY.md exist for main and all configured roles.
+/// Call at startup so `~/.synbot/memory/{agentId}/` and `MEMORY.md` are created
+/// even before any message is processed.
+pub fn ensure_memory_dirs(cfg: &crate::config::Config) {
+    let _ = MemoryStore::new("main");
+    for role in &cfg.agent.roles {
+        let _ = MemoryStore::new(&role.name);
+    }
+}
+
 impl MemoryStore {
-    pub fn new(workspace: &Path) -> Self {
-        let memory_dir = workspace.join("memory");
-        std::fs::create_dir_all(&memory_dir).ok();
-        Self { memory_dir }
+    /// Create a store for the given agent. Uses `~/.synbot/memory/{agent_id}`.
+    /// Pass `"main"` or empty for the default agent.
+    /// Ensures directories and an empty MEMORY.md exist so the structure is visible.
+    pub fn new(agent_id: &str) -> Self {
+        let agent_root = config::memory_dir(agent_id);
+        std::fs::create_dir_all(&agent_root).ok();
+        let notes_dir = agent_root.join("memory");
+        std::fs::create_dir_all(&notes_dir).ok();
+        // Ensure MEMORY.md exists so the memory dir is not empty and ready for appends
+        let memory_file = agent_root.join("MEMORY.md");
+        if !memory_file.exists() {
+            let _ = std::fs::write(&memory_file, "# Long-term memory\n\n");
+        }
+        Self {
+            agent_root,
+            notes_dir,
+        }
+    }
+
+    /// Create a store with an explicit agent root (e.g. for tests).
+    /// Does not create MEMORY.md so tests can start with an empty store.
+    pub fn new_with_root(agent_root: &Path) -> Self {
+        std::fs::create_dir_all(agent_root).ok();
+        let notes_dir = agent_root.join("memory");
+        std::fs::create_dir_all(&notes_dir).ok();
+        Self {
+            agent_root: agent_root.to_path_buf(),
+            notes_dir,
+        }
+    }
+
+    /// Agent memory root directory (for tests and index path).
+    pub fn agent_root(&self) -> &Path {
+        &self.agent_root
+    }
+
+    /// Daily notes subdirectory (memory/YYYY-MM-DD.md). For tests.
+    pub fn notes_dir(&self) -> &Path {
+        &self.notes_dir
     }
 
     pub fn memory_file(&self) -> PathBuf {
-        self.memory_dir.join("MEMORY.md")
+        self.agent_root.join("MEMORY.md")
     }
 
     fn today_file(&self) -> PathBuf {
-        self.memory_dir.join(format!("{}.md", Local::now().format("%Y-%m-%d")))
+        self.notes_dir
+            .join(format!("{}.md", Local::now().format("%Y-%m-%d")))
     }
 
     pub fn read_long_term(&self) -> String {
@@ -140,7 +200,7 @@ impl MemoryStore {
         for i in 0..days {
             let date = today - chrono::Duration::days(i as i64);
             let path = self
-                .memory_dir
+                .notes_dir
                 .join(format!("{}.md", date.format("%Y-%m-%d")));
             if let Ok(content) = std::fs::read_to_string(&path) {
                 parts.push(content);
@@ -207,7 +267,7 @@ impl MemoryStore {
     ) -> Vec<MemoryEntry> {
         let mut entries = Vec::new();
 
-        let dir = match std::fs::read_dir(&self.memory_dir) {
+        let dir = match std::fs::read_dir(&self.notes_dir) {
             Ok(d) => d,
             Err(_) => return entries,
         };
@@ -215,12 +275,11 @@ impl MemoryStore {
         for entry in dir.flatten() {
             let path = entry.path();
 
-            // Skip non-.md files and MEMORY.md
             let filename = match path.file_name().and_then(|f| f.to_str()) {
                 Some(f) => f.to_string(),
                 None => continue,
             };
-            if !filename.ends_with(".md") || filename == "MEMORY.md" {
+            if !filename.ends_with(".md") {
                 continue;
             }
 
@@ -266,13 +325,13 @@ mod tests {
     /// Helper: create a MemoryStore backed by a temp directory.
     fn make_store() -> (TempDir, MemoryStore) {
         let tmp = TempDir::new().unwrap();
-        let store = MemoryStore::new(tmp.path());
+        let store = MemoryStore::new_with_root(tmp.path());
         (tmp, store)
     }
 
-    /// Helper: write a daily note file into the memory directory.
+    /// Helper: write a daily note file into the notes subdir (memory/YYYY-MM-DD.md).
     fn write_note(store: &MemoryStore, filename: &str, content: &str) {
-        let path = store.memory_dir.join(filename);
+        let path = store.notes_dir().join(filename);
         std::fs::write(&path, content).unwrap();
     }
 
@@ -349,7 +408,7 @@ mod tests {
         );
 
         let entry = store
-            .parse_memory_file(&store.memory_dir.join("2025-03-10.md"))
+            .parse_memory_file(&store.notes_dir().join("2025-03-10.md"))
             .unwrap();
         assert_eq!(entry.date, NaiveDate::from_ymd_opt(2025, 3, 10).unwrap());
         assert_eq!(entry.tags, vec!["work", "rust"]);
@@ -367,7 +426,7 @@ mod tests {
         );
 
         let entry = store
-            .parse_memory_file(&store.memory_dir.join("2025-06-01.md"))
+            .parse_memory_file(&store.notes_dir().join("2025-06-01.md"))
             .unwrap();
         assert_eq!(entry.date, NaiveDate::from_ymd_opt(2025, 6, 1).unwrap());
         assert!(entry.tags.is_empty());

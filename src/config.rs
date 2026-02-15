@@ -465,6 +465,81 @@ impl Default for WebConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Memory config
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryCompressionConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_compression_max_turns")]
+    pub max_conversation_turns: u32,
+    #[serde(default = "default_summary_write_to_memory")]
+    pub summary_write_to_memory: bool,
+}
+
+fn default_compression_max_turns() -> u32 {
+    50
+}
+fn default_summary_write_to_memory() -> bool {
+    true
+}
+
+impl Default for MemoryCompressionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_conversation_turns: default_compression_max_turns(),
+            summary_write_to_memory: default_summary_write_to_memory(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryConfig {
+    #[serde(default)]
+    pub backend: String,
+    #[serde(default = "default_embedding_model")]
+    pub embedding_model: String,
+    #[serde(default = "default_vector_weight")]
+    pub vector_weight: f32,
+    #[serde(default = "default_text_weight")]
+    pub text_weight: f32,
+    #[serde(default = "default_auto_index")]
+    pub auto_index: bool,
+    #[serde(default)]
+    pub compression: MemoryCompressionConfig,
+}
+
+fn default_embedding_model() -> String {
+    "local/default".to_string()
+}
+fn default_vector_weight() -> f32 {
+    0.7
+}
+fn default_text_weight() -> f32 {
+    0.3
+}
+fn default_auto_index() -> bool {
+    true
+}
+
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        Self {
+            backend: String::new(),
+            embedding_model: default_embedding_model(),
+            vector_weight: default_vector_weight(),
+            text_weight: default_text_weight(),
+            auto_index: default_auto_index(),
+            compression: MemoryCompressionConfig::default(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tools config
 // ---------------------------------------------------------------------------
 
@@ -490,6 +565,8 @@ pub struct Config {
     pub providers: ProvidersConfig,
     #[serde(default)]
     pub agent: AgentDefaults,
+    #[serde(default)]
+    pub memory: MemoryConfig,
     #[serde(default)]
     pub tools: ToolsConfig,
     #[serde(default)]
@@ -563,6 +640,22 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
             field: "agent.max_tool_iterations".into(),
             value: config.agent.max_tool_iterations.to_string(),
             constraint: "must be greater than 0".into(),
+        });
+    }
+
+    // --- Memory ---
+    if config.memory.vector_weight < 0.0 || config.memory.vector_weight > 1.0 {
+        errors.push(ValidationError {
+            field: "memory.vectorWeight".into(),
+            value: config.memory.vector_weight.to_string(),
+            constraint: "must be between 0.0 and 1.0".into(),
+        });
+    }
+    if config.memory.text_weight < 0.0 || config.memory.text_weight > 1.0 {
+        errors.push(ValidationError {
+            field: "memory.textWeight".into(),
+            value: config.memory.text_weight.to_string(),
+            constraint: "must be between 0.0 and 1.0".into(),
         });
     }
 
@@ -810,6 +903,22 @@ pub fn config_dir() -> PathBuf {
 
 pub fn config_path() -> PathBuf {
     config_dir().join("config.json")
+}
+
+/// Memory root directory: `~/.synbot/memory/`.
+pub fn memory_root() -> PathBuf {
+    config_dir().join("memory")
+}
+
+/// Memory directory for an agent: `~/.synbot/memory/{agentId}`.
+/// Empty or "main" both resolve to the default "main" agent directory.
+pub fn memory_dir(agent_id: &str) -> PathBuf {
+    let id = if agent_id.trim().is_empty() {
+        "main"
+    } else {
+        agent_id
+    };
+    memory_root().join(id)
 }
 
 /// 固定路径：role 模板目录，onboard 时从 templates/roles 写入此处。

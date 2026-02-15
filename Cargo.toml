@@ -5,6 +5,10 @@ edition = "2021"
 description = "Personal AI assistant"
 license = "MIT"
 
+[features]
+default = ["memory-index"]
+memory-index = ["dep:rusqlite", "dep:sqlite-vec"]
+
 [[bin]]
 name = "synbot"
 path = "src/main.rs"
@@ -73,6 +77,10 @@ actix-rt = "2"
 rust-embed = "8"
 mime_guess = "2"
 base64 = "0.22"
+
+# Memory index (vector + FTS5); disable with --no-default-features if build fails
+rusqlite = { version = "0.32", features = ["bundled"], optional = true }
+sqlite-vec = { version = "0.1", optional = true }
 
 # Sandbox dependencies
 num_cpus = "1"

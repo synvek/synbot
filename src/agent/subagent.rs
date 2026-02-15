@@ -135,6 +135,7 @@ impl SubagentManager {
     ///
     /// Returns the subagent id on success, or an error if the concurrency
     /// limit has been reached.
+    /// `agent_id`: which agent's memory to use (e.g. "main" or role name).
     pub async fn spawn(
         &mut self,
         label: String,
@@ -142,8 +143,15 @@ impl SubagentManager {
         model: Box<dyn CompletionModel>,
         workspace: PathBuf,
         tools: Arc<ToolRegistry>,
+        agent_id: &str,
     ) -> Result<String> {
-        let task_fn = Box::pin(run_subagent_task(model, workspace, tools, task));
+        let task_fn = Box::pin(run_subagent_task(
+            model,
+            workspace,
+            tools,
+            task,
+            agent_id.to_string(),
+        ));
         self.spawn_fn(label, task_fn).await
     }
 
@@ -182,7 +190,7 @@ impl SubagentManager {
 
 /// Run a simplified one-shot agent interaction for the subagent.
 ///
-/// This creates a `ContextBuilder` for the workspace, sends the task as a
+/// This creates a `ContextBuilder` for the workspace and agent_id, sends the task as a
 /// user message, and collects the assistant's text response (executing any
 /// tool calls along the way, up to a fixed iteration limit).
 async fn run_subagent_task(
@@ -190,8 +198,9 @@ async fn run_subagent_task(
     workspace: PathBuf,
     tools: Arc<ToolRegistry>,
     task: String,
+    agent_id: String,
 ) -> Result<String> {
-    let context = ContextBuilder::new(&workspace);
+    let context = ContextBuilder::new(&workspace, &agent_id);
     let system_prompt = context.build_system_prompt();
     let tool_defs = tools.rig_definitions();
 

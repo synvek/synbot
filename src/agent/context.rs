@@ -10,16 +10,27 @@ const BOOTSTRAP_FILES: &[&str] = &["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"
 
 pub struct ContextBuilder {
     workspace: PathBuf,
+    /// Used for memory path (~/.synbot/memory/{agent_id}) and later for hybrid search.
+    #[allow(dead_code)]
+    agent_id: String,
     memory: MemoryStore,
     skills: SkillsLoader,
 }
 
 impl ContextBuilder {
-    pub fn new(workspace: &Path) -> Self {
+    /// `workspace`: where to load bootstrap files and skills from.
+    /// `agent_id`: which agent's memory to use (e.g. "main" or role name); stored at ~/.synbot/memory/{agent_id}.
+    pub fn new(workspace: &Path, agent_id: &str) -> Self {
+        let agent_id = if agent_id.is_empty() {
+            "main".to_string()
+        } else {
+            agent_id.to_string()
+        };
         Self {
             workspace: workspace.to_path_buf(),
-            memory: MemoryStore::new(workspace),
+            memory: MemoryStore::new(&agent_id),
             skills: SkillsLoader::new(workspace),
+            agent_id,
         }
     }
 

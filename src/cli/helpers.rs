@@ -98,5 +98,6 @@ pub fn build_default_tools(
     reg.register(std::sync::Arc::new(spawn::SpawnTool {
         manager: subagent_mgr,
     })).expect("register SpawnTool");
+    reg.register(std::sync::Arc::new(memory_tool::RememberTool::new("main"))).expect("register RememberTool");
     reg
 }
