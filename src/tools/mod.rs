@@ -1,5 +1,6 @@
 pub mod approval;
 pub mod approval_store;
+pub mod context;
 pub mod filesystem;
 pub mod memory_tool;
 pub mod message;
@@ -13,7 +14,49 @@ use anyhow::Result;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, debug};
+
+pub use context::{scope, ToolContext};
+
+/// Build a short string for logging tool args (path, command, etc.) without leaking full content.
+fn sanitize_args_for_log(tool_name: &str, args: &Value) -> String {
+    let obj = match args.as_object() {
+        Some(o) => o,
+        None => return "args=?".to_string(),
+    };
+    let part = match tool_name {
+        "read_file" | "write_file" | "edit_file" | "list_dir" => obj
+            .get("path")
+            .and_then(|v| v.as_str())
+            .map(|s| format!("path={}", truncate_for_log(s, 120))),
+        "exec" => obj
+            .get("command")
+            .and_then(|v| v.as_str())
+            .map(|s| format!("command={}", truncate_for_log(s, 80))),
+        "remember" => obj
+            .get("content")
+            .and_then(|v| v.as_str())
+            .map(|s| format!("content_len={}", s.len())),
+        "list_memory" => obj
+            .get("agent_id")
+            .and_then(|v| v.as_str())
+            .map(|s| format!("agent_id={}", s)),
+        _ => None,
+    };
+    part.unwrap_or_else(|| "args=...".to_string())
+}
+
+fn truncate_for_log(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        let mut end = max_len.min(s.len());
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}... ({} chars)", &s[..end], s.len())
+    }
+}
 
 /// A type-erased tool that can be stored in the registry.
 #[async_trait::async_trait]
@@ -78,12 +121,15 @@ impl ToolRegistry {
     }
 
     pub async fn execute(&self, name: &str, args: Value) -> Result<String> {
+        let args_for_log = sanitize_args_for_log(name, &args);
         let span = tracing::info_span!(
             "tool_execution",
             tool_name = %name,
+            args = %args_for_log,
         );
         let _guard = span.enter();
 
+        debug!(tool_name = %name, args = ?args, "Tool call started");
         let start = std::time::Instant::now();
         let result = match self.tools.get(name) {
             Some(tool) => tool.call(args).await,
@@ -92,11 +138,13 @@ impl ToolRegistry {
         let duration_ms = start.elapsed().as_millis() as u64;
 
         match &result {
-            Ok(_) => {
+            Ok(s) => {
+                let result_preview = truncate_for_log(s, 200);
                 info!(
                     tool_name = %name,
                     duration_ms = duration_ms,
                     status = "success",
+                    result_preview = %result_preview,
                     "Tool execution completed"
                 );
             }

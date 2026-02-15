@@ -20,7 +20,8 @@ use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
 use crate::agent::context::ContextBuilder;
-use crate::tools::ToolRegistry;
+use crate::config;
+use crate::tools::{scope, ToolContext, ToolRegistry};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -200,89 +201,99 @@ async fn run_subagent_task(
     task: String,
     agent_id: String,
 ) -> Result<String> {
-    let context = ContextBuilder::new(&workspace, &agent_id);
-    let system_prompt = context.build_system_prompt();
-    let tool_defs = tools.rig_definitions();
+    let memory_dir = config::memory_dir(&agent_id);
+    let tool_ctx = ToolContext {
+        agent_id: agent_id.clone(),
+        workspace: workspace.clone(),
+        memory_dir,
+    };
 
-    let mut history: Vec<Message> = vec![Message::user(&task)];
-    let max_iterations: u32 = 15;
-    let mut iterations = 0u32;
+    scope(tool_ctx, async move {
+        let context = ContextBuilder::new(&workspace, &agent_id);
+        let system_prompt = context.build_system_prompt();
+        let tool_defs = tools.rig_definitions();
 
-    loop {
-        iterations += 1;
-        if iterations > max_iterations {
-            warn!(
-                iterations = max_iterations,
-                "Subagent hit max iterations, returning partial result"
-            );
-            break;
-        }
+        let mut history: Vec<Message> = vec![Message::user(&task)];
+        let max_iterations: u32 = 15;
+        let mut iterations = 0u32;
 
-        let request = CompletionRequest {
-            preamble: Some(system_prompt.clone()),
-            chat_history: history.clone(),
-            prompt: Message::user(""),
-            tools: tool_defs.clone(),
-            documents: vec![],
-            temperature: None,
-            max_tokens: None,
-            additional_params: None,
-        };
-
-        let response = model.completion(request).await?;
-
-        let mut has_tool_calls = false;
-        let mut text_parts = Vec::new();
-        let mut assistant_contents = Vec::new();
-        let mut tool_results = Vec::new();
-
-        for content in response.iter() {
-            match content {
-                AssistantContent::Text(t) => {
-                    text_parts.push(t.text.clone());
-                    assistant_contents.push(content.clone());
-                }
-                AssistantContent::ToolCall(tc) => {
-                    has_tool_calls = true;
-                    assistant_contents.push(content.clone());
-                    let args = tc.function.arguments.clone();
-                    let result = tools.execute(&tc.function.name, args).await;
-                    let result_str = match result {
-                        Ok(s) => s,
-                        Err(e) => format!("Error: {e}"),
-                    };
-                    tool_results.push((tc.id.clone(), result_str));
-                }
+        loop {
+            iterations += 1;
+            if iterations > max_iterations {
+                warn!(
+                    iterations = max_iterations,
+                    "Subagent hit max iterations, returning partial result"
+                );
+                break;
             }
-        }
 
-        if has_tool_calls && !assistant_contents.is_empty() {
-            let content = match assistant_contents.len() {
-                1 => OneOrMany::one(assistant_contents.into_iter().next().unwrap()),
-                _ => OneOrMany::many(assistant_contents).expect("non-empty"),
+            let request = CompletionRequest {
+                preamble: Some(system_prompt.clone()),
+                chat_history: history.clone(),
+                prompt: Message::user(""),
+                tools: tool_defs.clone(),
+                documents: vec![],
+                temperature: None,
+                max_tokens: None,
+                additional_params: None,
             };
-            history.push(Message::Assistant { content });
-            for (id, result_str) in tool_results {
-                history.push(Message::User {
-                    content: OneOrMany::one(UserContent::tool_result(
-                        id,
-                        OneOrMany::one(ToolResultContent::text(result_str)),
-                    )),
-                });
+
+            let response = model.completion(request).await?;
+
+            let mut has_tool_calls = false;
+            let mut text_parts = Vec::new();
+            let mut assistant_contents = Vec::new();
+            let mut tool_results = Vec::new();
+
+            for content in response.iter() {
+                match content {
+                    AssistantContent::Text(t) => {
+                        text_parts.push(t.text.clone());
+                        assistant_contents.push(content.clone());
+                    }
+                    AssistantContent::ToolCall(tc) => {
+                        has_tool_calls = true;
+                        assistant_contents.push(content.clone());
+                        let args = tc.function.arguments.clone();
+                        let result = tools.execute(&tc.function.name, args).await;
+                        let result_str = match result {
+                            Ok(s) => s,
+                            Err(e) => format!("Error: {e}"),
+                        };
+                        tool_results.push((tc.id.clone(), result_str));
+                    }
+                }
+            }
+
+            if has_tool_calls && !assistant_contents.is_empty() {
+                let content = match assistant_contents.len() {
+                    1 => OneOrMany::one(assistant_contents.into_iter().next().unwrap()),
+                    _ => OneOrMany::many(assistant_contents).expect("non-empty"),
+                };
+                history.push(Message::Assistant { content });
+                for (id, result_str) in tool_results {
+                    history.push(Message::User {
+                        content: OneOrMany::one(UserContent::tool_result(
+                            id,
+                            OneOrMany::one(ToolResultContent::text(result_str)),
+                        )),
+                    });
+                }
+            }
+
+            if !has_tool_calls {
+                let reply = text_parts.join("");
+                if !reply.is_empty() {
+                    return Ok(reply);
+                }
+                break;
             }
         }
 
-        if !has_tool_calls {
-            let reply = text_parts.join("");
-            if !reply.is_empty() {
-                return Ok(reply);
-            }
-            break;
-        }
-    }
-
-    // If we got here without a text reply, return a summary
-    Ok("Subagent completed without producing a text response.".to_string())
+        // If we got here without a text reply, return a summary
+        Ok("Subagent completed without producing a text response.".to_string())
+    })
+    .await
 }
 
 // ---------------------------------------------------------------------------

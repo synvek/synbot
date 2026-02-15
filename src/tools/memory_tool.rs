@@ -5,11 +5,13 @@ use chrono::Local;
 use serde_json::{json, Value};
 
 use crate::config;
+use crate::tools::context;
 use crate::tools::DynTool;
 
 /// Tool that appends text to the agent's long-term memory (MEMORY.md) or today's daily note (memory/YYYY-MM-DD.md).
+/// When running in a tool context (e.g. a role), writes only to that agent's memory; ignores any agent_id in args.
 pub struct RememberTool {
-    /// Agent id whose memory to write to (e.g. "main").
+    /// Default agent id when no context is set (e.g. "main").
     agent_id: String,
 }
 
@@ -20,8 +22,8 @@ impl RememberTool {
         }
     }
 
-    fn append_long_term(&self, content: &str) -> Result<()> {
-        let dir = config::memory_dir(&self.agent_id);
+    fn append_long_term_for(agent_id: &str, content: &str) -> Result<()> {
+        let dir = config::memory_dir(agent_id);
         std::fs::create_dir_all(&dir)?;
         let path = dir.join("MEMORY.md");
         let existing = std::fs::read_to_string(&path).unwrap_or_default();
@@ -34,8 +36,8 @@ impl RememberTool {
         Ok(())
     }
 
-    fn append_daily_note(&self, content: &str) -> Result<()> {
-        let dir = config::memory_dir(&self.agent_id);
+    fn append_daily_note_for(agent_id: &str, content: &str) -> Result<()> {
+        let dir = config::memory_dir(agent_id);
         let notes_dir = dir.join("memory");
         std::fs::create_dir_all(&notes_dir)?;
         let today = Local::now().format("%Y-%m-%d");
@@ -79,17 +81,18 @@ impl DynTool for RememberTool {
     }
 
     async fn call(&self, args: Value) -> Result<String> {
+        let agent_id = context::current_agent_id().unwrap_or_else(|| self.agent_id.clone());
         let content = args["content"].as_str().unwrap_or("").trim();
         if content.is_empty() {
             return Ok("No content to remember. Please provide 'content' with the fact to save.".to_string());
         }
         let daily = args["daily"].as_bool().unwrap_or(false);
         if daily {
-            self.append_daily_note(content)?;
+            Self::append_daily_note_for(&agent_id, content)?;
             let today = Local::now().format("%Y-%m-%d");
             Ok(format!("已写入今日笔记（{}）：{}", today, content))
         } else {
-            self.append_long_term(content)?;
+            Self::append_long_term_for(&agent_id, content)?;
             Ok(format!("已写入长期记忆：{}", content))
         }
     }
@@ -99,9 +102,10 @@ impl DynTool for RememberTool {
 // list_memory — list memory files so the model does not need to use shell (dir) for retrieval
 // ---------------------------------------------------------------------------
 
-/// Tool to list memory files (MEMORY.md and memory/YYYY-MM-DD.md) for an agent.
-/// Use this instead of running shell commands like `dir` on ~/.synbot/memory.
+/// Tool to list memory files (MEMORY.md and memory/YYYY-MM-DD.md) for the current agent only.
+/// When running as a role, lists only that role's memory; args do not allow listing another agent's memory.
 pub struct ListMemoryTool {
+    /// Default agent id when no context is set (e.g. "main").
     agent_id: String,
 }
 
@@ -120,29 +124,20 @@ impl DynTool for ListMemoryTool {
     }
 
     fn description(&self) -> &str {
-        "List memory files for the agent: MEMORY.md (long-term) and memory/YYYY-MM-DD.md (daily notes). Use this to see what memory files exist; do not use exec/shell to run 'dir' on the memory directory."
+        "List memory files for this agent only: MEMORY.md (long-term) and memory/YYYY-MM-DD.md (daily notes). Use this to see what memory files exist; do not use exec/shell to run 'dir' on the memory directory."
     }
 
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
-            "properties": {
-                "agent_id": {
-                    "type": "string",
-                    "description": "Agent id (default: main). Leave empty for main agent."
-                }
-            },
+            "properties": {},
             "required": []
         })
     }
 
-    async fn call(&self, args: Value) -> Result<String> {
-        let agent_id = args["agent_id"]
-            .as_str()
-            .unwrap_or("main")
-            .trim();
-        let id = if agent_id.is_empty() { "main" } else { agent_id };
-        let dir = config::memory_dir(id);
+    async fn call(&self, _args: Value) -> Result<String> {
+        let id = context::current_agent_id().unwrap_or_else(|| self.agent_id.clone());
+        let dir = config::memory_dir(&id);
         let mut lines = Vec::new();
 
         let memory_md = dir.join("MEMORY.md");
