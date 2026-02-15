@@ -341,16 +341,29 @@ impl DynTool for ExecTool {
                 "Command executed successfully"
             );
         } else {
-            warn!(
-                command = %cmd_str,
-                exit_code = exec_result.exit_code,
-                duration_ms = exec_result.duration_ms,
-                working_dir = %working_dir,
-                stderr = %mask_sensitive_info(&truncated_stderr),
-                session_id = ?self.session_id,
-                channel = ?self.channel,
-                "Command execution failed"
-            );
+            // On Windows, "dir /s /b" returns exit code 1 when no files match (not an error)
+            let is_windows_dir_no_match = cfg!(windows)
+                && exec_result.exit_code == 1
+                && cmd_str.trim().to_uppercase().starts_with("DIR");
+            if is_windows_dir_no_match {
+                tracing::debug!(
+                    command = %cmd_str,
+                    exit_code = exec_result.exit_code,
+                    working_dir = %working_dir,
+                    "dir returned 1 (no matches), not treating as failure"
+                );
+            } else {
+                warn!(
+                    command = %cmd_str,
+                    exit_code = exec_result.exit_code,
+                    duration_ms = exec_result.duration_ms,
+                    working_dir = %working_dir,
+                    stderr = %mask_sensitive_info(&truncated_stderr),
+                    session_id = ?self.session_id,
+                    channel = ?self.channel,
+                    "Command execution failed"
+                );
+            }
         }
 
         Ok(exec_result.to_display_string())

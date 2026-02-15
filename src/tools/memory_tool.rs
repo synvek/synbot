@@ -94,3 +94,80 @@ impl DynTool for RememberTool {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// list_memory — list memory files so the model does not need to use shell (dir) for retrieval
+// ---------------------------------------------------------------------------
+
+/// Tool to list memory files (MEMORY.md and memory/YYYY-MM-DD.md) for an agent.
+/// Use this instead of running shell commands like `dir` on ~/.synbot/memory.
+pub struct ListMemoryTool {
+    agent_id: String,
+}
+
+impl ListMemoryTool {
+    pub fn new(agent_id: impl Into<String>) -> Self {
+        Self {
+            agent_id: agent_id.into(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl DynTool for ListMemoryTool {
+    fn name(&self) -> &str {
+        "list_memory"
+    }
+
+    fn description(&self) -> &str {
+        "List memory files for the agent: MEMORY.md (long-term) and memory/YYYY-MM-DD.md (daily notes). Use this to see what memory files exist; do not use exec/shell to run 'dir' on the memory directory."
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "string",
+                    "description": "Agent id (default: main). Leave empty for main agent."
+                }
+            },
+            "required": []
+        })
+    }
+
+    async fn call(&self, args: Value) -> Result<String> {
+        let agent_id = args["agent_id"]
+            .as_str()
+            .unwrap_or("main")
+            .trim();
+        let id = if agent_id.is_empty() { "main" } else { agent_id };
+        let dir = config::memory_dir(id);
+        let mut lines = Vec::new();
+
+        let memory_md = dir.join("MEMORY.md");
+        if memory_md.exists() {
+            lines.push(format!("MEMORY.md (long-term)"));
+        }
+        let notes_dir = dir.join("memory");
+        if notes_dir.is_dir() {
+            let mut entries: Vec<_> = std::fs::read_dir(&notes_dir)
+                .map_err(|e| anyhow::anyhow!("read memory dir: {}", e))?
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    e.path().extension().map_or(false, |x| x == "md")
+                })
+                .collect();
+            entries.sort_by_key(|e| e.file_name());
+            for e in entries {
+                let name = e.file_name().to_string_lossy().into_owned();
+                lines.push(format!("memory/{}", name));
+            }
+        }
+        if lines.is_empty() {
+            Ok(format!("Memory dir: {}. No MEMORY.md or memory/*.md yet.", dir.display()))
+        } else {
+            Ok(format!("Memory dir: {}\n\n{}", dir.display(), lines.join("\n")))
+        }
+    }
+}
