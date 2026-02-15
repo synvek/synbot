@@ -8,9 +8,17 @@ interface UseWebSocketOptions {
   maxReconnectAttempts?: number;
 }
 
+export interface ToolProgressState {
+  tool_name: string;
+  status: string;
+  result_preview: string;
+}
+
 interface UseWebSocketReturn {
   connected: boolean;
   messages: ChatMessage[];
+  /** Accumulated tool progress for current turn (cleared when chat_response arrives) */
+  toolProgressList: ToolProgressState[];
   send: (content: string) => void;
   sendApprovalResponse: (requestId: string, approved: boolean) => void;
   disconnect: () => void;
@@ -27,13 +35,16 @@ export function useWebSocket({
   const [connected, setConnected] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  
+  const [toolProgressList, setToolProgressList] = useState<ToolProgressState[]>([]);
+
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimeoutRef = useRef<number | null>(null);
   const shouldReconnectRef = useRef(autoConnect);
   const isConnectingRef = useRef(false);
   const connectFnRef = useRef<(() => void) | null>(null);
+  const toolProgressListRef = useRef<ToolProgressState[]>([]);
+  toolProgressListRef.current = toolProgressList;
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -75,40 +86,60 @@ export function useWebSocket({
             
             case 'history':
               console.log('Received history with', message.messages.length, 'messages');
-              // Load history messages
-              const historyMessages: ChatMessage[] = message.messages.map((msg, index) => ({
-                id: `history-${index}-${msg.timestamp}`,
-                role: msg.role as 'user' | 'assistant',
-                content: msg.content,
-                timestamp: msg.timestamp,
-              }));
+              const historyMessages: ChatMessage[] = message.messages.map((msg, index) => {
+                const role = (['user', 'assistant', 'tool_call', 'tool_result', 'approval'] as const).includes(msg.role as any)
+                  ? (msg.role as ChatMessage['role'])
+                  : 'assistant';
+                return {
+                  id: `history-${index}-${msg.timestamp}`,
+                  role,
+                  content: msg.content,
+                  timestamp: msg.timestamp,
+                };
+              });
               setMessages(historyMessages);
               break;
             
-            case 'chat_response':
+            case 'tool_progress': {
+              const item = {
+                tool_name: message.tool_name,
+                status: message.status,
+                result_preview: message.result_preview,
+              };
+              setToolProgressList((prev) => {
+                const next = [...prev, item];
+                toolProgressListRef.current = next;
+                return next;
+              });
+              break;
+            }
+
+            case 'chat_response': {
+              const steps = toolProgressListRef.current;
+              setToolProgressList([]);
               console.log('Received chat_response:', {
                 content: message.content.substring(0, 50),
                 timestamp: message.timestamp,
               });
-              
               setMessages((prev) => {
-                console.log('Current messages count:', prev.length);
-                
-                // Strong deduplication: check by content and role
-                // This prevents duplicate assistant messages with same content
-                const exists = prev.some(msg => 
-                  msg.role === 'assistant' && 
-                  msg.content === message.content
+                const exists = prev.some(msg =>
+                  msg.role === 'assistant' && msg.content === message.content
                 );
-                
-                if (exists) {
-                  console.log('Duplicate assistant message detected (same content), skipping');
-                  return prev;
-                }
-                
-                console.log('Adding new assistant message');
+                if (exists) return prev;
+                const stepMessages: ChatMessage[] = steps.map((item, idx) => {
+                  const content = item.result_preview
+                    ? `${item.tool_name} — ${item.status}\n${item.result_preview}`
+                    : `${item.tool_name} — ${item.status}`;
+                  return {
+                    id: `tool-${Date.now()}-${idx}-${item.tool_name}`,
+                    role: 'tool_call' as const,
+                    content,
+                    timestamp: new Date().toISOString(),
+                  };
+                });
                 return [
                   ...prev,
+                  ...stepMessages,
                   {
                     id: `${message.timestamp}-assistant-${Date.now()}`,
                     role: 'assistant',
@@ -118,6 +149,7 @@ export function useWebSocket({
                 ];
               });
               break;
+            }
             
             case 'approval_request':
               setMessages((prev) => [
@@ -301,6 +333,7 @@ export function useWebSocket({
   return {
     connected,
     messages,
+    toolProgressList,
     send,
     sendApprovalResponse,
     disconnect,

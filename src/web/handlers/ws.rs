@@ -54,6 +54,12 @@ pub enum WsServerMessage {
     History {
         messages: Vec<HistoryMessage>,
     },
+    /// Tool execution progress (sent in real time during agent run)
+    ToolProgress {
+        tool_name: String,
+        status: String,
+        result_preview: String,
+    },
 }
 
 /// Message in history. When loading channel view, `agent_id` is set so the UI can show which agent (main or role) the message belongs to.
@@ -154,8 +160,8 @@ impl Actor for WsSession {
         ctx.spawn(
             async move {
                 while let Ok(msg) = outbound_rx.recv().await {
-                    // Filter messages for this user's chat_id
-                    if msg.chat_id == user_id {
+                    // Only forward messages for web channel and this user
+                    if msg.channel == "web" && msg.chat_id == user_id {
                         addr.do_send(OutboundMessageWrapper(msg));
                     }
                 }
@@ -357,19 +363,35 @@ impl Handler<OutboundMessageWrapper> for WsSession {
     type Result = ();
 
     fn handle(&mut self, msg: OutboundMessageWrapper, ctx: &mut Self::Context) {
-        let server_msg = match msg.0.message_type {
+        let send = match msg.0.message_type {
             crate::bus::OutboundMessageType::Chat { content, .. } => {
-                WsServerMessage::ChatResponse {
+                Some(WsServerMessage::ChatResponse {
                     content,
                     timestamp: Utc::now(),
-                }
+                })
             }
             crate::bus::OutboundMessageType::ApprovalRequest { request } => {
-                WsServerMessage::ApprovalRequest { request }
+                Some(WsServerMessage::ApprovalRequest { request })
+            }
+            crate::bus::OutboundMessageType::ToolProgress {
+                tool_name,
+                status,
+                result_preview,
+            } => {
+                if self.state.config.show_tool_calls && self.state.config.web.show_tool_calls {
+                    Some(WsServerMessage::ToolProgress {
+                        tool_name,
+                        status,
+                        result_preview,
+                    })
+                } else {
+                    None
+                }
             }
         };
-
-        self.send_message(ctx, server_msg);
+        if let Some(server_msg) = send {
+            self.send_message(ctx, server_msg);
+        }
     }
 }
 

@@ -109,6 +109,13 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
                     crate::bus::OutboundMessageType::ApprovalRequest { request } => {
                         println!("Approval request: {}", request.command);
                     }
+                    crate::bus::OutboundMessageType::ToolProgress {
+                        tool_name,
+                        status,
+                        result_preview,
+                    } => {
+                        println!("[Tool: {}] {} — {}", tool_name, status, result_preview);
+                    }
                 }
             }
         });

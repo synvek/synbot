@@ -22,6 +22,8 @@ const API_BASE: &str = "https://api.telegram.org/bot";
 
 pub struct TelegramChannel {
     config: TelegramConfig,
+    /// When true, forward tool execution progress to this channel (global && channel show_tool_calls).
+    show_tool_calls: bool,
     inbound_tx: mpsc::Sender<InboundMessage>,
     outbound_rx: Option<broadcast::Receiver<OutboundMessage>>,
     client: reqwest::Client,
@@ -74,6 +76,7 @@ impl TelegramChannel {
         config: TelegramConfig,
         inbound_tx: mpsc::Sender<InboundMessage>,
         outbound_rx: broadcast::Receiver<OutboundMessage>,
+        show_tool_calls: bool,
     ) -> Self {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(60))
@@ -81,6 +84,7 @@ impl TelegramChannel {
             .expect("failed to build HTTP client");
         Self {
             config,
+            show_tool_calls,
             inbound_tx,
             outbound_rx: Some(outbound_rx),
             client,
@@ -261,6 +265,7 @@ impl Channel for TelegramChannel {
         let client = self.client.clone();
         let token = self.config.token.clone();
         let pending_approvals = self.pending_approvals.clone();
+        let show_tool_calls = self.show_tool_calls;
         tokio::spawn(async move {
             while let Ok(msg) = outbound_rx.recv().await {
                 if msg.channel != "telegram" {
@@ -270,6 +275,27 @@ impl Channel for TelegramChannel {
                     let url = format!("{}{}/sendMessage", API_BASE, token);
                     let content = match &msg.message_type {
                         crate::bus::OutboundMessageType::Chat { content, .. } => content.clone(),
+                        crate::bus::OutboundMessageType::ToolProgress {
+                            tool_name,
+                            status,
+                            result_preview,
+                        } => {
+                            if !show_tool_calls {
+                                continue;
+                            }
+                            let preview = if result_preview.is_empty() {
+                                String::new()
+                            } else if result_preview.len() > 100 {
+                                format!("{}...", result_preview.chars().take(100).collect::<String>())
+                            } else {
+                                result_preview.clone()
+                            };
+                            if preview.is_empty() {
+                                format!("🔧 {} — {}", tool_name, status)
+                            } else {
+                                format!("🔧 {} — {}\n{}", tool_name, status, preview)
+                            }
+                        }
                         crate::bus::OutboundMessageType::ApprovalRequest { request } => {
                             // 注册待处理的审批请求
                             // 从 session_id 中提取 user_id (格式: agent:role:channel:type:user_id)
@@ -460,6 +486,27 @@ impl Channel for TelegramChannel {
             crate::bus::OutboundMessageType::ApprovalRequest { request } => {
                 format!("🔐 命令执行审批请求\n\n命令：{}\n工作目录：{}\n上下文：{}\n\n请回复以下关键词进行审批：\n• 同意 / 批准 / yes / y - 批准执行\n• 拒绝 / 不同意 / no / n - 拒绝执行\n\n⏱️ 请求将在 {} 秒后超时", 
                     request.command, request.working_dir, request.context, request.timeout_secs)
+            }
+            crate::bus::OutboundMessageType::ToolProgress {
+                tool_name,
+                status,
+                result_preview,
+            } => {
+                if !self.show_tool_calls {
+                    return Ok(());
+                }
+                let preview = if result_preview.is_empty() {
+                    String::new()
+                } else if result_preview.len() > 100 {
+                    format!("{}...", result_preview.chars().take(100).collect::<String>())
+                } else {
+                    result_preview.clone()
+                };
+                if preview.is_empty() {
+                    format!("🔧 {} — {}", tool_name, status)
+                } else {
+                    format!("🔧 {} — {}\n{}", tool_name, status, preview)
+                }
             }
         };
         self.send_text(chat_id, &content).await

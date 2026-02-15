@@ -193,17 +193,24 @@ impl AgentLoop {
                 memory_dir: agent_memory_dir,
             };
 
+            // User-visible content: preserve "@@role" so it shows in session and after refresh
+            let user_content = if agent_id == "main" {
+                directive.content.clone()
+            } else {
+                format!("@@{} {}", agent_id, directive.content)
+            };
+
             let tool_defs = self.tools.rig_definitions();
             let mut sessions = self.sessions.lock().await;
             let history = sessions.entry(session_key.clone()).or_default();
-            history.push(Message::user(&directive.content));
+            history.push(Message::user(&user_content));
             
             // Update session_manager with the user message
             {
                 let mut sm = self.session_manager.write().await;
                 let user_msg = crate::agent::session::SessionMessage {
                     role: "user".to_string(),
-                    content: directive.content.clone(),
+                    content: user_content.clone(),
                     timestamp: chrono::Utc::now(),
                 };
                 sm.append(&session_id, user_msg);
@@ -309,17 +316,24 @@ impl AgentLoop {
 
             let tool_defs = self.tools.rig_definitions();
 
+            // User-visible content: preserve "@@role" so it shows after refresh
+            let user_content = if agent_id == "main" {
+                directive.content.clone()
+            } else {
+                format!("@@{} {}", agent_id, directive.content)
+            };
+
             // Push user message into session history before spawning
             {
                 let mut sessions = self.sessions.lock().await;
                 let history = sessions.entry(session_key.clone()).or_default();
-                history.push(Message::user(&directive.content));
+                history.push(Message::user(&user_content));
                 
                 // Update session_manager with the user message
                 let mut sm = self.session_manager.write().await;
                 let user_msg = crate::agent::session::SessionMessage {
                     role: "user".to_string(),
-                    content: directive.content.clone(),
+                    content: user_content.clone(),
                     timestamp: chrono::Utc::now(),
                 };
                 sm.append(&session_id, user_msg);
@@ -545,10 +559,31 @@ async fn run_completion_loop(
                     assistant_contents.push(content.clone());
                     let args = tc.function.arguments.clone();
                     let result = tools.execute(&tc.function.name, args).await;
-                    let result_str = match result {
-                        Ok(s) => s,
+                    let result_str = match &result {
+                        Ok(s) => s.clone(),
                         Err(e) => format!("Error: {e}"),
                     };
+                    let status = if result.is_ok() {
+                        "success"
+                    } else {
+                        "failure"
+                    };
+                    let preview = if result_str.len() > 200 {
+                        let mut end = 200;
+                        while end > 0 && !result_str.is_char_boundary(end) {
+                            end -= 1;
+                        }
+                        format!("{}...", &result_str[..end])
+                    } else {
+                        result_str.clone()
+                    };
+                    let _ = outbound_tx.send(OutboundMessage::tool_progress(
+                        channel.to_string(),
+                        chat_id.to_string(),
+                        tc.function.name.clone(),
+                        status.to_string(),
+                        preview,
+                    ));
                     tool_results.push((tc.id.clone(), result_str));
                 }
             }

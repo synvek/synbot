@@ -126,9 +126,10 @@ pub async fn cmd_start() -> Result<()> {
         let tg_inbound = inbound_tx.clone();
         let tg_outbound = bus.subscribe_outbound();
         let tg_cfg = cfg.channels.feishu.clone();
+        let show_tool_calls = cfg.show_tool_calls && cfg.channels.feishu.show_tool_calls;
         tokio::spawn(async move {
             let mut ch = crate::channels::feishu::FeishuChannel::new(
-                tg_cfg, tg_inbound, tg_outbound,
+                tg_cfg, tg_inbound, tg_outbound, show_tool_calls,
             );
             if let Err(e) = ch.start().await {
                 tracing::error!("Feishu channel error: {e:#}");
@@ -141,9 +142,10 @@ pub async fn cmd_start() -> Result<()> {
         let dc_inbound = inbound_tx.clone();
         let dc_outbound = bus.subscribe_outbound();
         let dc_cfg = cfg.channels.discord.clone();
+        let show_tool_calls = cfg.show_tool_calls && cfg.channels.discord.show_tool_calls;
         tokio::spawn(async move {
             let mut ch = crate::channels::discord::DiscordChannel::new(
-                dc_cfg, dc_inbound, dc_outbound,
+                dc_cfg, dc_inbound, dc_outbound, show_tool_calls,
             );
             if let Err(e) = ch.start().await {
                 tracing::error!("Discord channel error: {e:#}");

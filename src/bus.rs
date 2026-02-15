@@ -56,6 +56,12 @@ pub enum OutboundMessageType {
     ApprovalRequest {
         request: ApprovalRequest,
     },
+    /// 工具执行进度（实时发给前端，便于展示「正在调用 list_memory…」等）
+    ToolProgress {
+        tool_name: String,
+        status: String,
+        result_preview: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,6 +102,26 @@ impl OutboundMessage {
             chat_id,
             message_type: OutboundMessageType::ApprovalRequest { request },
             reply_to,
+        }
+    }
+
+    /// 创建工具执行进度消息（实时发给客户端）
+    pub fn tool_progress(
+        channel: String,
+        chat_id: String,
+        tool_name: String,
+        status: String,
+        result_preview: String,
+    ) -> Self {
+        Self {
+            channel,
+            chat_id,
+            message_type: OutboundMessageType::ToolProgress {
+                tool_name,
+                status,
+                result_preview,
+            },
+            reply_to: None,
         }
     }
 }

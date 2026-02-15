@@ -9,7 +9,7 @@ export default function Chat() {
   const { t } = useI18n();
   
   const wsUrl = `ws://${window.location.hostname}:${window.location.port || '8080'}/ws/chat`;
-  const { connected, messages, send, sendApprovalResponse, sessionId } = useWebSocket({
+  const { connected, messages, toolProgressList, send, sendApprovalResponse, sessionId } = useWebSocket({
     url: wsUrl,
     autoConnect: true,
   });
@@ -20,7 +20,7 @@ export default function Chat() {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, toolProgressList]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -77,6 +77,13 @@ export default function Chat() {
                     onReject={(requestId) => sendApprovalResponse(requestId, false)}
                     result={message.approvalResult}
                   />
+                ) : message.role === 'tool_call' || message.role === 'tool_result' ? (
+                  <div className="max-w-[70%] rounded-lg px-3 py-1.5 bg-background/80 border border-border text-text-secondary text-sm">
+                    <div className="whitespace-pre-wrap break-words">{message.content}</div>
+                    <div className="text-xs mt-0.5 opacity-70 text-text-secondary">
+                      {new Date(message.timestamp).toLocaleTimeString()}
+                    </div>
+                  </div>
                 ) : (
                   <div
                     className={`max-w-[70%] rounded-lg px-4 py-2 shadow-sm ${
@@ -99,6 +106,24 @@ export default function Chat() {
                 )}
               </div>
             ))
+          )}
+          {toolProgressList.length > 0 && (
+            <>
+              {toolProgressList.map((item, idx) => (
+                <div key={`tool-${idx}-${item.tool_name}`} className="flex justify-start">
+                  <div className="max-w-[70%] rounded-lg px-3 py-1.5 bg-background/80 border border-border text-text-secondary text-sm">
+                    <span className="font-medium">{item.tool_name}</span>
+                    <span className="mx-2">—</span>
+                    <span>{item.status}</span>
+                    {item.result_preview && (
+                      <div className="mt-1 text-xs opacity-80 truncate max-w-md" title={item.result_preview}>
+                        {item.result_preview}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </>
           )}
           <div ref={messagesEndRef} />
         </div>

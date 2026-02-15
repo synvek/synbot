@@ -51,21 +51,32 @@ impl SessionMessage {
         match msg {
             Message::User { content } => {
                 let mut parts: Vec<String> = Vec::new();
+                let mut has_tool_result = false;
                 for c in content.iter() {
                     match c {
                         UserContent::Text(t) => parts.push(t.text.clone()),
                         UserContent::ToolResult(tr) => {
+                            has_tool_result = true;
                             let preview = Self::tool_result_preview(tr);
-                            parts.push(format!("[Tool result] {}", preview));
+                            parts.push(preview);
                         }
                         _ => {}
                     }
                 }
                 let content = parts.join("\n\n");
+                let role = if has_tool_result {
+                    "tool_result"
+                } else {
+                    "user"
+                };
                 SessionMessage {
-                    role: "user".to_string(),
+                    role: role.to_string(),
                     content: if content.is_empty() {
-                        "[Tool result]".to_string()
+                        if has_tool_result {
+                            "[Tool result]".to_string()
+                        } else {
+                            String::new()
+                        }
                     } else {
                         content
                     },
@@ -74,10 +85,16 @@ impl SessionMessage {
             }
             Message::Assistant { content } => {
                 let mut parts: Vec<String> = Vec::new();
+                let mut has_text = false;
+                let mut has_tool_call = false;
                 for c in content.iter() {
                     match c {
-                        AssistantContent::Text(t) => parts.push(t.text.clone()),
+                        AssistantContent::Text(t) => {
+                            has_text = true;
+                            parts.push(t.text.clone());
+                        }
                         AssistantContent::ToolCall(tc) => {
+                            has_tool_call = true;
                             let name = &tc.function.name;
                             let args_preview = tc
                                 .function
@@ -90,8 +107,13 @@ impl SessionMessage {
                     }
                 }
                 let content = parts.join("\n\n");
+                let role = if has_tool_call && !has_text {
+                    "tool_call"
+                } else {
+                    "assistant"
+                };
                 SessionMessage {
-                    role: "assistant".to_string(),
+                    role: role.to_string(),
                     content: if content.is_empty() {
                         "[Tool call]".to_string()
                     } else {
@@ -122,10 +144,12 @@ impl SessionMessage {
         }
     }
 
-    /// Convert back to a `rig::message::Message`.
+    /// Convert back to a `rig::message::Message` when loading from disk.
+    /// tool_call and tool_result are stored for display; when replaying we treat
+    /// tool_call as assistant text and tool_result as user text.
     pub fn to_message(&self) -> Message {
         match self.role.as_str() {
-            "assistant" => Message::assistant(&self.content),
+            "assistant" | "tool_call" => Message::assistant(&self.content),
             _ => Message::user(&self.content),
         }
     }

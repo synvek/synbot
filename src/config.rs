@@ -16,6 +16,9 @@ pub struct TelegramConfig {
     #[serde(default)]
     pub allow_from: Vec<String>,
     pub proxy: Option<String>,
+    /// When true (default), push tool execution progress to this channel.
+    #[serde(default = "default_true")]
+    pub show_tool_calls: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -27,6 +30,9 @@ pub struct DiscordConfig {
     pub token: String,
     #[serde(default)]
     pub allow_from: Vec<String>,
+    /// When true (default), push tool execution progress to this channel.
+    #[serde(default = "default_true")]
+    pub show_tool_calls: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -40,6 +46,9 @@ pub struct FeishuConfig {
     pub app_secret: String,
     #[serde(default)]
     pub allow_from: Vec<String>,
+    /// When true (default), push tool execution progress to this channel.
+    #[serde(default = "default_true")]
+    pub show_tool_calls: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -442,6 +451,9 @@ pub struct WebConfig {
     pub auth: Option<WebAuthConfig>,
     #[serde(default)]
     pub cors_origins: Vec<String>,
+    /// When true (default), push tool execution progress to web clients.
+    #[serde(default = "default_true")]
+    pub show_tool_calls: bool,
 }
 
 fn default_web_port() -> u16 {
@@ -460,6 +472,7 @@ impl Default for WebConfig {
             host: default_web_host(),
             auth: None,
             cors_origins: Vec::new(),
+            show_tool_calls: true,
         }
     }
 }
@@ -556,9 +569,16 @@ pub struct ToolsConfig {
 // Root config
 // ---------------------------------------------------------------------------
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
+    /// When true (default), all channels may receive tool execution progress; each channel can override via channels.*.showToolCalls.
+    #[serde(default = "default_true")]
+    pub show_tool_calls: bool,
     #[serde(default)]
     pub channels: ChannelsConfig,
     #[serde(default)]

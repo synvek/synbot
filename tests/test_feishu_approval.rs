@@ -20,9 +20,10 @@ fn create_test_channel(
         app_secret: "test_app_secret".to_string(),
         allow_from: vec![],
         enabled: true,
+        show_tool_calls: true,
     };
     
-    let mut channel = FeishuChannel::new(config, inbound_tx, outbound_rx);
+    let mut channel = FeishuChannel::new(config, inbound_tx, outbound_rx, true);
     if let Some(manager) = approval_manager {
         channel = channel.with_approval_manager(manager);
     }

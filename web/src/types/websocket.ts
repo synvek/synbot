@@ -14,7 +14,8 @@ export type WsServerMessage =
   | { type: 'error'; message: string }
   | { type: 'pong' }
   | { type: 'connected'; session_id: string }
-  | { type: 'history'; messages: HistoryMessage[] };
+  | { type: 'history'; messages: HistoryMessage[] }
+  | { type: 'tool_progress'; tool_name: string; status: string; result_preview: string };
 
 export interface ApprovalRequest {
   id: string;
@@ -36,7 +37,7 @@ export interface HistoryMessage {
 
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant' | 'approval';
+  role: 'user' | 'assistant' | 'approval' | 'tool_call' | 'tool_result';
   content: string;
   timestamp: string;
   approvalRequest?: ApprovalRequest;
