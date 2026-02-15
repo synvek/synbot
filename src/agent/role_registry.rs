@@ -1,7 +1,7 @@
 //! Role registry — manages Sub-Role definitions and their resolved configurations.
 //!
 //! Each registered role gets a workspace directory under `workspace/roles/{role_name}/`
-//! with `memory`, `sessions`, and `skills` subdirectories.
+//! with `memory` and `skills` subdirectories. Sessions live under `~/.synbot/sessions/{role_name}/`.
 //!
 //! When a role has a `reference`, its system prompt is built from `~/.synbot/roles/{reference}/`
 //! (AGENTS.md, SOUL.md, TOOLS.md). Missing files are skipped.
@@ -116,7 +116,7 @@ impl RoleRegistry {
             let params = ResolvedRoleParams::from_config(role, defaults);
 
             let role_dir = workspace.join("roles").join(&role.name);
-            let subdirs = ["memory", "sessions", "skills"];
+            let subdirs = ["memory", "skills"];
             for sub in &subdirs {
                 let dir = role_dir.join(sub);
                 std::fs::create_dir_all(&dir).with_context(|| {
@@ -316,7 +316,8 @@ mod tests {
 
         let role_dir = tmp.path().join("roles").join("test_role");
         assert!(role_dir.join("memory").is_dir());
-        assert!(role_dir.join("sessions").is_dir());
+        assert!(role_dir.join("memory").is_dir());
+        assert!(role_dir.join("skills").is_dir());
         assert!(role_dir.join("skills").is_dir());
     }
 

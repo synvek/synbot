@@ -1,6 +1,7 @@
 //! Memory system — daily notes + long-term MEMORY.md.
 //!
-//! **Not the same as sessions.** Sessions (in `{workspace}/sessions/*.json`) store
+//! **Not the same as sessions.** Sessions (in `~/.synbot/sessions/main/*.json` and
+//! `~/.synbot/sessions/{role}/*.json`) store
 //! raw conversation history (each message). Memory here is long-term and daily
 //! notes used to build context for the model, stored under `~/.synbot/memory/{agentId}/`.
 //!

@@ -910,6 +910,12 @@ pub fn memory_root() -> PathBuf {
     config_dir().join("memory")
 }
 
+/// Sessions root directory: `~/.synbot/sessions/`.
+/// Main agent sessions live in `sessions_root()/main/`, role sessions in `sessions_root()/{role}/`.
+pub fn sessions_root() -> PathBuf {
+    config_dir().join("sessions")
+}
+
 /// Memory directory for an agent: `~/.synbot/memory/{agentId}`.
 /// Empty or "main" both resolve to the default "main" agent directory.
 pub fn memory_dir(agent_id: &str) -> PathBuf {

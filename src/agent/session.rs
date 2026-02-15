@@ -101,27 +101,25 @@ pub struct SessionData {
 
 /// Persistent session store backed by JSON files on disk.
 ///
-/// Sessions are stored in `{workspace}/sessions/` with one JSON file per
-/// session key.  Writes are atomic (write to `.tmp`, then rename).
-///
-/// Sub-Role sessions are stored under `{workspace}/roles/{role_name}/sessions/`.
+/// Sessions are stored under `~/.synbot/sessions/`: main agent in
+/// `sessions_root/main/`, each role in `sessions_root/{role}/`.
+/// Writes are atomic (write to `.tmp`, then rename).
 pub struct SessionStore {
-    session_dir: PathBuf,
-    workspace: PathBuf,
+    sessions_root: PathBuf,
 }
 
 impl SessionStore {
-    /// Create a new `SessionStore` rooted at `workspace/sessions/`.
-    pub fn new(workspace: &Path) -> Self {
+    /// Create a new `SessionStore` rooted at `~/.synbot/sessions/` (or the given path).
+    /// Main sessions go under `sessions_root/main/`, role sessions under `sessions_root/{role}/`.
+    pub fn new(sessions_root: &Path) -> Self {
         Self {
-            session_dir: workspace.join("sessions"),
-            workspace: workspace.to_path_buf(),
+            sessions_root: sessions_root.to_path_buf(),
         }
     }
 
-    /// Get the workspace root path.
-    pub fn workspace(&self) -> &Path {
-        &self.workspace
+    /// Get the sessions root path (e.g. `~/.synbot/sessions`).
+    pub fn sessions_root(&self) -> &Path {
+        &self.sessions_root
     }
 
     // ── helpers ──────────────────────────────────────────────────────
@@ -132,22 +130,14 @@ impl SessionStore {
     }
 
     /// Determine the sessions directory for a given session key.
-    ///
-    /// If the key corresponds to a Sub-Role (i.e. the agent_id extracted from
-    /// the SessionId is neither `"main"` nor unparseable), the directory is
-    /// `workspace/roles/{role_name}/sessions/`. Otherwise it falls back to the
-    /// default `workspace/sessions/`.
+    /// Main agent → `sessions_root/main/`, sub-roles → `sessions_root/{role}/`.
     fn sessions_dir_for_key(&self, key: &str) -> PathBuf {
-        if let Ok(sid) = SessionId::parse(key) {
-            if sid.agent_id != "main" {
-                return self
-                    .workspace
-                    .join("roles")
-                    .join(&sid.agent_id)
-                    .join("sessions");
-            }
-        }
-        self.session_dir.clone()
+        let subdir = if let Ok(sid) = SessionId::parse(key) {
+            sid.agent_id.to_string()
+        } else {
+            "main".to_string()
+        };
+        self.sessions_root.join(subdir)
     }
 
     /// Full path for a session file.
@@ -162,9 +152,9 @@ impl SessionStore {
             .join(format!("{}.json.tmp", Self::safe_filename(key)))
     }
 
-    /// Path to the `archived/` subdirectory.
-    fn archive_dir(&self) -> PathBuf {
-        self.session_dir.join("archived")
+    /// Path to the `archived/` subdirectory for a given session key's agent dir.
+    fn archive_dir_for_key(&self, key: &str) -> PathBuf {
+        self.sessions_dir_for_key(key).join("archived")
     }
 
     // ── public API ──────────────────────────────────────────────────
@@ -270,62 +260,79 @@ impl SessionStore {
         Ok(SessionData { meta, messages })
     }
 
-    /// Load every persisted session from the `sessions/` directory.
+    /// Load every persisted session from `sessions_root/main/` and
+    /// `sessions_root/{role}/` for each role subdir.
     ///
     /// Supports both the new `SessionData` format and the legacy format.
     pub async fn load_all_sessions(&self) -> Result<HashMap<String, SessionData>> {
         let mut sessions = HashMap::new();
 
-        if !self.session_dir.exists() {
+        if !self.sessions_root.exists() {
             return Ok(sessions);
         }
 
-        let mut entries = fs::read_dir(&self.session_dir)
+        let mut root_entries = fs::read_dir(&self.sessions_root)
             .await
-            .context("failed to read sessions directory")?;
+            .context("failed to read sessions root directory")?;
 
-        while let Some(entry) = entries.next_entry().await? {
-            let path = entry.path();
-
-            // Only process .json files (skip .tmp, archived/, etc.)
-            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+        while let Some(entry) = root_entries.next_entry().await? {
+            let agent_dir = entry.path();
+            if !agent_dir.is_dir() {
                 continue;
             }
-            // Skip directories
-            if path.is_dir() {
-                continue;
-            }
-
-            let stem = match path.file_stem().and_then(|s| s.to_str()) {
-                Some(s) => s.to_string(),
+            // Skip archived subdirs (e.g. main/archived is inside main, not a sibling)
+            let dir_name = match agent_dir.file_name().and_then(|n| n.to_str()) {
+                Some(n) => n,
                 None => continue,
             };
+            if dir_name == "archived" {
+                continue;
+            }
 
-            match fs::read_to_string(&path).await {
-                Ok(data) => {
-                    // Try new format first — it contains the authoritative key
-                    // inside `meta.id`.
-                    if let Ok(session_data) = serde_json::from_str::<SessionData>(&data) {
-                        let key = session_data.meta.id.format();
-                        sessions.insert(key, session_data);
-                        continue;
-                    }
-
-                    // Legacy format: reverse the safe-filename encoding
-                    // (`_` → `:`). Replace all underscores since
-                    // `safe_filename` replaced all colons.
-                    let session_key = stem.replace('_', ":");
-                    match Self::parse_session_json(&data, &session_key) {
-                        Ok(session_data) => {
-                            sessions.insert(session_key, session_data);
-                        }
-                        Err(e) => {
-                            warn!(path = %path.display(), error = %e, "skipping corrupt session file");
-                        }
-                    }
-                }
+            let mut entries = match fs::read_dir(&agent_dir).await {
+                Ok(e) => e,
                 Err(e) => {
-                    warn!(path = %path.display(), error = %e, "failed to read session file");
+                    warn!(path = %agent_dir.display(), error = %e, "failed to read agent sessions dir");
+                    continue;
+                }
+            };
+
+            while let Some(file_entry) = entries.next_entry().await? {
+                let path = file_entry.path();
+
+                if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                    continue;
+                }
+                if path.is_dir() {
+                    continue;
+                }
+
+                let stem = match path.file_stem().and_then(|s| s.to_str()) {
+                    Some(s) => s.to_string(),
+                    None => continue,
+                };
+
+                match fs::read_to_string(&path).await {
+                    Ok(data) => {
+                        if let Ok(session_data) = serde_json::from_str::<SessionData>(&data) {
+                            let key = session_data.meta.id.format();
+                            sessions.insert(key, session_data);
+                            continue;
+                        }
+
+                        let session_key = stem.replace('_', ":");
+                        match Self::parse_session_json(&data, &session_key) {
+                            Ok(session_data) => {
+                                sessions.insert(session_key, session_data);
+                            }
+                            Err(e) => {
+                                warn!(path = %path.display(), error = %e, "skipping corrupt session file");
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!(path = %path.display(), error = %e, "failed to read session file");
+                    }
                 }
             }
         }
@@ -334,74 +341,92 @@ impl SessionStore {
     }
 
     /// Archive sessions whose file has not been modified for longer than
-    /// `max_inactive`.
-    ///
-    /// Archived files are moved into the `sessions/archived/` subdirectory.
+    /// `max_inactive`. Scans each agent subdir (main, roles) under sessions_root.
+    /// Archived files are moved into that agent's `archived/` subdir.
     /// Returns the number of sessions archived.
     pub async fn archive_inactive(&self, max_inactive: Duration) -> Result<u32> {
-        if !self.session_dir.exists() {
+        if !self.sessions_root.exists() {
             return Ok(0);
         }
 
-        let archive = self.archive_dir();
         let mut archived_count = 0u32;
-
-        let mut entries = fs::read_dir(&self.session_dir)
-            .await
-            .context("failed to read sessions directory")?;
-
         let now = std::time::SystemTime::now();
 
-        while let Some(entry) = entries.next_entry().await? {
-            let path = entry.path();
+        let mut root_entries = fs::read_dir(&self.sessions_root)
+            .await
+            .context("failed to read sessions root directory")?;
 
-            // Only process .json files
-            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+        while let Some(entry) = root_entries.next_entry().await? {
+            let agent_dir = entry.path();
+            if !agent_dir.is_dir() {
                 continue;
             }
-            if path.is_dir() {
+            let dir_name = match agent_dir.file_name().and_then(|n| n.to_str()) {
+                Some(n) => n,
+                None => continue,
+            };
+            if dir_name == "archived" {
                 continue;
             }
 
-            let metadata = match fs::metadata(&path).await {
-                Ok(m) => m,
+            let archive = agent_dir.join("archived");
+            let mut entries = match fs::read_dir(&agent_dir).await {
+                Ok(e) => e,
                 Err(e) => {
-                    warn!(path = %path.display(), error = %e, "failed to read metadata");
+                    warn!(path = %agent_dir.display(), error = %e, "failed to read agent sessions dir");
                     continue;
                 }
             };
 
-            let modified = match metadata.modified() {
-                Ok(t) => t,
-                Err(e) => {
-                    warn!(path = %path.display(), error = %e, "failed to get modified time");
+            while let Some(file_entry) = entries.next_entry().await? {
+                let path = file_entry.path();
+
+                if path.extension().and_then(|e| e.to_str()) != Some("json") {
                     continue;
                 }
-            };
+                if path.is_dir() {
+                    continue;
+                }
 
-            let inactive_duration = match now.duration_since(modified) {
-                Ok(d) => d,
-                Err(_) => continue, // modified time in the future — skip
-            };
-
-            if inactive_duration > max_inactive {
-                // Ensure archive directory exists
-                fs::create_dir_all(&archive)
-                    .await
-                    .context("failed to create archive directory")?;
-
-                let filename = match path.file_name() {
-                    Some(f) => f.to_owned(),
-                    None => continue,
+                let metadata = match fs::metadata(&path).await {
+                    Ok(m) => m,
+                    Err(e) => {
+                        warn!(path = %path.display(), error = %e, "failed to read metadata");
+                        continue;
+                    }
                 };
-                let dest = archive.join(filename);
 
-                fs::rename(&path, &dest)
-                    .await
-                    .with_context(|| format!("failed to archive {}", path.display()))?;
+                let modified = match metadata.modified() {
+                    Ok(t) => t,
+                    Err(e) => {
+                        warn!(path = %path.display(), error = %e, "failed to get modified time");
+                        continue;
+                    }
+                };
 
-                archived_count += 1;
-                debug!(path = %path.display(), "session archived");
+                let inactive_duration = match now.duration_since(modified) {
+                    Ok(d) => d,
+                    Err(_) => continue,
+                };
+
+                if inactive_duration > max_inactive {
+                    fs::create_dir_all(&archive)
+                        .await
+                        .context("failed to create archive directory")?;
+
+                    let filename = match path.file_name() {
+                        Some(f) => f.to_owned(),
+                        None => continue,
+                    };
+                    let dest = archive.join(filename);
+
+                    fs::rename(&path, &dest)
+                        .await
+                        .with_context(|| format!("failed to archive {}", path.display()))?;
+
+                    archived_count += 1;
+                    debug!(path = %path.display(), "session archived");
+                }
             }
         }
 
@@ -535,9 +560,9 @@ mod tests {
         let loaded = store.load_session("agent:main:old").await.unwrap();
         assert!(loaded.is_none());
 
-        // The file should exist in the archived directory
+        // The file should exist in the archived directory for main
         let archive_path = store
-            .archive_dir()
+            .archive_dir_for_key("agent:main:old")
             .join("agent_main_old.json");
         assert!(archive_path.exists());
     }
@@ -727,12 +752,8 @@ mod tests {
             .await
             .unwrap();
 
-        // Verify the file is stored under roles/ui_designer/sessions/
-        let expected_dir = store
-            .workspace
-            .join("roles")
-            .join("ui_designer")
-            .join("sessions");
+        // Verify the file is stored under sessions_root/ui_designer/
+        let expected_dir = store.sessions_root().join("ui_designer");
         assert!(expected_dir.exists());
 
         let expected_file = expected_dir.join(format!(
@@ -756,16 +777,12 @@ mod tests {
         let key = "agent:main:telegram:dm:user_1";
         store.save_session(key, &messages, None).await.unwrap();
 
-        // Verify the file is stored under sessions/ (not roles/)
-        let expected_file = store.session_dir.join(format!(
+        // Verify the file is stored under sessions_root/main/
+        let expected_file = store.sessions_root().join("main").join(format!(
             "{}.json",
             SessionStore::safe_filename(key)
         ));
         assert!(expected_file.exists());
-
-        // roles/ directory should NOT exist
-        let roles_dir = store.workspace.join("roles");
-        assert!(!roles_dir.exists());
     }
 
     #[tokio::test]

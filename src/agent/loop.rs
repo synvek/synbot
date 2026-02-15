@@ -47,7 +47,7 @@ impl AgentLoop {
         config: &Config,
         session_manager: Arc<RwLock<SessionManager>>,
     ) -> Self {
-        let session_store = SessionStore::new(&workspace);
+        let session_store = SessionStore::new(crate::config::sessions_root().as_path());
         let mut role_registry = RoleRegistry::new();
         let roles_dir = crate::config::roles_dir();
         if let Err(e) = role_registry.load_from_config(
@@ -306,7 +306,7 @@ impl AgentLoop {
             let tools = Arc::clone(&self.tools);
             let sessions = Arc::clone(&self.sessions);
             let session_manager = Arc::clone(&self.session_manager);
-            let session_store_workspace = self.session_store.workspace().to_path_buf();
+            let session_store_root = self.session_store.sessions_root().to_path_buf();
             let outbound_tx = self.outbound_tx.clone();
             let channel = msg.channel.clone();
             let chat_id = msg.chat_id.clone();
@@ -332,7 +332,7 @@ impl AgentLoop {
                 ).await?;
 
                 // Persist session with metadata and sync to session_manager
-                let store = SessionStore::new(&session_store_workspace);
+                let store = SessionStore::new(&session_store_root);
                 if let Some(messages) = sessions_guard.get(&sk) {
                     let now = chrono::Utc::now();
                     let meta = crate::agent::session_manager::SessionMeta {
