@@ -48,8 +48,12 @@ impl AgentLoop {
     ) -> Self {
         let session_store = SessionStore::new(&workspace);
         let mut role_registry = RoleRegistry::new();
+        let roles_dir = crate::config::roles_dir();
         if let Err(e) = role_registry.load_from_config(
-            &config.agent.roles, &config.agent, &workspace,
+            &config.agent.roles,
+            &config.agent,
+            &workspace,
+            &roles_dir,
         ) {
             warn!(error = %e, "Failed to load role registry from config");
         }

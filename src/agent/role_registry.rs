@@ -2,6 +2,9 @@
 //!
 //! Each registered role gets a workspace directory under `workspace/roles/{role_name}/`
 //! with `memory`, `sessions`, and `skills` subdirectories.
+//!
+//! When a role has a `reference`, its system prompt is built from `~/.synbot/roles/{reference}/`
+//! (AGENTS.md, SOUL.md, TOOLS.md). Missing files are skipped.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -9,6 +12,27 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use crate::config::{AgentDefaults, RoleConfig};
+
+/// 从 `roles_dir/reference/` 读取 AGENTS.md、SOUL.md、TOOLS.md 并拼接成 system prompt。
+/// 找不到的文件或目录则忽略，返回已读到的内容或空字符串。
+fn build_system_prompt_from_role_dir(roles_dir: &Path, reference: &str) -> String {
+    let role_dir = roles_dir.join(reference);
+    if !role_dir.is_dir() {
+        return String::new();
+    }
+    let files = ["AGENTS.md", "SOUL.md", "TOOLS.md"];
+    let mut parts = Vec::new();
+    for name in &files {
+        let path = role_dir.join(name);
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            let trimmed = content.trim();
+            if !trimmed.is_empty() {
+                parts.push(trimmed.to_string());
+            }
+        }
+    }
+    parts.join("\n\n")
+}
 
 // ---------------------------------------------------------------------------
 // Resolved role parameters
@@ -79,11 +103,14 @@ impl RoleRegistry {
     /// For each role the optional fields (`provider`, `model`, `max_tokens`,
     /// `temperature`, `max_iterations`) are resolved against `defaults`.
     /// Workspace directories are created under `workspace/roles/{role_name}/`.
+    /// When the role has a `reference`, the system prompt is built from
+    /// `roles_dir/{reference}/` (AGENTS.md, SOUL.md, TOOLS.md), typically ~/.synbot/roles.
     pub fn load_from_config(
         &mut self,
         roles: &[RoleConfig],
         defaults: &AgentDefaults,
         workspace: &Path,
+        roles_dir: &Path,
     ) -> Result<()> {
         for role in roles {
             let params = ResolvedRoleParams::from_config(role, defaults);
@@ -101,9 +128,21 @@ impl RoleRegistry {
                 })?;
             }
 
+            let system_prompt = role
+                .system_prompt
+                .as_ref()
+                .filter(|s| !s.is_empty())
+                .cloned()
+                .or_else(|| {
+                    role.reference.as_ref().filter(|r| !r.is_empty()).map(|ref_name| {
+                        build_system_prompt_from_role_dir(roles_dir, ref_name)
+                    })
+                })
+                .unwrap_or_default();
+
             let ctx = RoleContext {
                 name: role.name.clone(),
-                system_prompt: role.system_prompt.clone(),
+                system_prompt,
                 skills: role.skills.clone(),
                 tools: role.tools.clone(),
                 params,
@@ -155,10 +194,11 @@ mod tests {
     }
 
     /// Helper: create a minimal `RoleConfig`.
-    fn make_role(name: &str, prompt: &str) -> RoleConfig {
+    fn make_role(name: &str, reference: Option<&str>) -> RoleConfig {
         RoleConfig {
             name: name.into(),
-            system_prompt: prompt.into(),
+            system_prompt: None,
+            reference: reference.map(String::from),
             skills: vec![],
             tools: vec![],
             provider: None,
@@ -174,7 +214,7 @@ mod tests {
     #[test]
     fn resolved_params_uses_defaults_when_none() {
         let defaults = test_defaults();
-        let role = make_role("r", "prompt");
+        let role = make_role("r", Some("dev"));
         let params = ResolvedRoleParams::from_config(&role, &defaults);
 
         assert_eq!(params.provider, "default_provider");
@@ -189,7 +229,8 @@ mod tests {
         let defaults = test_defaults();
         let role = RoleConfig {
             name: "r".into(),
-            system_prompt: "prompt".into(),
+            system_prompt: None,
+            reference: Some("dev".into()),
             skills: vec![],
             tools: vec![],
             provider: Some("openai".into()),
@@ -212,7 +253,8 @@ mod tests {
         let defaults = test_defaults();
         let role = RoleConfig {
             name: "r".into(),
-            system_prompt: "prompt".into(),
+            system_prompt: None,
+            reference: Some("dev".into()),
             skills: vec![],
             tools: vec![],
             provider: Some("openai".into()),
@@ -245,12 +287,13 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let defaults = test_defaults();
         let roles = vec![
-            make_role("ui_designer", "You are a UI designer"),
-            make_role("product_manager", "You are a PM"),
+            make_role("ui_designer", Some("dev")),
+            make_role("product_manager", Some("dev")),
         ];
 
+        let roles_dir = TempDir::new().unwrap();
         let mut reg = RoleRegistry::new();
-        reg.load_from_config(&roles, &defaults, tmp.path()).unwrap();
+        reg.load_from_config(&roles, &defaults, tmp.path(), roles_dir.path()).unwrap();
 
         assert!(reg.contains("ui_designer"));
         assert!(reg.contains("product_manager"));
@@ -265,10 +308,11 @@ mod tests {
     fn load_from_config_creates_workspace_directories() {
         let tmp = TempDir::new().unwrap();
         let defaults = test_defaults();
-        let roles = vec![make_role("test_role", "prompt")];
+        let roles = vec![make_role("test_role", None)];
 
+        let roles_dir = TempDir::new().unwrap();
         let mut reg = RoleRegistry::new();
-        reg.load_from_config(&roles, &defaults, tmp.path()).unwrap();
+        reg.load_from_config(&roles, &defaults, tmp.path(), roles_dir.path()).unwrap();
 
         let role_dir = tmp.path().join("roles").join("test_role");
         assert!(role_dir.join("memory").is_dir());
@@ -280,9 +324,18 @@ mod tests {
     fn get_returns_correct_role_context() {
         let tmp = TempDir::new().unwrap();
         let defaults = test_defaults();
+        // Use a temp roles dir with role "designer" md files
+        let roles_dir = TempDir::new().unwrap();
+        let role_tpl = roles_dir.path().join("designer");
+        std::fs::create_dir_all(&role_tpl).unwrap();
+        std::fs::write(role_tpl.join("AGENTS.md"), "You design things").unwrap();
+        std::fs::write(role_tpl.join("SOUL.md"), "").unwrap();
+        std::fs::write(role_tpl.join("TOOLS.md"), "").unwrap();
+
         let roles = vec![RoleConfig {
             name: "designer".into(),
-            system_prompt: "You design things".into(),
+            system_prompt: None,
+            reference: Some("designer".into()),
             skills: vec!["figma".into(), "css".into()],
             tools: vec!["web".into()],
             provider: Some("openai".into()),
@@ -293,7 +346,7 @@ mod tests {
         }];
 
         let mut reg = RoleRegistry::new();
-        reg.load_from_config(&roles, &defaults, tmp.path()).unwrap();
+        reg.load_from_config(&roles, &defaults, tmp.path(), roles_dir.path()).unwrap();
 
         let ctx = reg.get("designer").unwrap();
         assert_eq!(ctx.name, "designer");
@@ -316,8 +369,9 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let defaults = test_defaults();
 
+        let roles_dir = TempDir::new().unwrap();
         let mut reg = RoleRegistry::new();
-        reg.load_from_config(&[], &defaults, tmp.path()).unwrap();
+        reg.load_from_config(&[], &defaults, tmp.path(), roles_dir.path()).unwrap();
 
         assert!(reg.list_names().is_empty());
     }
@@ -325,11 +379,19 @@ mod tests {
     #[test]
     fn load_from_config_overwrites_duplicate_role() {
         let tmp = TempDir::new().unwrap();
+        let roles_dir = TempDir::new().unwrap();
+        let role_tpl = roles_dir.path().join("dup");
+        std::fs::create_dir_all(&role_tpl).unwrap();
+        std::fs::write(role_tpl.join("AGENTS.md"), "second").unwrap();
+        std::fs::write(role_tpl.join("SOUL.md"), "").unwrap();
+        std::fs::write(role_tpl.join("TOOLS.md"), "").unwrap();
+
         let defaults = test_defaults();
         let roles = vec![
             RoleConfig {
                 name: "dup".into(),
-                system_prompt: "first".into(),
+                system_prompt: None,
+                reference: Some("other".into()),
                 skills: vec![],
                 tools: vec![],
                 provider: None,
@@ -340,7 +402,8 @@ mod tests {
             },
             RoleConfig {
                 name: "dup".into(),
-                system_prompt: "second".into(),
+                system_prompt: None,
+                reference: Some("dup".into()),
                 skills: vec![],
                 tools: vec![],
                 provider: None,
@@ -352,7 +415,7 @@ mod tests {
         ];
 
         let mut reg = RoleRegistry::new();
-        reg.load_from_config(&roles, &defaults, tmp.path()).unwrap();
+        reg.load_from_config(&roles, &defaults, tmp.path(), roles_dir.path()).unwrap();
 
         // The last one wins
         let ctx = reg.get("dup").unwrap();
@@ -365,12 +428,13 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let defaults = test_defaults();
         let roles = vec![
-            make_role("alpha", "prompt a"),
-            make_role("beta", "prompt b"),
+            make_role("alpha", None),
+            make_role("beta", None),
         ];
 
+        let roles_dir = TempDir::new().unwrap();
         let mut reg = RoleRegistry::new();
-        reg.load_from_config(&roles, &defaults, tmp.path()).unwrap();
+        reg.load_from_config(&roles, &defaults, tmp.path(), roles_dir.path()).unwrap();
 
         assert_eq!(
             reg.get("alpha").unwrap().workspace_dir,

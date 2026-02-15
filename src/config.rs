@@ -114,7 +114,12 @@ pub struct TopicConfig {
 #[serde(rename_all = "camelCase")]
 pub struct RoleConfig {
     pub name: String,
-    pub system_prompt: String,
+    /// 已废弃：请改用 reference，从 templates/roles/{reference} 的 md 文件生成 prompt
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub system_prompt: Option<String>,
+    /// 引用 templates/roles 下的子目录名，用于从 AGENTS.md、SOUL.md、TOOLS.md 生成 system prompt
+    #[serde(default)]
+    pub reference: Option<String>,
     #[serde(default)]
     pub skills: Vec<String>,
     #[serde(default)]
@@ -729,14 +734,6 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
                 constraint: "role name must be non-empty".into(),
             });
         }
-        if role.system_prompt.is_empty() {
-            errors.push(ValidationError {
-                field: format!("{}.system_prompt", role_label),
-                value: String::new(),
-                constraint: "role system_prompt must be non-empty".into(),
-            });
-        }
-
         // Name format: only [a-zA-Z0-9_]
         if !role.name.is_empty()
             && !role
@@ -813,6 +810,11 @@ pub fn config_dir() -> PathBuf {
 
 pub fn config_path() -> PathBuf {
     config_dir().join("config.json")
+}
+
+/// 固定路径：role 模板目录，onboard 时从 templates/roles 写入此处。
+pub fn roles_dir() -> PathBuf {
+    config_dir().join("roles")
 }
 
 pub fn workspace_path(cfg: &Config) -> PathBuf {
@@ -1103,10 +1105,11 @@ mod tests {
         cfg
     }
 
-    fn make_role(name: &str, system_prompt: &str) -> RoleConfig {
+    fn make_role(name: &str, reference: Option<&str>) -> RoleConfig {
         RoleConfig {
             name: name.into(),
-            system_prompt: system_prompt.into(),
+            system_prompt: None,
+            reference: reference.map(String::from),
             skills: Vec::new(),
             tools: Vec::new(),
             provider: None,
@@ -1123,7 +1126,7 @@ mod tests {
     fn main_channel_empty_with_roles_is_rejected() {
         let mut cfg = config_with_telegram();
         cfg.main_channel = String::new();
-        cfg.agent.roles = vec![make_role("helper", "You help")];
+        cfg.agent.roles = vec![make_role("helper", Some("dev"))];
         let errors = validate_config(&cfg).unwrap_err();
         assert!(errors.iter().any(|e| e.field == "main_channel"));
     }
@@ -1132,7 +1135,7 @@ mod tests {
     fn main_channel_referencing_disabled_channel_is_rejected() {
         let mut cfg = valid_config();
         cfg.main_channel = "telegram".into();
-        cfg.agent.roles = vec![make_role("helper", "You help")];
+        cfg.agent.roles = vec![make_role("helper", Some("dev"))];
         // telegram is not enabled
         let errors = validate_config(&cfg).unwrap_err();
         assert!(errors.iter().any(|e| e.field == "main_channel"));
@@ -1141,7 +1144,7 @@ mod tests {
     #[test]
     fn main_channel_referencing_enabled_channel_is_accepted() {
         let mut cfg = config_with_telegram();
-        cfg.agent.roles = vec![make_role("helper", "You help")];
+        cfg.agent.roles = vec![make_role("helper", Some("dev"))];
         assert!(validate_config(&cfg).is_ok());
     }
 
@@ -1158,7 +1161,7 @@ mod tests {
     #[test]
     fn role_name_with_special_chars_is_rejected() {
         let mut cfg = config_with_telegram();
-        cfg.agent.roles = vec![make_role("bad-name!", "prompt")];
+        cfg.agent.roles = vec![make_role("bad-name!", Some("dev"))];
         let errors = validate_config(&cfg).unwrap_err();
         assert!(errors.iter().any(|e| e.constraint.contains("letters, digits, and underscores")));
     }
@@ -1166,7 +1169,7 @@ mod tests {
     #[test]
     fn role_name_alphanumeric_underscore_is_accepted() {
         let mut cfg = config_with_telegram();
-        cfg.agent.roles = vec![make_role("good_Role_123", "prompt")];
+        cfg.agent.roles = vec![make_role("good_Role_123", Some("dev"))];
         assert!(validate_config(&cfg).is_ok());
     }
 
@@ -1176,8 +1179,8 @@ mod tests {
     fn duplicate_role_names_are_rejected() {
         let mut cfg = config_with_telegram();
         cfg.agent.roles = vec![
-            make_role("helper", "prompt1"),
-            make_role("helper", "prompt2"),
+            make_role("helper", Some("dev")),
+            make_role("helper", Some("dev")),
         ];
         let errors = validate_config(&cfg).unwrap_err();
         assert!(errors.iter().any(|e| e.constraint.contains("duplicate")));
@@ -1188,17 +1191,16 @@ mod tests {
     #[test]
     fn role_empty_name_is_rejected() {
         let mut cfg = config_with_telegram();
-        cfg.agent.roles = vec![make_role("", "prompt")];
+        cfg.agent.roles = vec![make_role("", Some("dev"))];
         let errors = validate_config(&cfg).unwrap_err();
         assert!(errors.iter().any(|e| e.constraint.contains("name must be non-empty")));
     }
 
     #[test]
-    fn role_empty_system_prompt_is_rejected() {
+    fn role_without_reference_is_accepted() {
         let mut cfg = config_with_telegram();
-        cfg.agent.roles = vec![make_role("helper", "")];
-        let errors = validate_config(&cfg).unwrap_err();
-        assert!(errors.iter().any(|e| e.constraint.contains("system_prompt must be non-empty")));
+        cfg.agent.roles = vec![make_role("helper", None)];
+        assert!(validate_config(&cfg).is_ok());
     }
 
     // --- Groups/topics participant channel validation ---

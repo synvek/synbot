@@ -74,7 +74,8 @@ pub async fn cmd_start() -> Result<()> {
     ));
 
     let mut role_registry = crate::agent::role_registry::RoleRegistry::new();
-    role_registry.load_from_config(&cfg.agent.roles, &cfg.agent, &ws)?;
+    let roles_dir = config::roles_dir();
+    role_registry.load_from_config(&cfg.agent.roles, &cfg.agent, &ws, &roles_dir)?;
     let role_registry = std::sync::Arc::new(role_registry);
 
     let skills_loader = std::sync::Arc::new(crate::agent::skills::SkillsLoader::new(&ws));
