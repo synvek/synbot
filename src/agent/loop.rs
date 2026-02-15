@@ -19,6 +19,7 @@ use crate::agent::session_manager::SessionManager;
 use crate::agent::subagent::SubagentManager;
 use crate::bus::{InboundMessage, OutboundMessage};
 use crate::config::Config;
+use crate::config;
 use crate::tools::{scope, ToolContext, ToolRegistry};
 
 pub struct AgentLoop {
@@ -174,6 +175,24 @@ impl AgentLoop {
                 (role.system_prompt.clone(), role.params.max_iterations)
             };
 
+            let (agent_workspace, agent_memory_dir) = if agent_id == "main" {
+                (
+                    self.workspace.clone(),
+                    config::memory_dir("main"),
+                )
+            } else {
+                let role = self.role_registry.get(&agent_id).unwrap();
+                (
+                    role.workspace_dir.clone(),
+                    config::memory_dir(&agent_id),
+                )
+            };
+            let tool_ctx = ToolContext {
+                agent_id: agent_id.clone(),
+                workspace: agent_workspace,
+                memory_dir: agent_memory_dir,
+            };
+
             let tool_defs = self.tools.rig_definitions();
             let mut sessions = self.sessions.lock().await;
             let history = sessions.entry(session_key.clone()).or_default();
@@ -190,18 +209,22 @@ impl AgentLoop {
                 sm.append(&session_id, user_msg);
             }
 
-            let iterations = run_completion_loop(
-                &*self.model,
-                &system_prompt,
-                model_max_iterations,
-                &agent_id,
-                history,
-                &tool_defs,
-                &self.tools,
-                &msg.channel,
-                &msg.chat_id,
-                &self.outbound_tx,
-            ).await?;
+            let iterations = scope(tool_ctx, async {
+                run_completion_loop(
+                    &*self.model,
+                    &system_prompt,
+                    model_max_iterations,
+                    &agent_id,
+                    history,
+                    &tool_defs,
+                    &self.tools,
+                    &msg.channel,
+                    &msg.chat_id,
+                    &self.outbound_tx,
+                )
+                .await
+            })
+            .await?;
 
             drop(sessions);
 

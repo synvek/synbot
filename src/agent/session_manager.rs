@@ -112,6 +112,37 @@ impl SessionManager {
         self.sessions.get(id).map(|(_, msgs)| msgs)
     }
 
+    /// Get all sessions for a given channel and chat/group identifier (e.g. web + user_id).
+    /// Used to show a unified channel view: one timeline with all roles (main, dev, …) for that channel.
+    /// Returns sessions sorted by agent_id (main first, then alphabetically) so the order is stable.
+    pub fn get_sessions_for_channel(
+        &self,
+        channel: &str,
+        scope: SessionScope,
+        identifier: &str,
+    ) -> Vec<(SessionMeta, Vec<SessionMessage>)> {
+        let mut out: Vec<_> = self
+            .sessions
+            .iter()
+            .filter(|(id, _)| {
+                id.channel == channel
+                    && id.scope.as_ref() == Some(&scope)
+                    && id.identifier.as_deref() == Some(identifier)
+            })
+            .map(|(_, (meta, msgs))| (meta.clone(), msgs.clone()))
+            .collect();
+        out.sort_by(|a, b| {
+            let a_main = a.0.id.agent_id == "main";
+            let b_main = b.0.id.agent_id == "main";
+            match (a_main, b_main) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => a.0.id.agent_id.cmp(&b.0.id.agent_id),
+            }
+        });
+        out
+    }
+
     /// Append a message to a session. Creates the session if it does not
     /// exist.
     pub fn append(&mut self, id: &SessionId, message: SessionMessage) {

@@ -56,12 +56,15 @@ pub enum WsServerMessage {
     },
 }
 
-/// Message in history
+/// Message in history. When loading channel view, `agent_id` is set so the UI can show which agent (main or role) the message belongs to.
 #[derive(Debug, Serialize)]
 pub struct HistoryMessage {
     pub role: String,
     pub content: String,
     pub timestamp: chrono::DateTime<Utc>,
+    /// Agent that produced or received this message (main, dev, …). Omitted for backward compat when single-session.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
 }
 
 /// WebSocket session actor
@@ -171,38 +174,49 @@ impl Actor for WsSession {
             },
         );
 
-        // Load and send history
+        // Load and send history for this channel (web) and user: all sessions (main + roles) so the UI shows the full thread.
         let state = self.state.clone();
         let user_id = self.user_id.clone();
         let addr = ctx.address();
         ctx.spawn(
             async move {
-                // Build session ID using the same logic as resolve_session
-                // For web channel, it will be: agent:main:web:dm:{user_id}
-                let session_id = {
-                    let sm = state.session_manager.read().await;
-                    sm.resolve_session("main", "web", &user_id, &serde_json::Value::Null)
-                };
-                
-                tracing::info!("Loading history for session: {}", session_id.format());
-                
-                // Get session history
+                use crate::agent::session_id::SessionScope;
+
                 let sm = state.session_manager.read().await;
-                if let Some(messages) = sm.get_history(&session_id) {
-                    tracing::info!("Found {} history messages for session {}", messages.len(), session_id.format());
-                    let history_messages: Vec<HistoryMessage> = messages
-                        .iter()
-                        .map(|msg| HistoryMessage {
-                            role: msg.role.clone(),
-                            content: msg.content.clone(),
-                            timestamp: msg.timestamp,
-                        })
-                        .collect();
-                    
-                    addr.do_send(HistoryMessageWrapper(history_messages));
-                } else {
-                    tracing::info!("No history found for session {}", session_id.format());
+                let sessions = sm.get_sessions_for_channel("web", SessionScope::Dm, &user_id);
+
+                if sessions.is_empty() {
+                    tracing::info!("No sessions found for web/dm/{}", user_id);
+                    addr.do_send(HistoryMessageWrapper(Vec::new()));
+                    return;
                 }
+
+                let total_msgs: usize = sessions.iter().map(|(_, msgs)| msgs.len()).sum();
+                tracing::info!(
+                    "Loading channel history for web/dm/{}: {} session(s), {} message(s)",
+                    user_id,
+                    sessions.len(),
+                    total_msgs
+                );
+
+                let mut all: Vec<(chrono::DateTime<Utc>, HistoryMessage)> = Vec::new();
+                for (meta, messages) in &sessions {
+                    let agent_id = meta.id.agent_id.clone();
+                    for msg in messages {
+                        all.push((
+                            msg.timestamp,
+                            HistoryMessage {
+                                role: msg.role.clone(),
+                                content: msg.content.clone(),
+                                timestamp: msg.timestamp,
+                                agent_id: Some(agent_id.clone()),
+                            },
+                        ));
+                    }
+                }
+                all.sort_by_key(|(ts, _)| *ts);
+                let history_messages: Vec<HistoryMessage> = all.into_iter().map(|(_, m)| m).collect();
+                addr.do_send(HistoryMessageWrapper(history_messages));
             }
             .into_actor(self)
             .map(|_, _, _| {}),

@@ -5,7 +5,7 @@
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use rig::message::Message;
+use rig::message::{AssistantContent, Message, ToolResultContent, UserContent};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -15,6 +15,21 @@ use tracing::{debug, warn};
 
 use crate::agent::session_id::SessionId;
 use crate::agent::session_manager::SessionMeta;
+
+const TOOL_RESULT_PREVIEW_LEN: usize = 150;
+
+fn truncate_preview(s: &str, max_len: usize) -> String {
+    let s = s.trim();
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        let mut end = max_len.min(s.len());
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...", &s[..end])
+    }
+}
 
 /// A serializable representation of a chat message.
 ///
@@ -30,44 +45,80 @@ pub struct SessionMessage {
 
 impl SessionMessage {
     /// Convert a `rig::message::Message` into a `SessionMessage`.
+    /// Tool calls and tool results are persisted as short descriptive text so the session
+    /// and web UI show non-empty, human-readable entries instead of blank lines.
     pub fn from_message(msg: &Message) -> Self {
         match msg {
             Message::User { content } => {
-                let text = content
-                    .iter()
-                    .filter_map(|c| {
-                        if let rig::message::UserContent::Text(t) = c {
-                            Some(t.text.as_str())
-                        } else {
-                            None
+                let mut parts: Vec<String> = Vec::new();
+                for c in content.iter() {
+                    match c {
+                        UserContent::Text(t) => parts.push(t.text.clone()),
+                        UserContent::ToolResult(tr) => {
+                            let preview = Self::tool_result_preview(tr);
+                            parts.push(format!("[Tool result] {}", preview));
                         }
-                    })
-                    .collect::<Vec<_>>()
-                    .join("");
+                        _ => {}
+                    }
+                }
+                let content = parts.join("\n\n");
                 SessionMessage {
                     role: "user".to_string(),
-                    content: text,
+                    content: if content.is_empty() {
+                        "[Tool result]".to_string()
+                    } else {
+                        content
+                    },
                     timestamp: Utc::now(),
                 }
             }
             Message::Assistant { content } => {
-                let text = content
-                    .iter()
-                    .filter_map(|c| {
-                        if let rig::message::AssistantContent::Text(t) = c {
-                            Some(t.text.as_str())
-                        } else {
-                            None
+                let mut parts: Vec<String> = Vec::new();
+                for c in content.iter() {
+                    match c {
+                        AssistantContent::Text(t) => parts.push(t.text.clone()),
+                        AssistantContent::ToolCall(tc) => {
+                            let name = &tc.function.name;
+                            let args_preview = tc
+                                .function
+                                .arguments
+                                .as_str()
+                                .map(|s| truncate_preview(s, 80))
+                                .unwrap_or_else(|| "...".to_string());
+                            parts.push(format!("[Tool: {}] {}", name, args_preview));
                         }
-                    })
-                    .collect::<Vec<_>>()
-                    .join("");
+                    }
+                }
+                let content = parts.join("\n\n");
                 SessionMessage {
                     role: "assistant".to_string(),
-                    content: text,
+                    content: if content.is_empty() {
+                        "[Tool call]".to_string()
+                    } else {
+                        content
+                    },
                     timestamp: Utc::now(),
                 }
             }
+        }
+    }
+
+    fn tool_result_preview(tr: &rig::message::ToolResult) -> String {
+        let text_parts: Vec<String> = tr
+            .content
+            .iter()
+            .filter_map(|c| {
+                if let ToolResultContent::Text(t) = c {
+                    Some(truncate_preview(&t.text, TOOL_RESULT_PREVIEW_LEN))
+                } else {
+                    Some("[image]".to_string())
+                }
+            })
+            .collect();
+        if text_parts.is_empty() {
+            "[no text]".to_string()
+        } else {
+            text_parts.join("; ")
         }
     }
 
