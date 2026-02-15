@@ -18,9 +18,10 @@ pub struct ContextBuilder {
 }
 
 impl ContextBuilder {
-    /// `workspace`: where to load bootstrap files and skills from.
+    /// `workspace`: where to load bootstrap files (AGENTS.md, SOUL.md, etc.) from.
     /// `agent_id`: which agent's memory to use (e.g. "main" or role name); stored at ~/.synbot/memory/{agent_id}.
-    pub fn new(workspace: &Path, agent_id: &str) -> Self {
+    /// `skills_dir`: global skills root (e.g. `config::skills_dir()`), i.e. `~/.synbot/skills/`.
+    pub fn new(workspace: &Path, agent_id: &str, skills_dir: &Path) -> Self {
         let agent_id = if agent_id.is_empty() {
             "main".to_string()
         } else {
@@ -29,7 +30,7 @@ impl ContextBuilder {
         Self {
             workspace: workspace.to_path_buf(),
             memory: MemoryStore::new(&agent_id),
-            skills: SkillsLoader::new(workspace),
+            skills: SkillsLoader::new(skills_dir),
             agent_id,
         }
     }

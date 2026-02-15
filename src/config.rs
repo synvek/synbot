@@ -952,6 +952,11 @@ pub fn roles_dir() -> PathBuf {
     config_dir().join("roles")
 }
 
+/// 应用可用的 skills 目录：`~/.synbot/skills/`。每个 skill 为子目录且含 SKILL.md。
+pub fn skills_dir() -> PathBuf {
+    config_dir().join("skills")
+}
+
 pub fn workspace_path(cfg: &Config) -> PathBuf {
     let raw = &cfg.agent.workspace;
     if raw.starts_with('~') {

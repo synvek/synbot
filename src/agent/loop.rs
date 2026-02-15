@@ -168,7 +168,7 @@ impl AgentLoop {
             let session_key = session_id.format();
 
             let (system_prompt, model_max_iterations) = if agent_id == "main" {
-                let context = ContextBuilder::new(&self.workspace, "main");
+                let context = ContextBuilder::new(&self.workspace, "main", config::skills_dir().as_path());
                 (context.build_system_prompt(), self.max_iterations)
             } else {
                 let role = self.role_registry.get(&agent_id).unwrap();
@@ -307,7 +307,7 @@ impl AgentLoop {
             let session_key = session_id.format();
 
             let (system_prompt, model_max_iterations) = if agent_id == "main" {
-                let context = ContextBuilder::new(&self.workspace, "main");
+                let context = ContextBuilder::new(&self.workspace, "main", config::skills_dir().as_path());
                 (context.build_system_prompt(), self.max_iterations)
             } else {
                 let role = self.role_registry.get(&agent_id).unwrap();

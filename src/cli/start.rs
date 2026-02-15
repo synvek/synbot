@@ -87,7 +87,11 @@ pub async fn cmd_start() -> Result<()> {
         let _ = crate::agent::memory_index::open_index("main");
     }
 
-    let skills_loader = std::sync::Arc::new(crate::agent::skills::SkillsLoader::new(&ws));
+    let skills_dir = config::skills_dir();
+    if let Err(e) = std::fs::create_dir_all(&skills_dir) {
+        tracing::warn!(path = %skills_dir.display(), error = %e, "Could not create skills dir");
+    }
+    let skills_loader = std::sync::Arc::new(crate::agent::skills::SkillsLoader::new(&skills_dir));
 
     let cron_store_path = config::config_dir().join("cron").join("jobs.json");
     let cron_service = std::sync::Arc::new(tokio::sync::RwLock::new(

@@ -1,22 +1,25 @@
 //! Skills loader — markdown-based agent capabilities.
+//! Loads from the global skills directory `~/.synbot/skills/`, not from workspace.
 
 use std::path::{Path, PathBuf};
 
 pub struct SkillsLoader {
-    workspace_skills: PathBuf,
+    /// Global skills root: ~/.synbot/skills/
+    skills_root: PathBuf,
 }
 
 impl SkillsLoader {
-    pub fn new(workspace: &Path) -> Self {
+    /// Create a loader for the given skills root (e.g. `config::skills_dir()`).
+    pub fn new(skills_root: &Path) -> Self {
         Self {
-            workspace_skills: workspace.join("skills"),
+            skills_root: skills_root.to_path_buf(),
         }
     }
 
     /// List available skill names.
     pub fn list_skills(&self) -> Vec<String> {
         let mut names = Vec::new();
-        if let Ok(entries) = std::fs::read_dir(&self.workspace_skills) {
+        if let Ok(entries) = std::fs::read_dir(&self.skills_root) {
             for entry in entries.flatten() {
                 if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
                     let skill_file = entry.path().join("SKILL.md");
@@ -33,7 +36,7 @@ impl SkillsLoader {
 
     /// Load a skill's content by name.
     pub fn load_skill(&self, name: &str) -> Option<String> {
-        let path = self.workspace_skills.join(name).join("SKILL.md");
+        let path = self.skills_root.join(name).join("SKILL.md");
         std::fs::read_to_string(&path).ok()
     }
 
