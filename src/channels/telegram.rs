@@ -358,7 +358,7 @@ impl Channel for TelegramChannel {
                             let sender =
                                 m.from.map(|u| u.id.to_string()).unwrap_or_default();
                             if !self.is_allowed(&sender, &self.config.allow_from) {
-                                warn!(sender, "Access denied");
+                                warn!(sender, "Telegram access denied (sender not in allowFrom)");
                                 continue;
                             }
                             if let Some(text) = m.text {

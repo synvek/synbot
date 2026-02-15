@@ -158,7 +158,8 @@ pub trait Channel: Send + Sync {
     async fn stop(&mut self) -> Result<()>;
     async fn send(&self, msg: &OutboundMessage) -> Result<()>;
 
-    /// Check if a sender is in the allow-list. Empty list = allow all.
+    /// Check if a sender is allowed by the channel's allowFrom list.
+    /// Rule: if the list is empty, allow all IDs; otherwise only allow IDs in the list.
     fn is_allowed(&self, sender_id: &str, allow_list: &[String]) -> bool {
         if allow_list.is_empty() {
             return true;

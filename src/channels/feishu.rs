@@ -245,11 +245,11 @@ impl FeishuChannel {
                             "Feishu received message from sender"
                         );
 
-                        // Access control
+                        // allowFrom: empty list = allow all IDs; otherwise only allow IDs in the list
                         if !allow_from.is_empty()
                             && !allow_from.iter().any(|a| a == &sender_open_id)
                         {
-                            warn!(sender = %sender_open_id, "Feishu access denied");
+                            warn!(sender = %sender_open_id, "Feishu access denied (sender not in allowFrom)");
                             return;
                         }
 

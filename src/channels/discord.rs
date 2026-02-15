@@ -187,7 +187,7 @@ fn discord_event_to_inbound(
         return None;
     }
 
-    // Access control: empty allow_from means allow all
+    // allowFrom: empty list = allow all IDs; otherwise only allow IDs in the list
     if !allow_from.is_empty() && !allow_from.iter().any(|a| a == &sender_id) {
         warn!(sender = %sender_id, "Discord access denied (sender not in allow_from)");
         return None;

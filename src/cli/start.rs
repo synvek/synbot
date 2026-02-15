@@ -125,6 +125,22 @@ pub async fn cmd_start() -> Result<()> {
         }
     });
 
+    // Start Telegram channel if enabled
+    if cfg.channels.telegram.enabled {
+        let tg_inbound = inbound_tx.clone();
+        let tg_outbound = bus.subscribe_outbound();
+        let tg_cfg = cfg.channels.telegram.clone();
+        let show_tool_calls = cfg.show_tool_calls && cfg.channels.telegram.show_tool_calls;
+        tokio::spawn(async move {
+            let mut ch = crate::channels::telegram::TelegramChannel::new(
+                tg_cfg, tg_inbound, tg_outbound, show_tool_calls,
+            );
+            if let Err(e) = ch.start().await {
+                tracing::error!("Telegram channel error: {e:#}");
+            }
+        });
+    }
+
     // Start Feishu channel if enabled
     if cfg.channels.feishu.enabled {
         let tg_inbound = inbound_tx.clone();
