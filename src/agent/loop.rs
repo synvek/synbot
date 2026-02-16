@@ -129,6 +129,18 @@ impl AgentLoop {
             message_length = msg.content.len(),
         );
         async {
+            // When trigger_agent is false (e.g. not in allowlist, or group message not @bot),
+            // still append the message to session and persist so the user can see history and update allowlist.
+            let trigger_agent = msg
+                .metadata
+                .get("trigger_agent")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            if !trigger_agent {
+                self.save_message_only(&msg).await?;
+                return Ok(());
+            }
+
             let start = std::time::Instant::now();
             info!(chat = %msg.chat_id, "Processing message");
             let directives = DirectiveParser::parse(&msg.content);
@@ -141,6 +153,62 @@ impl AgentLoop {
         }
         .instrument(span)
         .await
+    }
+
+    /// Append the message to the main agent's session and persist to disk, without running completion.
+    /// Used when the chat is not in allowlist or when it's a group message not directed at the bot.
+    async fn save_message_only(&mut self, msg: &InboundMessage) -> Result<()> {
+        let agent_id = "main";
+        let session_id = {
+            let sm = self.session_manager.write().await;
+            sm.resolve_session(agent_id, &msg.channel, &msg.chat_id, &msg.metadata)
+        };
+        let session_key = session_id.format();
+
+        let user_content = msg.content.clone();
+        {
+            let mut sessions = self.sessions.lock().await;
+            let history = sessions.entry(session_key.clone()).or_default();
+            history.push(Message::user(&user_content));
+        }
+        {
+            let mut sm = self.session_manager.write().await;
+            let user_msg = crate::agent::session::SessionMessage {
+                role: "user".to_string(),
+                content: user_content,
+                timestamp: chrono::Utc::now(),
+            };
+            sm.append(&session_id, user_msg);
+        }
+
+        let sessions = self.sessions.lock().await;
+        if let Some(messages) = sessions.get(&session_key) {
+            let now = chrono::Utc::now();
+            let meta = crate::agent::session_manager::SessionMeta {
+                id: session_id.clone(),
+                participants: vec![
+                    format!("{}:{}", msg.channel, msg.sender_id),
+                    format!("agent:{}", agent_id),
+                ],
+                created_at: now,
+                updated_at: now,
+            };
+            let mut sm = self.session_manager.write().await;
+            let session_messages: Vec<crate::agent::session::SessionMessage> =
+                messages.iter().map(crate::agent::session::SessionMessage::from_message).collect();
+            let history = sm.get_or_create(&session_id);
+            history.clear();
+            history.extend(session_messages);
+            drop(sm);
+            if let Err(e) = self.session_store.save_session(&session_key, messages, Some(&meta)).await {
+                warn!(
+                    session_key = %session_key,
+                    error = %e,
+                    "Failed to persist session (save_message_only)"
+                );
+            }
+        }
+        Ok(())
     }
 
     async fn process_directives_sequential(

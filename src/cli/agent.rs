@@ -65,10 +65,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
 
     // Create session_manager for CLI mode
     let session_manager = std::sync::Arc::new(tokio::sync::RwLock::new(
-        crate::agent::session_manager::SessionManager::new(
-            cfg.groups.clone(),
-            cfg.topics.clone(),
-        ),
+        crate::agent::session_manager::SessionManager::new(),
     ));
 
     // Agent loop

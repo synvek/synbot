@@ -15,7 +15,7 @@ use tracing::{error, info, warn};
 
 use crate::bus::{InboundMessage, OutboundMessage};
 use crate::channels::{approval_parser, Channel, RetryPolicy, RetryState};
-use crate::config::TelegramConfig;
+use crate::config::{AllowlistEntry, TelegramConfig};
 use crate::tools::approval::{ApprovalManager, ApprovalResponse};
 
 const API_BASE: &str = "https://api.telegram.org/bot";
@@ -249,7 +249,7 @@ impl std::fmt::Display for TelegramPollError {
 #[async_trait]
 impl Channel for TelegramChannel {
     fn name(&self) -> &str {
-        "telegram"
+        &self.config.name
     }
 
     async fn start(&mut self) -> Result<()> {
@@ -264,11 +264,12 @@ impl Channel for TelegramChannel {
         let mut outbound_rx = self.outbound_rx.take().unwrap();
         let client = self.client.clone();
         let token = self.config.token.clone();
+        let channel_name = self.config.name.clone();
         let pending_approvals = self.pending_approvals.clone();
         let show_tool_calls = self.show_tool_calls;
         tokio::spawn(async move {
             while let Ok(msg) = outbound_rx.recv().await {
-                if msg.channel != "telegram" {
+                if msg.channel != channel_name {
                     continue;
                 }
                 if let Ok(chat_id) = msg.chat_id.parse::<i64>() {
@@ -357,13 +358,73 @@ impl Channel for TelegramChannel {
                         if let Some(m) = u.message {
                             let sender =
                                 m.from.map(|u| u.id.to_string()).unwrap_or_default();
-                            if !self.is_allowed(&sender, &self.config.allow_from) {
-                                warn!(sender, "Telegram access denied (sender not in allowFrom)");
-                                continue;
-                            }
                             if let Some(text) = m.text {
+                                let chat_id_str = m.chat.id.to_string();
+                                let entry = self
+                                    .config
+                                    .allowlist
+                                    .iter()
+                                    .find(|e| e.chat_id == chat_id_str);
+                                let (trigger_agent, content, is_group) = match entry {
+                                    None => {
+                                        warn!(
+                                            chat_id = %chat_id_str,
+                                            "Telegram: chat not in allowlist, saving to session only"
+                                        );
+                                        let _ = self
+                                            .send_text(m.chat.id, "未配置聊天许可，请配置。")
+                                            .await;
+                                        let _ = self.inbound_tx.send(InboundMessage {
+                                            channel: self.config.name.clone(),
+                                            sender_id: sender.clone(),
+                                            chat_id: chat_id_str.clone(),
+                                            content: text.clone(),
+                                            timestamp: chrono::Utc::now(),
+                                            media: vec![],
+                                            metadata: serde_json::json!({ "trigger_agent": false }),
+                                        }).await;
+                                        continue;
+                                    }
+                                    Some(e) => {
+                                        if let Some(ref my_name) = e.my_name {
+                                            let trimmed = text.trim_start();
+                                            let mention = format!("@{}", my_name);
+                                            let starts = trimmed.starts_with(&mention)
+                                                || trimmed
+                                                    .strip_prefix('@')
+                                                    .map(|s| s.trim_start().starts_with(my_name))
+                                                    .unwrap_or(false);
+                                            if !starts {
+                                                info!(
+                                                    chat_id = %chat_id_str,
+                                                    "Telegram: group message not @bot, saving to session only"
+                                                );
+                                                let _ = self.inbound_tx.send(InboundMessage {
+                                                    channel: self.config.name.clone(),
+                                                    sender_id: sender.clone(),
+                                                    chat_id: chat_id_str.clone(),
+                                                    content: text.clone(),
+                                                    timestamp: chrono::Utc::now(),
+                                                    media: vec![],
+                                                    metadata: serde_json::json!({
+                                                        "trigger_agent": false,
+                                                        "group": true,
+                                                    }),
+                                                }).await;
+                                                continue;
+                                            }
+                                            let stripped = trimmed
+                                                .strip_prefix(&mention)
+                                                .map(str::trim_start)
+                                                .unwrap_or_else(|| trimmed.strip_prefix('@').map(str::trim_start).unwrap_or(trimmed));
+                                            (true, stripped.to_string(), true)
+                                        } else {
+                                            (true, text.clone(), false)
+                                        }
+                                    }
+                                };
                                 // 检查是否为审批响应
-                                if let Some(approved) = approval_parser::is_approval_response(&text) {
+                                if let Some(approved) = approval_parser::is_approval_response(&content) {
                                     // 检查用户是否有待处理的审批请求
                                     if let Some((request_id, chat_id_str)) = self.take_pending_approval(&sender).await {
                                         if let Some(ref manager) = self.approval_manager {
@@ -405,20 +466,20 @@ impl Channel for TelegramChannel {
                                         continue; // 不将审批响应作为普通消息发送
                                     }
                                 }
-                                
                                 // 普通消息处理
-                                let _ = self
-                                    .inbound_tx
-                                    .send(InboundMessage {
-                                        channel: "telegram".into(),
-                                        sender_id: sender,
-                                        chat_id: m.chat.id.to_string(),
-                                        content: text,
-                                        timestamp: chrono::Utc::now(),
-                                        media: vec![],
-                                        metadata: serde_json::Value::Null,
-                                    })
-                                    .await;
+                                let mut meta = serde_json::json!({ "trigger_agent": true });
+                                if is_group {
+                                    meta["group"] = serde_json::json!(true);
+                                }
+                                let _ = self.inbound_tx.send(InboundMessage {
+                                    channel: self.config.name.clone(),
+                                    sender_id: sender,
+                                    chat_id: m.chat.id.to_string(),
+                                    content,
+                                    timestamp: chrono::Utc::now(),
+                                    media: vec![],
+                                    metadata: meta,
+                                }).await;
                             }
                         }
                     }

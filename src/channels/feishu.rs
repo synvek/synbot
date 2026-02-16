@@ -24,7 +24,7 @@ use tracing::{error, info, warn};
 
 use crate::bus::{InboundMessage, OutboundMessage};
 use crate::channels::{approval_parser, Channel, RetryPolicy, RetryState};
-use crate::config::FeishuConfig;
+use crate::config::{AllowlistEntry, FeishuConfig};
 use crate::tools::approval::{ApprovalManager, ApprovalResponse};
 
 pub struct FeishuChannel {
@@ -214,7 +214,8 @@ impl FeishuChannel {
     /// error for the retry loop to handle.
     async fn attempt_ws_connection(
         inbound_tx: mpsc::Sender<InboundMessage>,
-        allow_from: Vec<String>,
+        allowlist: Vec<AllowlistEntry>,
+        channel_name: String,
         app_id: String,
         app_secret: String,
         approval_manager: Option<Arc<ApprovalManager>>,
@@ -245,14 +246,6 @@ impl FeishuChannel {
                             "Feishu received message from sender"
                         );
 
-                        // allowFrom: empty list = allow all IDs; otherwise only allow IDs in the list
-                        if !allow_from.is_empty()
-                            && !allow_from.iter().any(|a| a == &sender_open_id)
-                        {
-                            warn!(sender = %sender_open_id, "Feishu access denied (sender not in allowFrom)");
-                            return;
-                        }
-
                         let msg = &event.event.message;
                         info!(
                             message_type = %msg.message_type,
@@ -279,8 +272,97 @@ impl FeishuChannel {
                             return;
                         }
 
+                        // Allowlist by chat_id. When not found, reply and still send to bus.
+                        let chat_id = msg.chat_id.clone();
+                        let entry = allowlist.iter().find(|e| e.chat_id == chat_id);
+                        let (trigger_agent, content, is_group) = match entry {
+                            None => {
+                                warn!(chat_id = %chat_id, "Feishu: chat not in allowlist, saving to session only");
+                                let inbound_tx_clone = inbound_tx.clone();
+                                let sender_id = sender_open_id.clone();
+                                let text_clone = text.clone();
+                                let message_id = msg.message_id.clone();
+                                let message_type = msg.message_type.clone();
+                                let chat_type = msg.chat_type.clone();
+                                let channel_name_clone = channel_name.clone();
+                                let app_id_clone = app_id.clone();
+                                let app_secret_clone = app_secret.clone();
+                                tokio::task::spawn_local(async move {
+                                    let client = LarkClient::builder(&app_id_clone, &app_secret_clone)
+                                        .with_app_type(AppType::SelfBuild)
+                                        .with_enable_token_cache(true)
+                                        .build();
+                                    let _ = Self::send_text_static(&client, &chat_id, "未配置聊天许可，请配置。").await;
+                                    let inbound = InboundMessage {
+                                        channel: channel_name_clone,
+                                        sender_id,
+                                        chat_id,
+                                        content: text_clone,
+                                        timestamp: chrono::Utc::now(),
+                                        media: vec![],
+                                        metadata: serde_json::json!({
+                                            "message_id": message_id,
+                                            "message_type": message_type,
+                                            "chat_type": chat_type,
+                                            "trigger_agent": false,
+                                        }),
+                                    };
+                                    if let Err(e) = inbound_tx_clone.try_send(inbound) {
+                                        error!("Feishu failed to forward allowlist-denied message: {e}");
+                                    }
+                                });
+                                return;
+                            }
+                            Some(e) => {
+                                if let Some(ref my_name) = e.my_name {
+                                    let trimmed = text.trim_start();
+                                    let mention = format!("@{}", my_name);
+                                    let starts = trimmed.starts_with(&mention)
+                                        || trimmed
+                                            .strip_prefix('@')
+                                            .map(|s| s.trim_start().starts_with(my_name))
+                                            .unwrap_or(false);
+                                    if !starts {
+                                        info!(
+                                            chat_id = %chat_id,
+                                            "Feishu: group message not @bot, saving to session only"
+                                        );
+                                        let inbound_tx_clone = inbound_tx.clone();
+                                        let sender_id = sender_open_id.clone();
+                                        let channel_name_clone = channel_name.clone();
+                                        let message_id = msg.message_id.clone();
+                                        let message_type = msg.message_type.clone();
+                                        let chat_type = msg.chat_type.clone();
+                                        let _ = inbound_tx_clone.try_send(InboundMessage {
+                                            channel: channel_name_clone,
+                                            sender_id,
+                                            chat_id: chat_id.clone(),
+                                            content: text.clone(),
+                                            timestamp: chrono::Utc::now(),
+                                            media: vec![],
+                                            metadata: serde_json::json!({
+                                                "message_id": message_id,
+                                                "message_type": message_type,
+                                                "chat_type": chat_type,
+                                                "trigger_agent": false,
+                                                "group": true,
+                                            }),
+                                        });
+                                        return;
+                                    }
+                                    let stripped = trimmed
+                                        .strip_prefix(&mention)
+                                        .map(str::trim_start)
+                                        .unwrap_or_else(|| trimmed.strip_prefix('@').map(str::trim_start).unwrap_or(trimmed));
+                                    (true, stripped.to_string(), true)
+                                } else {
+                                    (true, text.clone(), false)
+                                }
+                            }
+                        };
+
                         // 检查是否为审批响应
-                        if let Some(approved) = approval_parser::is_approval_response(&text) {
+                        if let Some(approved) = approval_parser::is_approval_response(&content) {
                             // 需要在异步上下文中处理审批响应
                             let approval_manager_clone = approval_manager.clone();
                             let pending_approvals_clone = pending_approvals.clone();
@@ -333,18 +415,22 @@ impl FeishuChannel {
                             return; // 不将审批响应作为普通消息发送
                         }
 
+                        let mut meta = serde_json::json!({
+                            "message_id": msg.message_id,
+                            "message_type": msg.message_type,
+                            "chat_type": msg.chat_type,
+                        });
+                        if is_group {
+                            meta["group"] = serde_json::json!(true);
+                        }
                         let inbound = InboundMessage {
-                            channel: "feishu".into(),
+                            channel: channel_name.clone(),
                             sender_id: sender_open_id,
                             chat_id: msg.chat_id.clone(),
-                            content: text,
+                            content,
                             timestamp: chrono::Utc::now(),
                             media: vec![],
-                            metadata: serde_json::json!({
-                                "message_id": msg.message_id,
-                                "message_type": msg.message_type,
-                                "chat_type": msg.chat_type,
-                            }),
+                            metadata: meta,
                         };
 
                         // Use try_send to avoid needing async context.
@@ -397,7 +483,7 @@ impl FeishuChannel {
 #[async_trait]
 impl Channel for FeishuChannel {
     fn name(&self) -> &str {
-        "feishu"
+        &self.config.name
     }
 
     async fn start(&mut self) -> Result<()> {
@@ -443,11 +529,12 @@ impl Channel for FeishuChannel {
         // --- Spawn outbound message dispatcher ---
         let mut outbound_rx = self.outbound_rx.take().unwrap();
         let outbound_client = self.build_lark_client();
+        let feishu_channel_name = self.config.name.clone();
         let pending_approvals_clone = self.pending_approvals.clone();
         let show_tool_calls = self.show_tool_calls;
         tokio::spawn(async move {
             while let Ok(msg) = outbound_rx.recv().await {
-                if msg.channel != "feishu" {
+                if msg.channel != feishu_channel_name {
                     continue;
                 }
                 let content = match msg.message_type {
@@ -515,7 +602,8 @@ impl Channel for FeishuChannel {
         while self.running {
             let result = FeishuChannel::attempt_ws_connection(
                 self.inbound_tx.clone(),
-                self.config.allow_from.clone(),
+                self.config.allowlist.clone(),
+                self.config.name.clone(),
                 self.config.app_id.clone(),
                 self.config.app_secret.clone(),
                 self.approval_manager.clone(),

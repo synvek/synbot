@@ -23,7 +23,7 @@ use tracing::{error, info, warn};
 
 use crate::bus::{InboundMessage, OutboundMessage};
 use crate::channels::{approval_parser, Channel, RetryPolicy, RetryState};
-use crate::config::DiscordConfig;
+use crate::config::{AllowlistEntry, DiscordConfig};
 use crate::tools::approval::{ApprovalManager, ApprovalResponse};
 
 // ---------------------------------------------------------------------------
@@ -143,11 +143,8 @@ pub fn split_message(content: &str, max_len: usize) -> Vec<String> {
 /// Convert a Discord MESSAGE_CREATE event payload into an InboundMessage.
 ///
 /// Returns `None` if the message is from a bot, has no text content,
-/// the sender is not in the allow list, or required fields are missing.
-fn discord_event_to_inbound(
-    data: &serde_json::Value,
-    allow_from: &[String],
-) -> Option<InboundMessage> {
+/// or required fields are missing. Allowlist is checked by the caller.
+fn discord_event_to_inbound(data: &serde_json::Value) -> Option<InboundMessage> {
     let author = match data.get("author") {
         Some(a) => a,
         None => {
@@ -184,12 +181,6 @@ fn discord_event_to_inbound(
 
     if content.is_empty() {
         info!("Discord: Ignoring empty content");
-        return None;
-    }
-
-    // allowFrom: empty list = allow all IDs; otherwise only allow IDs in the list
-    if !allow_from.is_empty() && !allow_from.iter().any(|a| a == &sender_id) {
-        warn!(sender = %sender_id, "Discord access denied (sender not in allow_from)");
         return None;
     }
 
@@ -345,6 +336,33 @@ impl DiscordChannel {
         Ok(())
     }
 
+    /// Send a plain text message to a channel (used e.g. for allowlist denial reply).
+    async fn send_text_to_channel(
+        client: &reqwest::Client,
+        token: &str,
+        channel_id: &str,
+        content: &str,
+    ) -> Result<()> {
+        let url = format!("{}/channels/{}/messages", API_BASE, channel_id);
+        let resp = client
+            .post(&url)
+            .header("Authorization", format!("Bot {}", token))
+            .json(&serde_json::json!({ "content": content }))
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            error!(
+                channel_id = %channel_id,
+                status = %status,
+                "Discord send_text_to_channel failed: {body}"
+            );
+            anyhow::bail!("Discord send failed: HTTP {status}: {body}");
+        }
+        Ok(())
+    }
+
     /// Send a system notification to the Agent via the MessageBus.
     async fn notify_system_error(&self, error_msg: &str) {
         let notification = InboundMessage {
@@ -397,7 +415,8 @@ impl DiscordChannel {
     async fn run_gateway_session(
         token: &str,
         inbound_tx: &mpsc::Sender<InboundMessage>,
-        allow_from: &[String],
+        allowlist: &[AllowlistEntry],
+        channel_name: &str,
         resume: &mut ResumeState,
         approval_manager: &Option<Arc<ApprovalManager>>,
         pending_approvals: &Arc<RwLock<HashMap<String, (String, String)>>>,
@@ -582,9 +601,65 @@ impl DiscordChannel {
                                 "MESSAGE_CREATE" => {
                                     if let Some(d) = payload.get("d") {
                                         info!("Discord MESSAGE_CREATE event received");
-                                        if let Some(inbound) =
-                                            discord_event_to_inbound(d, allow_from)
-                                        {
+                                        if let Some(mut inbound) = discord_event_to_inbound(d) {
+                                            inbound.channel = channel_name.to_string();
+                                            let entry = allowlist
+                                                .iter()
+                                                .find(|e| e.chat_id == inbound.chat_id);
+                                            let (trigger_agent, content) = match entry {
+                                                None => {
+                                                    warn!(
+                                                        chat_id = %inbound.chat_id,
+                                                        "Discord: chat not in allowlist, saving to session only"
+                                                    );
+                                                    let _ = Self::send_text_to_channel(
+                                                        client,
+                                                        token,
+                                                        &inbound.chat_id,
+                                                        "未配置聊天许可，请配置。",
+                                                    )
+                                                    .await;
+                                                    inbound.metadata["trigger_agent"] =
+                                                        serde_json::json!(false);
+                                                    (false, inbound.content.clone())
+                                                }
+                                                Some(e) => {
+                                                    if let Some(ref my_name) = e.my_name {
+                                                        let trimmed = inbound.content.trim_start();
+                                                        let mention_prefix = format!("<@!{}>", my_name);
+                                                        let mention_prefix_alt = format!("<@{}>", my_name);
+                                                        let starts = trimmed.starts_with(&mention_prefix)
+                                                            || trimmed.starts_with(&mention_prefix_alt);
+                                                        if !starts {
+                                                            info!(
+                                                                chat_id = %inbound.chat_id,
+                                                                "Discord: group message not @bot, saving to session only"
+                                                            );
+                                                            inbound.metadata["trigger_agent"] =
+                                                                serde_json::json!(false);
+                                                            inbound.metadata["group"] =
+                                                                serde_json::json!(true);
+                                                            (false, inbound.content.clone())
+                                                        } else {
+                                                            let stripped = trimmed
+                                                                .strip_prefix(&mention_prefix)
+                                                                .or_else(|| trimmed.strip_prefix(&mention_prefix_alt))
+                                                                .unwrap_or(trimmed)
+                                                                .trim_start();
+                                                            inbound.content = stripped.to_string();
+                                                            inbound.metadata["group"] =
+                                                                serde_json::json!(true);
+                                                            (true, inbound.content.clone())
+                                                        }
+                                                    } else {
+                                                        (true, inbound.content.clone())
+                                                    }
+                                                }
+                                            };
+                                            if !trigger_agent {
+                                                let _ = inbound_tx.send(inbound).await;
+                                                continue;
+                                            }
                                             // 检查是否为审批响应
                                             if let Some(approved) = approval_parser::is_approval_response(&inbound.content) {
                                                 // 检查用户是否有待处理的审批请求
@@ -693,7 +768,7 @@ impl DiscordChannel {
 #[async_trait]
 impl Channel for DiscordChannel {
     fn name(&self) -> &str {
-        "discord"
+        &self.config.name
     }
 
     async fn start(&mut self) -> Result<()> {
@@ -704,11 +779,12 @@ impl Channel for DiscordChannel {
         let mut outbound_rx = self.outbound_rx.take().unwrap();
         let outbound_client = self.client.clone();
         let outbound_token = self.config.token.clone();
+        let outbound_channel_name = self.config.name.clone();
         let pending_approvals_clone = self.pending_approvals.clone();
         let show_tool_calls = self.show_tool_calls;
         tokio::spawn(async move {
             while let Ok(msg) = outbound_rx.recv().await {
-                if msg.channel != "discord" {
+                if msg.channel != outbound_channel_name {
                     continue;
                 }
                 let content = match msg.message_type {
@@ -792,7 +868,8 @@ impl Channel for DiscordChannel {
             let result = Self::run_gateway_session(
                 &self.config.token,
                 &self.inbound_tx,
-                &self.config.allow_from,
+                &self.config.allowlist,
+                &self.config.name,
                 &mut resume,
                 &self.approval_manager,
                 &self.pending_approvals,
@@ -1016,7 +1093,7 @@ mod tests {
     #[test]
     fn converts_valid_message() {
         let data = make_message_create("user-1", "chan-1", "hello bot", false);
-        let result = discord_event_to_inbound(&data, &[]);
+        let result = discord_event_to_inbound(&data);
         assert!(result.is_some());
         let msg = result.unwrap();
         assert_eq!(msg.channel, "discord");
@@ -1028,44 +1105,21 @@ mod tests {
     #[test]
     fn ignores_bot_messages() {
         let data = make_message_create("bot-1", "chan-1", "bot msg", true);
-        let result = discord_event_to_inbound(&data, &[]);
+        let result = discord_event_to_inbound(&data);
         assert!(result.is_none());
     }
 
     #[test]
     fn ignores_empty_content() {
         let data = make_message_create("user-1", "chan-1", "", false);
-        let result = discord_event_to_inbound(&data, &[]);
+        let result = discord_event_to_inbound(&data);
         assert!(result.is_none());
-    }
-
-    #[test]
-    fn respects_allow_list() {
-        let data = make_message_create("user-1", "chan-1", "hi", false);
-        let allow = vec!["user-2".to_string()];
-        let result = discord_event_to_inbound(&data, &allow);
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn allows_user_in_allow_list() {
-        let data = make_message_create("user-1", "chan-1", "hi", false);
-        let allow = vec!["user-1".to_string()];
-        let result = discord_event_to_inbound(&data, &allow);
-        assert!(result.is_some());
-    }
-
-    #[test]
-    fn empty_allow_list_allows_all() {
-        let data = make_message_create("anyone", "chan-1", "hi", false);
-        let result = discord_event_to_inbound(&data, &[]);
-        assert!(result.is_some());
     }
 
     #[test]
     fn metadata_contains_message_and_guild_id() {
         let data = make_message_create("user-1", "chan-1", "hi", false);
-        let msg = discord_event_to_inbound(&data, &[]).unwrap();
+        let msg = discord_event_to_inbound(&data).unwrap();
         assert_eq!(msg.metadata["message_id"], "msg-123");
         assert_eq!(msg.metadata["guild_id"], "guild-456");
     }

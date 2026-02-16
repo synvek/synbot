@@ -123,20 +123,28 @@ pub struct SystemStatus {
 
 /// GET /api/status - Returns system status
 pub async fn get_status(state: web::Data<AppState>) -> Result<HttpResponse> {
-    // Count enabled channels
-    let channel_count = {
-        let mut count = 0;
-        if state.config.channels.telegram.enabled {
-            count += 1;
-        }
-        if state.config.channels.discord.enabled {
-            count += 1;
-        }
-        if state.config.channels.feishu.enabled {
-            count += 1;
-        }
-        count
-    };
+    // Count enabled channel connections
+    let channel_count = state
+        .config
+        .channels
+        .telegram
+        .iter()
+        .filter(|c| c.enabled)
+        .count()
+        + state
+            .config
+            .channels
+            .discord
+            .iter()
+            .filter(|c| c.enabled)
+            .count()
+        + state
+            .config
+            .channels
+            .feishu
+            .iter()
+            .filter(|c| c.enabled)
+            .count();
 
     // Get session count
     let session_count = {
@@ -393,45 +401,42 @@ pub enum ChannelStatus {
     Disabled,
 }
 
-/// GET /api/channels - Returns list of channels with status
+/// GET /api/channels - Returns list of channel connections with status
 pub async fn get_channels(state: web::Data<AppState>) -> Result<HttpResponse> {
     let mut channels = Vec::new();
-    
-    // Telegram channel
-    channels.push(ChannelInfo {
-        name: "telegram".to_string(),
-        enabled: state.config.channels.telegram.enabled,
-        status: if state.config.channels.telegram.enabled {
-            // For now, assume connected if enabled
-            // TODO: Add actual connection status tracking
-            ChannelStatus::Connected
-        } else {
-            ChannelStatus::Disabled
-        },
-    });
-    
-    // Discord channel
-    channels.push(ChannelInfo {
-        name: "discord".to_string(),
-        enabled: state.config.channels.discord.enabled,
-        status: if state.config.channels.discord.enabled {
-            ChannelStatus::Connected
-        } else {
-            ChannelStatus::Disabled
-        },
-    });
-    
-    // Feishu channel
-    channels.push(ChannelInfo {
-        name: "feishu".to_string(),
-        enabled: state.config.channels.feishu.enabled,
-        status: if state.config.channels.feishu.enabled {
-            ChannelStatus::Connected
-        } else {
-            ChannelStatus::Disabled
-        },
-    });
-    
+    for c in &state.config.channels.telegram {
+        channels.push(ChannelInfo {
+            name: c.name.clone(),
+            enabled: c.enabled,
+            status: if c.enabled {
+                ChannelStatus::Connected
+            } else {
+                ChannelStatus::Disabled
+            },
+        });
+    }
+    for c in &state.config.channels.discord {
+        channels.push(ChannelInfo {
+            name: c.name.clone(),
+            enabled: c.enabled,
+            status: if c.enabled {
+                ChannelStatus::Connected
+            } else {
+                ChannelStatus::Disabled
+            },
+        });
+    }
+    for c in &state.config.channels.feishu {
+        channels.push(ChannelInfo {
+            name: c.name.clone(),
+            enabled: c.enabled,
+            status: if c.enabled {
+                ChannelStatus::Connected
+            } else {
+                ChannelStatus::Disabled
+            },
+        });
+    }
     Ok(HttpResponse::Ok().json(ApiResponse::success(channels)))
 }
 

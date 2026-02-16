@@ -67,10 +67,7 @@ pub async fn cmd_start() -> Result<()> {
 
     // Initialize components for web server
     let session_manager = std::sync::Arc::new(tokio::sync::RwLock::new(
-        crate::agent::session_manager::SessionManager::new(
-            cfg.groups.clone(),
-            cfg.topics.clone(),
-        ),
+        crate::agent::session_manager::SessionManager::new(),
     ));
 
     let mut role_registry = crate::agent::role_registry::RoleRegistry::new();
@@ -125,12 +122,14 @@ pub async fn cmd_start() -> Result<()> {
         }
     });
 
-    // Start Telegram channel if enabled
-    if cfg.channels.telegram.enabled {
+    for tg_cfg in &cfg.channels.telegram {
+        if !tg_cfg.enabled {
+            continue;
+        }
+        let tg_cfg = tg_cfg.clone();
         let tg_inbound = inbound_tx.clone();
         let tg_outbound = bus.subscribe_outbound();
-        let tg_cfg = cfg.channels.telegram.clone();
-        let show_tool_calls = cfg.show_tool_calls && cfg.channels.telegram.show_tool_calls;
+        let show_tool_calls = cfg.show_tool_calls && tg_cfg.show_tool_calls;
         tokio::spawn(async move {
             let mut ch = crate::channels::telegram::TelegramChannel::new(
                 tg_cfg, tg_inbound, tg_outbound, show_tool_calls,
@@ -141,15 +140,17 @@ pub async fn cmd_start() -> Result<()> {
         });
     }
 
-    // Start Feishu channel if enabled
-    if cfg.channels.feishu.enabled {
-        let tg_inbound = inbound_tx.clone();
-        let tg_outbound = bus.subscribe_outbound();
-        let tg_cfg = cfg.channels.feishu.clone();
-        let show_tool_calls = cfg.show_tool_calls && cfg.channels.feishu.show_tool_calls;
+    for feishu_cfg in &cfg.channels.feishu {
+        if !feishu_cfg.enabled {
+            continue;
+        }
+        let feishu_cfg = feishu_cfg.clone();
+        let feishu_inbound = inbound_tx.clone();
+        let feishu_outbound = bus.subscribe_outbound();
+        let show_tool_calls = cfg.show_tool_calls && feishu_cfg.show_tool_calls;
         tokio::spawn(async move {
             let mut ch = crate::channels::feishu::FeishuChannel::new(
-                tg_cfg, tg_inbound, tg_outbound, show_tool_calls,
+                feishu_cfg, feishu_inbound, feishu_outbound, show_tool_calls,
             );
             if let Err(e) = ch.start().await {
                 tracing::error!("Feishu channel error: {e:#}");
@@ -157,12 +158,14 @@ pub async fn cmd_start() -> Result<()> {
         });
     }
 
-    // Start Discord channel if enabled
-    if cfg.channels.discord.enabled {
+    for dc_cfg in &cfg.channels.discord {
+        if !dc_cfg.enabled {
+            continue;
+        }
+        let dc_cfg = dc_cfg.clone();
         let dc_inbound = inbound_tx.clone();
         let dc_outbound = bus.subscribe_outbound();
-        let dc_cfg = cfg.channels.discord.clone();
-        let show_tool_calls = cfg.show_tool_calls && cfg.channels.discord.show_tool_calls;
+        let show_tool_calls = cfg.show_tool_calls && dc_cfg.show_tool_calls;
         tokio::spawn(async move {
             let mut ch = crate::channels::discord::DiscordChannel::new(
                 dc_cfg, dc_inbound, dc_outbound, show_tool_calls,

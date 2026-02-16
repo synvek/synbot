@@ -6,15 +6,31 @@ use std::path::{Path, PathBuf};
 // Channel configs
 // ---------------------------------------------------------------------------
 
+/// Single allowlist entry: one chat (DM or group) allowed to talk to the bot.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AllowlistEntry {
+    /// Chat ID (user id for DM, group/channel id for group).
+    pub chat_id: String,
+    /// Human-readable alias for this chat (for logs and UI).
+    pub chat_alias: String,
+    /// Bot's name in the group (optional). When set, only messages starting with @my_name are processed.
+    #[serde(default)]
+    pub my_name: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct TelegramConfig {
+    /// Unique channel name (used to associate channel; default "telegram").
+    #[serde(default = "default_telegram_name")]
+    pub name: String,
     #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
     pub token: String,
     #[serde(default)]
-    pub allow_from: Vec<String>,
+    pub allowlist: Vec<AllowlistEntry>,
     pub proxy: Option<String>,
     /// When true (default), push tool execution progress to this channel.
     #[serde(default = "default_true")]
@@ -24,12 +40,15 @@ pub struct TelegramConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct DiscordConfig {
+    /// Unique channel name (default "discord").
+    #[serde(default = "default_discord_name")]
+    pub name: String,
     #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
     pub token: String,
     #[serde(default)]
-    pub allow_from: Vec<String>,
+    pub allowlist: Vec<AllowlistEntry>,
     /// When true (default), push tool execution progress to this channel.
     #[serde(default = "default_true")]
     pub show_tool_calls: bool,
@@ -38,6 +57,9 @@ pub struct DiscordConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct FeishuConfig {
+    /// Unique channel name (default "feishu").
+    #[serde(default = "default_feishu_name")]
+    pub name: String,
     #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
@@ -45,21 +67,31 @@ pub struct FeishuConfig {
     #[serde(default)]
     pub app_secret: String,
     #[serde(default)]
-    pub allow_from: Vec<String>,
+    pub allowlist: Vec<AllowlistEntry>,
     /// When true (default), push tool execution progress to this channel.
     #[serde(default = "default_true")]
     pub show_tool_calls: bool,
+}
+
+fn default_telegram_name() -> String {
+    "telegram".into()
+}
+fn default_discord_name() -> String {
+    "discord".into()
+}
+fn default_feishu_name() -> String {
+    "feishu".into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ChannelsConfig {
     #[serde(default)]
-    pub telegram: TelegramConfig,
+    pub telegram: Vec<TelegramConfig>,
     #[serde(default)]
-    pub discord: DiscordConfig,
+    pub discord: Vec<DiscordConfig>,
     #[serde(default)]
-    pub feishu: FeishuConfig,
+    pub feishu: Vec<FeishuConfig>,
 }
 
 // ---------------------------------------------------------------------------
@@ -90,33 +122,8 @@ pub struct ProvidersConfig {
 }
 
 // ---------------------------------------------------------------------------
-// Role, Participant, Group, Topic configs
+// Role configs
 // ---------------------------------------------------------------------------
-
-/// 参与者配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ParticipantConfig {
-    pub channel: String,
-    #[serde(default)]
-    pub channel_user_id: Option<String>,
-}
-
-/// 群组配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GroupConfig {
-    pub name: String,
-    pub participants: Vec<ParticipantConfig>,
-}
-
-/// 话题配置
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TopicConfig {
-    pub name: String,
-    pub participants: Vec<ParticipantConfig>,
-}
 
 /// 单个角色的配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -595,10 +602,6 @@ pub struct Config {
     pub log: LogConfig,
     #[serde(default)]
     pub main_channel: String,
-    #[serde(default)]
-    pub groups: Vec<GroupConfig>,
-    #[serde(default)]
-    pub topics: Vec<TopicConfig>,
 }
 
 // ---------------------------------------------------------------------------
@@ -756,69 +759,98 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
         }
     }
 
-    // --- Channel credentials ---
-    if config.channels.telegram.enabled && config.channels.telegram.token.is_empty() {
-        errors.push(ValidationError {
-            field: "channels.telegram.token".into(),
-            value: String::new(),
-            constraint: "must be non-empty when telegram is enabled".into(),
-        });
-    }
-
-    if config.channels.discord.enabled && config.channels.discord.token.is_empty() {
-        errors.push(ValidationError {
-            field: "channels.discord.token".into(),
-            value: String::new(),
-            constraint: "must be non-empty when discord is enabled".into(),
-        });
-    }
-
-    if config.channels.feishu.enabled {
-        if config.channels.feishu.app_id.is_empty() {
+    // --- Channel credentials and unique names ---
+    let mut all_channel_names = std::collections::HashSet::new();
+    for (i, c) in config.channels.telegram.iter().enumerate() {
+        if c.enabled && c.token.is_empty() {
             errors.push(ValidationError {
-                field: "channels.feishu.app_id".into(),
+                field: format!("channels.telegram[{}].token", i),
                 value: String::new(),
-                constraint: "must be non-empty when feishu is enabled".into(),
+                constraint: "must be non-empty when enabled".into(),
             });
         }
-        if config.channels.feishu.app_secret.is_empty() {
+        if !c.name.is_empty() && !all_channel_names.insert(c.name.clone()) {
             errors.push(ValidationError {
-                field: "channels.feishu.app_secret".into(),
-                value: String::new(),
-                constraint: "must be non-empty when feishu is enabled".into(),
+                field: format!("channels.telegram[{}].name", i),
+                value: c.name.clone(),
+                constraint: "channel name must be globally unique".into(),
             });
         }
     }
+    for (i, c) in config.channels.discord.iter().enumerate() {
+        if c.enabled && c.token.is_empty() {
+            errors.push(ValidationError {
+                field: format!("channels.discord[{}].token", i),
+                value: String::new(),
+                constraint: "must be non-empty when enabled".into(),
+            });
+        }
+        if !c.name.is_empty() && !all_channel_names.insert(c.name.clone()) {
+            errors.push(ValidationError {
+                field: format!("channels.discord[{}].name", i),
+                value: c.name.clone(),
+                constraint: "channel name must be globally unique".into(),
+            });
+        }
+    }
+    for (i, c) in config.channels.feishu.iter().enumerate() {
+        if c.enabled {
+            if c.app_id.is_empty() {
+                errors.push(ValidationError {
+                    field: format!("channels.feishu[{}].app_id", i),
+                    value: String::new(),
+                    constraint: "must be non-empty when enabled".into(),
+                });
+            }
+            if c.app_secret.is_empty() {
+                errors.push(ValidationError {
+                    field: format!("channels.feishu[{}].app_secret", i),
+                    value: String::new(),
+                    constraint: "must be non-empty when enabled".into(),
+                });
+            }
+        }
+        if !c.name.is_empty() && !all_channel_names.insert(c.name.clone()) {
+            errors.push(ValidationError {
+                field: format!("channels.feishu[{}].name", i),
+                value: c.name.clone(),
+                constraint: "channel name must be globally unique".into(),
+            });
+        }
+    }
 
-    // --- Collect enabled channel names for reference validation ---
-    let enabled_channels: Vec<&str> = {
+    // --- Collect enabled channel names for main_channel validation ---
+    let enabled_channels: Vec<String> = {
         let mut ch = Vec::new();
-        if config.channels.telegram.enabled {
-            ch.push("telegram");
+        for c in &config.channels.telegram {
+            if c.enabled && !c.name.is_empty() {
+                ch.push(c.name.clone());
+            }
         }
-        if config.channels.discord.enabled {
-            ch.push("discord");
+        for c in &config.channels.discord {
+            if c.enabled && !c.name.is_empty() {
+                ch.push(c.name.clone());
+            }
         }
-        if config.channels.feishu.enabled {
-            ch.push("feishu");
+        for c in &config.channels.feishu {
+            if c.enabled && !c.name.is_empty() {
+                ch.push(c.name.clone());
+            }
         }
         ch
     };
 
     // --- main_channel validation ---
-    // Only validate when multi-agent features are in use
-    let has_multi_agent_features = !config.agent.roles.is_empty()
-        || !config.groups.is_empty()
-        || !config.topics.is_empty();
+    let has_multi_agent_features = !config.agent.roles.is_empty();
 
     if has_multi_agent_features {
         if config.main_channel.is_empty() {
             errors.push(ValidationError {
                 field: "main_channel".into(),
                 value: String::new(),
-                constraint: "must be non-empty when roles, groups, or topics are configured".into(),
+                constraint: "must be non-empty when roles are configured".into(),
             });
-        } else if !enabled_channels.contains(&config.main_channel.as_str()) {
+        } else if !enabled_channels.contains(&config.main_channel) {
             errors.push(ValidationError {
                 field: "main_channel".into(),
                 value: config.main_channel.clone(),
@@ -869,38 +901,6 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
                 value: role.name.clone(),
                 constraint: "duplicate role name".into(),
             });
-        }
-    }
-
-    // --- Groups participant channel validation ---
-    for (i, group) in config.groups.iter().enumerate() {
-        for (j, participant) in group.participants.iter().enumerate() {
-            if !enabled_channels.contains(&participant.channel.as_str()) {
-                errors.push(ValidationError {
-                    field: format!("groups[{}].participants[{}].channel", i, j),
-                    value: participant.channel.clone(),
-                    constraint: format!(
-                        "must reference an enabled channel (available: {})",
-                        enabled_channels.join(", ")
-                    ),
-                });
-            }
-        }
-    }
-
-    // --- Topics participant channel validation ---
-    for (i, topic) in config.topics.iter().enumerate() {
-        for (j, participant) in topic.participants.iter().enumerate() {
-            if !enabled_channels.contains(&participant.channel.as_str()) {
-                errors.push(ValidationError {
-                    field: format!("topics[{}].participants[{}].channel", i, j),
-                    value: participant.channel.clone(),
-                    constraint: format!(
-                        "must reference an enabled channel (available: {})",
-                        enabled_channels.join(", ")
-                    ),
-                });
-            }
         }
     }
 
@@ -1121,62 +1121,88 @@ mod tests {
     #[test]
     fn telegram_enabled_with_empty_token_is_rejected() {
         let mut cfg = valid_config();
-        cfg.channels.telegram.enabled = true;
-        cfg.channels.telegram.token = String::new();
+        cfg.channels.telegram = vec![TelegramConfig {
+            name: "telegram".into(),
+            enabled: true,
+            token: String::new(),
+            ..Default::default()
+        }];
         let errors = validate_config(&cfg).unwrap_err();
-        assert!(find_error(&errors, "channels.telegram.token").is_some());
+        assert!(errors.iter().any(|e| e.field == "channels.telegram[0].token"));
     }
 
     #[test]
     fn telegram_enabled_with_token_is_accepted() {
         let mut cfg = valid_config();
-        cfg.channels.telegram.enabled = true;
-        cfg.channels.telegram.token = "bot123:abc".into();
+        cfg.channels.telegram = vec![TelegramConfig {
+            name: "telegram".into(),
+            enabled: true,
+            token: "bot123:abc".into(),
+            ..Default::default()
+        }];
         assert!(validate_config(&cfg).is_ok());
     }
 
     #[test]
     fn telegram_disabled_with_empty_token_is_accepted() {
         let mut cfg = valid_config();
-        cfg.channels.telegram.enabled = false;
-        cfg.channels.telegram.token = String::new();
+        cfg.channels.telegram = vec![TelegramConfig {
+            enabled: false,
+            ..Default::default()
+        }];
         assert!(validate_config(&cfg).is_ok());
     }
 
     #[test]
     fn discord_enabled_with_empty_token_is_rejected() {
         let mut cfg = valid_config();
-        cfg.channels.discord.enabled = true;
-        cfg.channels.discord.token = String::new();
+        cfg.channels.discord = vec![DiscordConfig {
+            name: "discord".into(),
+            enabled: true,
+            token: String::new(),
+            ..Default::default()
+        }];
         let errors = validate_config(&cfg).unwrap_err();
-        assert!(find_error(&errors, "channels.discord.token").is_some());
+        assert!(errors.iter().any(|e| e.field == "channels.discord[0].token"));
     }
 
     #[test]
     fn discord_enabled_with_token_is_accepted() {
         let mut cfg = valid_config();
-        cfg.channels.discord.enabled = true;
-        cfg.channels.discord.token = "discord-token".into();
+        cfg.channels.discord = vec![DiscordConfig {
+            name: "discord".into(),
+            enabled: true,
+            token: "discord-token".into(),
+            ..Default::default()
+        }];
         assert!(validate_config(&cfg).is_ok());
     }
 
     #[test]
     fn feishu_enabled_with_empty_credentials_is_rejected() {
         let mut cfg = valid_config();
-        cfg.channels.feishu.enabled = true;
-        cfg.channels.feishu.app_id = String::new();
-        cfg.channels.feishu.app_secret = String::new();
+        cfg.channels.feishu = vec![FeishuConfig {
+            name: "feishu".into(),
+            enabled: true,
+            app_id: String::new(),
+            app_secret: String::new(),
+            ..Default::default()
+        }];
         let errors = validate_config(&cfg).unwrap_err();
-        assert!(find_error(&errors, "channels.feishu.app_id").is_some());
-        assert!(find_error(&errors, "channels.feishu.app_secret").is_some());
+        assert!(errors.iter().any(|e| e.field == "channels.feishu[0].app_id"));
+        assert!(errors.iter().any(|e| e.field == "channels.feishu[0].app_secret"));
     }
 
     #[test]
     fn feishu_enabled_with_credentials_is_accepted() {
         let mut cfg = valid_config();
-        cfg.channels.feishu.enabled = true;
-        cfg.channels.feishu.app_id = "app-id".into();
-        cfg.channels.feishu.app_secret = "app-secret".into();
+        cfg.channels.feishu = vec![FeishuConfig {
+            name: "feishu".into(),
+            enabled: true,
+            app_id: "app-id".into(),
+            app_secret: "app-secret".into(),
+            ..Default::default()
+        }];
         assert!(validate_config(&cfg).is_ok());
     }
 
@@ -1188,15 +1214,19 @@ mod tests {
         cfg.agent.max_tokens = 0;
         cfg.agent.temperature = 5.0;
         cfg.tools.exec.timeout_secs = 0;
-        cfg.channels.telegram.enabled = true;
-        cfg.channels.telegram.token = String::new();
+        cfg.channels.telegram = vec![TelegramConfig {
+            name: "telegram".into(),
+            enabled: true,
+            token: String::new(),
+            ..Default::default()
+        }];
 
         let errors = validate_config(&cfg).unwrap_err();
         assert!(errors.len() >= 4, "expected at least 4 errors, got {}", errors.len());
         assert!(find_error(&errors, "agent.max_tokens").is_some());
         assert!(find_error(&errors, "agent.temperature").is_some());
         assert!(find_error(&errors, "tools.exec.timeout_secs").is_some());
-        assert!(find_error(&errors, "channels.telegram.token").is_some());
+        assert!(errors.iter().any(|e| e.field == "channels.telegram[0].token"));
     }
 
     // --- load_config integration ---
@@ -1239,8 +1269,12 @@ mod tests {
 
     fn config_with_telegram() -> Config {
         let mut cfg = valid_config();
-        cfg.channels.telegram.enabled = true;
-        cfg.channels.telegram.token = "bot123:abc".into();
+        cfg.channels.telegram = vec![TelegramConfig {
+            name: "telegram".into(),
+            enabled: true,
+            token: "bot123:abc".into(),
+            ..Default::default()
+        }];
         cfg.main_channel = "telegram".into();
         cfg
     }
@@ -1341,22 +1375,6 @@ mod tests {
         let mut cfg = config_with_telegram();
         cfg.agent.roles = vec![make_role("helper", None)];
         assert!(validate_config(&cfg).is_ok());
-    }
-
-    // --- Groups/topics participant channel validation ---
-
-    #[test]
-    fn group_participant_invalid_channel_is_rejected() {
-        let mut cfg = config_with_telegram();
-        cfg.groups = vec![GroupConfig {
-            name: "team".into(),
-            participants: vec![ParticipantConfig {
-                channel: "slack".into(),
-                channel_user_id: None,
-            }],
-        }];
-        let errors = validate_config(&cfg).unwrap_err();
-        assert!(errors.iter().any(|e| e.field.contains("groups[0].participants[0].channel")));
     }
 
     // --- ValidationError Display ---

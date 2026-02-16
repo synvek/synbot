@@ -1,6 +1,6 @@
 use crate::config::{
-    ChannelsConfig, Config, DiscordConfig, FeishuConfig, ProviderEntry, ProvidersConfig,
-    TelegramConfig, WebAuthConfig, WebConfig,
+    AllowlistEntry, ChannelsConfig, Config, DiscordConfig, FeishuConfig, ProviderEntry,
+    ProvidersConfig, TelegramConfig, WebAuthConfig, WebConfig,
 };
 use serde::Serialize;
 
@@ -18,35 +18,38 @@ pub struct SanitizedConfig {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SanitizedChannelsConfig {
-    pub telegram: SanitizedTelegramConfig,
-    pub discord: SanitizedDiscordConfig,
-    pub feishu: SanitizedFeishuConfig,
+    pub telegram: Vec<SanitizedTelegramConfig>,
+    pub discord: Vec<SanitizedDiscordConfig>,
+    pub feishu: Vec<SanitizedFeishuConfig>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SanitizedTelegramConfig {
+    pub name: String,
     pub enabled: bool,
     pub token: String,
-    pub allow_from: Vec<String>,
+    pub allowlist: Vec<AllowlistEntry>,
     pub proxy: Option<String>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SanitizedDiscordConfig {
+    pub name: String,
     pub enabled: bool,
     pub token: String,
-    pub allow_from: Vec<String>,
+    pub allowlist: Vec<AllowlistEntry>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SanitizedFeishuConfig {
+    pub name: String,
     pub enabled: bool,
     pub app_id: String,
     pub app_secret: String,
-    pub allow_from: Vec<String>,
+    pub allowlist: Vec<AllowlistEntry>,
 }
 
 #[derive(Serialize)]
@@ -94,35 +97,38 @@ pub fn sanitize_config(config: &Config) -> SanitizedConfig {
 
 fn sanitize_channels(channels: &ChannelsConfig) -> SanitizedChannelsConfig {
     SanitizedChannelsConfig {
-        telegram: sanitize_telegram(&channels.telegram),
-        discord: sanitize_discord(&channels.discord),
-        feishu: sanitize_feishu(&channels.feishu),
+        telegram: channels.telegram.iter().map(sanitize_telegram).collect(),
+        discord: channels.discord.iter().map(sanitize_discord).collect(),
+        feishu: channels.feishu.iter().map(sanitize_feishu).collect(),
     }
 }
 
 fn sanitize_telegram(config: &TelegramConfig) -> SanitizedTelegramConfig {
     SanitizedTelegramConfig {
+        name: config.name.clone(),
         enabled: config.enabled,
         token: mask_if_not_empty(&config.token),
-        allow_from: config.allow_from.clone(),
+        allowlist: config.allowlist.clone(),
         proxy: config.proxy.clone(),
     }
 }
 
 fn sanitize_discord(config: &DiscordConfig) -> SanitizedDiscordConfig {
     SanitizedDiscordConfig {
+        name: config.name.clone(),
         enabled: config.enabled,
         token: mask_if_not_empty(&config.token),
-        allow_from: config.allow_from.clone(),
+        allowlist: config.allowlist.clone(),
     }
 }
 
 fn sanitize_feishu(config: &FeishuConfig) -> SanitizedFeishuConfig {
     SanitizedFeishuConfig {
+        name: config.name.clone(),
         enabled: config.enabled,
         app_id: mask_if_not_empty(&config.app_id),
         app_secret: mask_if_not_empty(&config.app_secret),
-        allow_from: config.allow_from.clone(),
+        allowlist: config.allowlist.clone(),
     }
 }
 
@@ -187,25 +193,33 @@ mod tests {
     #[test]
     fn sanitize_telegram_masks_token() {
         let config = TelegramConfig {
+            name: "telegram".to_string(),
             enabled: true,
             token: "bot123:secret".to_string(),
-            allow_from: vec!["user1".to_string()],
+            allowlist: vec![AllowlistEntry {
+                chat_id: "123".to_string(),
+                chat_alias: "user1".to_string(),
+                my_name: None,
+            }],
             proxy: Some("http://proxy".to_string()),
+            ..Default::default()
         };
 
         let sanitized = sanitize_telegram(&config);
         assert_eq!(sanitized.token, MASK);
         assert_eq!(sanitized.enabled, true);
-        assert_eq!(sanitized.allow_from, vec!["user1"]);
+        assert_eq!(sanitized.allowlist.len(), 1);
         assert_eq!(sanitized.proxy, Some("http://proxy".to_string()));
     }
 
     #[test]
     fn sanitize_discord_masks_token() {
         let config = DiscordConfig {
+            name: "discord".to_string(),
             enabled: true,
             token: "discord_token".to_string(),
-            allow_from: vec![],
+            allowlist: vec![],
+            ..Default::default()
         };
 
         let sanitized = sanitize_discord(&config);
@@ -216,10 +230,12 @@ mod tests {
     #[test]
     fn sanitize_feishu_masks_credentials() {
         let config = FeishuConfig {
+            name: "feishu".to_string(),
             enabled: true,
             app_id: "app123".to_string(),
             app_secret: "secret456".to_string(),
-            allow_from: vec![],
+            allowlist: vec![],
+            ..Default::default()
         };
 
         let sanitized = sanitize_feishu(&config);
@@ -256,23 +272,29 @@ mod tests {
     fn sanitize_config_masks_all_sensitive_fields() {
         let config = Config {
             channels: ChannelsConfig {
-                telegram: TelegramConfig {
+                telegram: vec![TelegramConfig {
+                    name: "telegram".to_string(),
                     enabled: true,
                     token: "bot_token".to_string(),
-                    allow_from: vec![],
+                    allowlist: vec![],
                     proxy: None,
-                },
-                discord: DiscordConfig {
+                    ..Default::default()
+                }],
+                discord: vec![DiscordConfig {
+                    name: "discord".to_string(),
                     enabled: false,
                     token: "discord_token".to_string(),
-                    allow_from: vec![],
-                },
-                feishu: FeishuConfig {
+                    allowlist: vec![],
+                    ..Default::default()
+                }],
+                feishu: vec![FeishuConfig {
+                    name: "feishu".to_string(),
                     enabled: false,
                     app_id: "app_id".to_string(),
                     app_secret: "app_secret".to_string(),
-                    allow_from: vec![],
-                },
+                    allowlist: vec![],
+                    ..Default::default()
+                }],
             },
             providers: ProvidersConfig {
                 anthropic: ProviderEntry {
@@ -311,11 +333,14 @@ mod tests {
 
         let sanitized = sanitize_config(&config);
 
-        // Check channels
-        assert_eq!(sanitized.channels.telegram.token, MASK);
-        assert_eq!(sanitized.channels.discord.token, MASK);
-        assert_eq!(sanitized.channels.feishu.app_id, MASK);
-        assert_eq!(sanitized.channels.feishu.app_secret, MASK);
+        // Check channels (first entry of each)
+        assert_eq!(sanitized.channels.telegram.len(), 1);
+        assert_eq!(sanitized.channels.telegram[0].token, MASK);
+        assert_eq!(sanitized.channels.discord.len(), 1);
+        assert_eq!(sanitized.channels.discord[0].token, MASK);
+        assert_eq!(sanitized.channels.feishu.len(), 1);
+        assert_eq!(sanitized.channels.feishu[0].app_id, MASK);
+        assert_eq!(sanitized.channels.feishu[0].app_secret, MASK);
 
         // Check providers
         assert_eq!(sanitized.providers.anthropic.api_key, MASK);
