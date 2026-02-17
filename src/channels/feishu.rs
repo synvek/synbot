@@ -216,6 +216,8 @@ impl FeishuChannel {
         inbound_tx: mpsc::Sender<InboundMessage>,
         allowlist: Vec<AllowlistEntry>,
         channel_name: String,
+        enable_allowlist: bool,
+        group_my_name: Option<String>,
         app_id: String,
         app_secret: String,
         approval_manager: Option<Arc<ApprovalManager>>,
@@ -272,49 +274,11 @@ impl FeishuChannel {
                             return;
                         }
 
-                        // Allowlist by chat_id. When not found, reply and still send to bus.
                         let chat_id = msg.chat_id.clone();
-                        let entry = allowlist.iter().find(|e| e.chat_id == chat_id);
-                        let (trigger_agent, content, is_group) = match entry {
-                            None => {
-                                warn!(chat_id = %chat_id, "Feishu: chat not in allowlist, saving to session only");
-                                let inbound_tx_clone = inbound_tx.clone();
-                                let sender_id = sender_open_id.clone();
-                                let text_clone = text.clone();
-                                let message_id = msg.message_id.clone();
-                                let message_type = msg.message_type.clone();
-                                let chat_type = msg.chat_type.clone();
-                                let channel_name_clone = channel_name.clone();
-                                let app_id_clone = app_id.clone();
-                                let app_secret_clone = app_secret.clone();
-                                tokio::task::spawn_local(async move {
-                                    let client = LarkClient::builder(&app_id_clone, &app_secret_clone)
-                                        .with_app_type(AppType::SelfBuild)
-                                        .with_enable_token_cache(true)
-                                        .build();
-                                    let _ = Self::send_text_static(&client, &chat_id, "未配置聊天许可，请配置。").await;
-                                    let inbound = InboundMessage {
-                                        channel: channel_name_clone,
-                                        sender_id,
-                                        chat_id,
-                                        content: text_clone,
-                                        timestamp: chrono::Utc::now(),
-                                        media: vec![],
-                                        metadata: serde_json::json!({
-                                            "message_id": message_id,
-                                            "message_type": message_type,
-                                            "chat_type": chat_type,
-                                            "trigger_agent": false,
-                                        }),
-                                    };
-                                    if let Err(e) = inbound_tx_clone.try_send(inbound) {
-                                        error!("Feishu failed to forward allowlist-denied message: {e}");
-                                    }
-                                });
-                                return;
-                            }
-                            Some(e) => {
-                                if let Some(ref my_name) = e.my_name {
+                        let is_group = msg.chat_type != "p2p";
+                        let (trigger_agent, content, is_group_meta) = if !enable_allowlist {
+                            if is_group {
+                                if let Some(ref my_name) = group_my_name {
                                     let trimmed = text.trim_start();
                                     let mention = format!("@{}", my_name);
                                     let starts = trimmed.starts_with(&mention)
@@ -356,7 +320,96 @@ impl FeishuChannel {
                                         .unwrap_or_else(|| trimmed.strip_prefix('@').map(str::trim_start).unwrap_or(trimmed));
                                     (true, stripped.to_string(), true)
                                 } else {
-                                    (true, text.clone(), false)
+                                    (true, text.clone(), true)
+                                }
+                            } else {
+                                (true, text.clone(), false)
+                            }
+                        } else {
+                            let entry = allowlist.iter().find(|e| e.chat_id == chat_id);
+                            match entry {
+                                None => {
+                                    warn!(chat_id = %chat_id, "Feishu: chat not in allowlist, saving to session only");
+                                    let inbound_tx_clone = inbound_tx.clone();
+                                    let sender_id = sender_open_id.clone();
+                                    let text_clone = text.clone();
+                                    let message_id = msg.message_id.clone();
+                                    let message_type = msg.message_type.clone();
+                                    let chat_type = msg.chat_type.clone();
+                                    let channel_name_clone = channel_name.clone();
+                                    let app_id_clone = app_id.clone();
+                                    let app_secret_clone = app_secret.clone();
+                                    tokio::task::spawn_local(async move {
+                                        let client = LarkClient::builder(&app_id_clone, &app_secret_clone)
+                                            .with_app_type(AppType::SelfBuild)
+                                            .with_enable_token_cache(true)
+                                            .build();
+                                        let _ = Self::send_text_static(&client, &chat_id, "未配置聊天许可，请配置。").await;
+                                        let inbound = InboundMessage {
+                                            channel: channel_name_clone,
+                                            sender_id,
+                                            chat_id,
+                                            content: text_clone,
+                                            timestamp: chrono::Utc::now(),
+                                            media: vec![],
+                                            metadata: serde_json::json!({
+                                                "message_id": message_id,
+                                                "message_type": message_type,
+                                                "chat_type": chat_type,
+                                                "trigger_agent": false,
+                                            }),
+                                        };
+                                        if let Err(e) = inbound_tx_clone.try_send(inbound) {
+                                            error!("Feishu failed to forward allowlist-denied message: {e}");
+                                        }
+                                    });
+                                    return;
+                                }
+                                Some(e) => {
+                                    if let Some(ref my_name) = e.my_name {
+                                        let trimmed = text.trim_start();
+                                        let mention = format!("@{}", my_name);
+                                        let starts = trimmed.starts_with(&mention)
+                                            || trimmed
+                                                .strip_prefix('@')
+                                                .map(|s| s.trim_start().starts_with(my_name))
+                                                .unwrap_or(false);
+                                        if !starts {
+                                            info!(
+                                                chat_id = %chat_id,
+                                                "Feishu: group message not @bot, saving to session only"
+                                            );
+                                            let inbound_tx_clone = inbound_tx.clone();
+                                            let sender_id = sender_open_id.clone();
+                                            let channel_name_clone = channel_name.clone();
+                                            let message_id = msg.message_id.clone();
+                                            let message_type = msg.message_type.clone();
+                                            let chat_type = msg.chat_type.clone();
+                                            let _ = inbound_tx_clone.try_send(InboundMessage {
+                                                channel: channel_name_clone,
+                                                sender_id,
+                                                chat_id: chat_id.clone(),
+                                                content: text.clone(),
+                                                timestamp: chrono::Utc::now(),
+                                                media: vec![],
+                                                metadata: serde_json::json!({
+                                                    "message_id": message_id,
+                                                    "message_type": message_type,
+                                                    "chat_type": chat_type,
+                                                    "trigger_agent": false,
+                                                    "group": true,
+                                                }),
+                                            });
+                                            return;
+                                        }
+                                        let stripped = trimmed
+                                            .strip_prefix(&mention)
+                                            .map(str::trim_start)
+                                            .unwrap_or_else(|| trimmed.strip_prefix('@').map(str::trim_start).unwrap_or(trimmed));
+                                        (true, stripped.to_string(), true)
+                                    } else {
+                                        (true, text.clone(), false)
+                                    }
                                 }
                             }
                         };
@@ -420,7 +473,7 @@ impl FeishuChannel {
                             "message_type": msg.message_type,
                             "chat_type": msg.chat_type,
                         });
-                        if is_group {
+                        if is_group_meta {
                             meta["group"] = serde_json::json!(true);
                         }
                         let inbound = InboundMessage {
@@ -604,6 +657,8 @@ impl Channel for FeishuChannel {
                 self.inbound_tx.clone(),
                 self.config.allowlist.clone(),
                 self.config.name.clone(),
+                self.config.enable_allowlist,
+                self.config.group_my_name.clone(),
                 self.config.app_id.clone(),
                 self.config.app_secret.clone(),
                 self.approval_manager.clone(),

@@ -30,6 +30,8 @@ pub struct SanitizedTelegramConfig {
     pub enabled: bool,
     pub token: String,
     pub allowlist: Vec<AllowlistEntry>,
+    pub enable_allowlist: bool,
+    pub group_my_name: Option<String>,
     pub proxy: Option<String>,
 }
 
@@ -40,6 +42,8 @@ pub struct SanitizedDiscordConfig {
     pub enabled: bool,
     pub token: String,
     pub allowlist: Vec<AllowlistEntry>,
+    pub enable_allowlist: bool,
+    pub group_my_name: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -50,6 +54,8 @@ pub struct SanitizedFeishuConfig {
     pub app_id: String,
     pub app_secret: String,
     pub allowlist: Vec<AllowlistEntry>,
+    pub enable_allowlist: bool,
+    pub group_my_name: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -109,6 +115,8 @@ fn sanitize_telegram(config: &TelegramConfig) -> SanitizedTelegramConfig {
         enabled: config.enabled,
         token: mask_if_not_empty(&config.token),
         allowlist: config.allowlist.clone(),
+        enable_allowlist: config.enable_allowlist,
+        group_my_name: config.group_my_name.clone(),
         proxy: config.proxy.clone(),
     }
 }
@@ -119,6 +127,8 @@ fn sanitize_discord(config: &DiscordConfig) -> SanitizedDiscordConfig {
         enabled: config.enabled,
         token: mask_if_not_empty(&config.token),
         allowlist: config.allowlist.clone(),
+        enable_allowlist: config.enable_allowlist,
+        group_my_name: config.group_my_name.clone(),
     }
 }
 
@@ -129,6 +139,8 @@ fn sanitize_feishu(config: &FeishuConfig) -> SanitizedFeishuConfig {
         app_id: mask_if_not_empty(&config.app_id),
         app_secret: mask_if_not_empty(&config.app_secret),
         allowlist: config.allowlist.clone(),
+        enable_allowlist: config.enable_allowlist,
+        group_my_name: config.group_my_name.clone(),
     }
 }
 

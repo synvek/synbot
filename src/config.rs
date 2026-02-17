@@ -31,6 +31,12 @@ pub struct TelegramConfig {
     pub token: String,
     #[serde(default)]
     pub allowlist: Vec<AllowlistEntry>,
+    /// When true (default), only chats in allowlist are accepted; when false, allowlist is not checked.
+    #[serde(default = "default_true")]
+    pub enable_allowlist: bool,
+    /// When enable_allowlist is false, bot name used for group @ check (optional).
+    #[serde(default)]
+    pub group_my_name: Option<String>,
     pub proxy: Option<String>,
     /// When true (default), push tool execution progress to this channel.
     #[serde(default = "default_true")]
@@ -49,6 +55,12 @@ pub struct DiscordConfig {
     pub token: String,
     #[serde(default)]
     pub allowlist: Vec<AllowlistEntry>,
+    /// When true (default), only chats in allowlist are accepted; when false, allowlist is not checked.
+    #[serde(default = "default_true")]
+    pub enable_allowlist: bool,
+    /// When enable_allowlist is false, bot name/id used for group @ check (optional).
+    #[serde(default)]
+    pub group_my_name: Option<String>,
     /// When true (default), push tool execution progress to this channel.
     #[serde(default = "default_true")]
     pub show_tool_calls: bool,
@@ -68,6 +80,12 @@ pub struct FeishuConfig {
     pub app_secret: String,
     #[serde(default)]
     pub allowlist: Vec<AllowlistEntry>,
+    /// When true (default), only chats in allowlist are accepted; when false, allowlist is not checked.
+    #[serde(default = "default_true")]
+    pub enable_allowlist: bool,
+    /// When enable_allowlist is false, bot name used for group @ check (optional).
+    #[serde(default)]
+    pub group_my_name: Option<String>,
     /// When true (default), push tool execution progress to this channel.
     #[serde(default = "default_true")]
     pub show_tool_calls: bool,

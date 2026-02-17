@@ -63,6 +63,9 @@ struct TgUser {
 #[derive(Debug, Deserialize)]
 struct TgChat {
     id: i64,
+    /// "private" | "group" | "supergroup" | "channel"
+    #[serde(rename = "type", default)]
+    type_: Option<String>,
 }
 
 /// Returns `true` if the HTTP status code indicates an unrecoverable error
@@ -360,33 +363,15 @@ impl Channel for TelegramChannel {
                                 m.from.map(|u| u.id.to_string()).unwrap_or_default();
                             if let Some(text) = m.text {
                                 let chat_id_str = m.chat.id.to_string();
-                                let entry = self
-                                    .config
-                                    .allowlist
-                                    .iter()
-                                    .find(|e| e.chat_id == chat_id_str);
-                                let (trigger_agent, content, is_group) = match entry {
-                                    None => {
-                                        warn!(
-                                            chat_id = %chat_id_str,
-                                            "Telegram: chat not in allowlist, saving to session only"
-                                        );
-                                        let _ = self
-                                            .send_text(m.chat.id, "未配置聊天许可，请配置。")
-                                            .await;
-                                        let _ = self.inbound_tx.send(InboundMessage {
-                                            channel: self.config.name.clone(),
-                                            sender_id: sender.clone(),
-                                            chat_id: chat_id_str.clone(),
-                                            content: text.clone(),
-                                            timestamp: chrono::Utc::now(),
-                                            media: vec![],
-                                            metadata: serde_json::json!({ "trigger_agent": false }),
-                                        }).await;
-                                        continue;
-                                    }
-                                    Some(e) => {
-                                        if let Some(ref my_name) = e.my_name {
+                                let is_group = m
+                                    .chat
+                                    .type_
+                                    .as_deref()
+                                    .map_or(false, |t| t == "group" || t == "supergroup");
+                                let (trigger_agent, content, is_group_meta) = if !self.config.enable_allowlist {
+                                    // Allowlist disabled: allow all; for group still check @group_my_name if set
+                                    if is_group {
+                                        if let Some(ref my_name) = self.config.group_my_name {
                                             let trimmed = text.trim_start();
                                             let mention = format!("@{}", my_name);
                                             let starts = trimmed.starts_with(&mention)
@@ -419,7 +404,73 @@ impl Channel for TelegramChannel {
                                                 .unwrap_or_else(|| trimmed.strip_prefix('@').map(str::trim_start).unwrap_or(trimmed));
                                             (true, stripped.to_string(), true)
                                         } else {
-                                            (true, text.clone(), false)
+                                            (true, text.clone(), true)
+                                        }
+                                    } else {
+                                        (true, text.clone(), false)
+                                    }
+                                } else {
+                                    let entry = self
+                                        .config
+                                        .allowlist
+                                        .iter()
+                                        .find(|e| e.chat_id == chat_id_str);
+                                    match entry {
+                                        None => {
+                                            warn!(
+                                                chat_id = %chat_id_str,
+                                                "Telegram: chat not in allowlist, saving to session only"
+                                            );
+                                            let _ = self
+                                                .send_text(m.chat.id, "未配置聊天许可，请配置。")
+                                                .await;
+                                            let _ = self.inbound_tx.send(InboundMessage {
+                                                channel: self.config.name.clone(),
+                                                sender_id: sender.clone(),
+                                                chat_id: chat_id_str.clone(),
+                                                content: text.clone(),
+                                                timestamp: chrono::Utc::now(),
+                                                media: vec![],
+                                                metadata: serde_json::json!({ "trigger_agent": false }),
+                                            }).await;
+                                            continue;
+                                        }
+                                        Some(e) => {
+                                            if let Some(ref my_name) = e.my_name {
+                                                let trimmed = text.trim_start();
+                                                let mention = format!("@{}", my_name);
+                                                let starts = trimmed.starts_with(&mention)
+                                                    || trimmed
+                                                        .strip_prefix('@')
+                                                        .map(|s| s.trim_start().starts_with(my_name))
+                                                        .unwrap_or(false);
+                                                if !starts {
+                                                    info!(
+                                                        chat_id = %chat_id_str,
+                                                        "Telegram: group message not @bot, saving to session only"
+                                                    );
+                                                    let _ = self.inbound_tx.send(InboundMessage {
+                                                        channel: self.config.name.clone(),
+                                                        sender_id: sender.clone(),
+                                                        chat_id: chat_id_str.clone(),
+                                                        content: text.clone(),
+                                                        timestamp: chrono::Utc::now(),
+                                                        media: vec![],
+                                                        metadata: serde_json::json!({
+                                                            "trigger_agent": false,
+                                                            "group": true,
+                                                        }),
+                                                    }).await;
+                                                    continue;
+                                                }
+                                                let stripped = trimmed
+                                                    .strip_prefix(&mention)
+                                                    .map(str::trim_start)
+                                                    .unwrap_or_else(|| trimmed.strip_prefix('@').map(str::trim_start).unwrap_or(trimmed));
+                                                (true, stripped.to_string(), true)
+                                            } else {
+                                                (true, text.clone(), false)
+                                            }
                                         }
                                     }
                                 };
@@ -468,7 +519,7 @@ impl Channel for TelegramChannel {
                                 }
                                 // 普通消息处理
                                 let mut meta = serde_json::json!({ "trigger_agent": true });
-                                if is_group {
+                                if is_group_meta {
                                     meta["group"] = serde_json::json!(true);
                                 }
                                 let _ = self.inbound_tx.send(InboundMessage {

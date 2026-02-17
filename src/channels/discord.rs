@@ -417,6 +417,8 @@ impl DiscordChannel {
         inbound_tx: &mpsc::Sender<InboundMessage>,
         allowlist: &[AllowlistEntry],
         channel_name: &str,
+        enable_allowlist: bool,
+        group_my_name: Option<&str>,
         resume: &mut ResumeState,
         approval_manager: &Option<Arc<ApprovalManager>>,
         pending_approvals: &Arc<RwLock<HashMap<String, (String, String)>>>,
@@ -603,28 +605,15 @@ impl DiscordChannel {
                                         info!("Discord MESSAGE_CREATE event received");
                                         if let Some(mut inbound) = discord_event_to_inbound(d) {
                                             inbound.channel = channel_name.to_string();
-                                            let entry = allowlist
-                                                .iter()
-                                                .find(|e| e.chat_id == inbound.chat_id);
-                                            let (trigger_agent, content) = match entry {
-                                                None => {
-                                                    warn!(
-                                                        chat_id = %inbound.chat_id,
-                                                        "Discord: chat not in allowlist, saving to session only"
-                                                    );
-                                                    let _ = Self::send_text_to_channel(
-                                                        client,
-                                                        token,
-                                                        &inbound.chat_id,
-                                                        "未配置聊天许可，请配置。",
-                                                    )
-                                                    .await;
-                                                    inbound.metadata["trigger_agent"] =
-                                                        serde_json::json!(false);
-                                                    (false, inbound.content.clone())
-                                                }
-                                                Some(e) => {
-                                                    if let Some(ref my_name) = e.my_name {
+                                            let is_group = !inbound
+                                                .metadata
+                                                .get("guild_id")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("")
+                                                .is_empty();
+                                            let (trigger_agent, skip_send) = if !enable_allowlist {
+                                                if is_group {
+                                                    if let Some(my_name) = group_my_name {
                                                         let trimmed = inbound.content.trim_start();
                                                         let mention_prefix = format!("<@!{}>", my_name);
                                                         let mention_prefix_alt = format!("<@{}>", my_name);
@@ -639,7 +628,7 @@ impl DiscordChannel {
                                                                 serde_json::json!(false);
                                                             inbound.metadata["group"] =
                                                                 serde_json::json!(true);
-                                                            (false, inbound.content.clone())
+                                                            (false, true)
                                                         } else {
                                                             let stripped = trimmed
                                                                 .strip_prefix(&mention_prefix)
@@ -649,14 +638,72 @@ impl DiscordChannel {
                                                             inbound.content = stripped.to_string();
                                                             inbound.metadata["group"] =
                                                                 serde_json::json!(true);
-                                                            (true, inbound.content.clone())
+                                                            (true, false)
                                                         }
                                                     } else {
-                                                        (true, inbound.content.clone())
+                                                        inbound.metadata["group"] =
+                                                            serde_json::json!(true);
+                                                        (true, false)
+                                                    }
+                                                } else {
+                                                    (true, false)
+                                                }
+                                            } else {
+                                                let entry = allowlist
+                                                    .iter()
+                                                    .find(|e| e.chat_id == inbound.chat_id);
+                                                match entry {
+                                                    None => {
+                                                        warn!(
+                                                            chat_id = %inbound.chat_id,
+                                                            "Discord: chat not in allowlist, saving to session only"
+                                                        );
+                                                        let _ = Self::send_text_to_channel(
+                                                            client,
+                                                            token,
+                                                            &inbound.chat_id,
+                                                            "未配置聊天许可，请配置。",
+                                                        )
+                                                        .await;
+                                                        inbound.metadata["trigger_agent"] =
+                                                            serde_json::json!(false);
+                                                        (false, true)
+                                                    }
+                                                    Some(e) => {
+                                                        if let Some(ref my_name) = e.my_name {
+                                                            let trimmed = inbound.content.trim_start();
+                                                            let mention_prefix = format!("<@!{}>", my_name);
+                                                            let mention_prefix_alt = format!("<@{}>", my_name);
+                                                            let starts = trimmed.starts_with(&mention_prefix)
+                                                                || trimmed.starts_with(&mention_prefix_alt);
+                                                            if !starts {
+                                                                info!(
+                                                                    chat_id = %inbound.chat_id,
+                                                                    "Discord: group message not @bot, saving to session only"
+                                                                );
+                                                                inbound.metadata["trigger_agent"] =
+                                                                    serde_json::json!(false);
+                                                                inbound.metadata["group"] =
+                                                                    serde_json::json!(true);
+                                                                (false, true)
+                                                            } else {
+                                                                let stripped = trimmed
+                                                                    .strip_prefix(&mention_prefix)
+                                                                    .or_else(|| trimmed.strip_prefix(&mention_prefix_alt))
+                                                                    .unwrap_or(trimmed)
+                                                                    .trim_start();
+                                                                inbound.content = stripped.to_string();
+                                                                inbound.metadata["group"] =
+                                                                    serde_json::json!(true);
+                                                                (true, false)
+                                                            }
+                                                        } else {
+                                                            (true, false)
+                                                        }
                                                     }
                                                 }
                                             };
-                                            if !trigger_agent {
+                                            if skip_send {
                                                 let _ = inbound_tx.send(inbound).await;
                                                 continue;
                                             }
@@ -870,6 +917,8 @@ impl Channel for DiscordChannel {
                 &self.inbound_tx,
                 &self.config.allowlist,
                 &self.config.name,
+                self.config.enable_allowlist,
+                self.config.group_my_name.as_deref(),
                 &mut resume,
                 &self.approval_manager,
                 &self.pending_approvals,
