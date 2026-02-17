@@ -9,6 +9,20 @@ use tracing::{info, warn};
 use crate::tools::context;
 use crate::tools::DynTool;
 
+/// Normalize path for prefix comparison so that Windows verbatim prefix (\\?\)
+/// and non-canonical paths compare correctly (e.g. write_file to a new path).
+#[cfg(windows)]
+fn path_for_prefix_check(p: &Path) -> PathBuf {
+    let s = p.to_string_lossy();
+    let s = s.trim_start_matches(r"\\?\");
+    PathBuf::from(s)
+}
+
+#[cfg(not(windows))]
+fn path_for_prefix_check(p: &Path) -> PathBuf {
+    p.to_path_buf()
+}
+
 /// Resolve path and enforce scope: when restrict is true, path must be under
 /// the current agent's allowed roots (workspace and memory_dir from context, or default workspace).
 fn resolve_path(path: &str, workspace: &Path, restrict: bool) -> anyhow::Result<PathBuf> {
@@ -17,12 +31,16 @@ fn resolve_path(path: &str, workspace: &Path, restrict: bool) -> anyhow::Result<
     } else {
         workspace.join(path)
     };
+    // For new files (e.g. write_file) canonicalize() fails; use p so scope check still works
     let canonical = p.canonicalize().unwrap_or_else(|_| p.clone());
+    let canonical_norm = path_for_prefix_check(&canonical);
 
     let allowed = if let Some((ctx_workspace, ctx_memory)) = context::current_allowed_roots() {
-        let ws_canon = ctx_workspace.canonicalize().unwrap_or_else(|_| ctx_workspace.clone());
-        let mem_canon = ctx_memory.canonicalize().unwrap_or_else(|_| ctx_memory.clone());
-        if canonical.starts_with(&ws_canon) || canonical.starts_with(&mem_canon) {
+        let ws_canon = ctx_workspace.canonicalize().unwrap_or_else(|_| ctx_workspace.to_path_buf());
+        let mem_canon = ctx_memory.canonicalize().unwrap_or_else(|_| ctx_memory.to_path_buf());
+        let ws_norm = path_for_prefix_check(&ws_canon);
+        let mem_norm = path_for_prefix_check(&mem_canon);
+        if canonical_norm.starts_with(&ws_norm) || canonical_norm.starts_with(&mem_norm) {
             true
         } else {
             warn!(
@@ -36,7 +54,8 @@ fn resolve_path(path: &str, workspace: &Path, restrict: bool) -> anyhow::Result<
         }
     } else if restrict {
         let ws_canon = workspace.canonicalize().unwrap_or_else(|_| workspace.to_path_buf());
-        canonical.starts_with(&ws_canon)
+        let ws_norm = path_for_prefix_check(&ws_canon);
+        canonical_norm.starts_with(&ws_norm)
     } else {
         true
     };
