@@ -1,4 +1,4 @@
-﻿---
+---
 title: Configuration Guide
 description: How to configure Synbot for your needs
 ---
@@ -250,6 +250,36 @@ You can define multiple roles with different system prompts:
 ## Tools Configuration
 
 ### Exec Tool Configuration
+
+#### How to enable command approvals
+
+**Command approval is disabled by default.** If you want `exec` commands (for example `python hello4.py`) to require an explicit user approval before they run, enable the permission system and set the default level to require approval:
+
+1. Open your config file (default: `~/.synbot/config.json`. On Windows: `C:\\Users\\<username>\\.synbot\\config.json`).
+2. Under `tools.exec.permissions`, set:
+   - **`"enabled": true`** — turn on permission/approval checks
+   - **`"defaultLevel": "require_approval"`** — commands that do not match any rule will require approval (this is also the default)
+   - **`"approvalTimeoutSecs": 300`** — approval timeout in seconds (must be > 0)
+
+**Minimal example (all exec commands require approval):**
+
+```json
+{
+  "tools": {
+    "exec": {
+      "permissions": {
+        "enabled": true,
+        "defaultLevel": "require_approval",
+        "approvalTimeoutSecs": 300
+      }
+    }
+  }
+}
+```
+
+If you already have `tools` or `tools.exec` in your config, just merge the `permissions` section. After editing, restart synbot or reload the configuration (if enabled in your deployment).
+
+For selective behavior (some commands allowed without approval, some require approval, some denied), see the full example below.
 
 ```json
 {

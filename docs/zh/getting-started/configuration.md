@@ -1,4 +1,4 @@
-﻿---
+---
 title: 配置指南
 description: 如何根据您的需求配置 Synbot
 ---
@@ -246,6 +246,36 @@ synbot start --config /path/to/your/config.json
 ## 工具配置
 
 ### 执行工具配置
+
+#### 如何启用命令审批
+
+**命令审批默认是关闭的。** 若希望执行 `exec` 命令（如运行 `python hello4.py`）前先经用户审批，需在配置中开启权限并设为“需审批”：
+
+1. 打开配置文件（默认 `~/.synbot/config.json`，Windows 下为 `C:\Users\<用户名>\.synbot\config.json`）。
+2. 在 `tools.exec.permissions` 中设置：
+   - **`"enabled": true`** — 开启权限/审批；
+   - **`"defaultLevel": "require_approval"`** — 未匹配规则的命令一律需审批（默认即此值）；
+   - **`"approvalTimeoutSecs": 300`** — 审批等待超时秒数（必填且 > 0）。
+
+**最小示例（所有 exec 命令均需审批）：**
+
+```json
+{
+  "tools": {
+    "exec": {
+      "permissions": {
+        "enabled": true,
+        "defaultLevel": "require_approval",
+        "approvalTimeoutSecs": 300
+      }
+    }
+  }
+}
+```
+
+若已有 `tools` 或 `tools.exec`，只需补全或合并上述 `permissions` 段即可。修改后重启 synbot 或调用配置重载接口使配置生效。
+
+带规则示例（部分命令免审批、部分需审批或禁止）见下方完整示例。
 
 ```json
 {
