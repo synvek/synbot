@@ -60,7 +60,16 @@ pub async fn cmd_start() -> Result<()> {
         None
     };
 
-    let tools = std::sync::Arc::new(build_default_tools(&cfg, &ws, std::sync::Arc::clone(&subagent_mgr), std::sync::Arc::clone(&approval_manager), permission_policy.clone()));
+    let heartbeat_cron_ctx: super::helpers::HeartbeatCronContext =
+        Some((std::sync::Arc::clone(&shared_config), Some(config::config_path())));
+    let tools = std::sync::Arc::new(build_default_tools(
+        &cfg,
+        &ws,
+        std::sync::Arc::clone(&subagent_mgr),
+        std::sync::Arc::clone(&approval_manager),
+        permission_policy.clone(),
+        heartbeat_cron_ctx,
+    ));
 
     let mut bus = crate::bus::MessageBus::new();
     let inbound_tx = bus.inbound_sender();
@@ -108,10 +117,6 @@ pub async fn cmd_start() -> Result<()> {
         std::sync::Arc::clone(&session_manager),
     )
     .await;
-    agent_loop.set_config_for_commands(
-        std::sync::Arc::clone(&shared_config),
-        Some(config::config_path()),
-    );
     tokio::spawn(async move {
         if let Err(e) = agent_loop.run().await {
             tracing::error!("Agent loop error: {e:#}");

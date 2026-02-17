@@ -2,6 +2,7 @@ pub mod approval;
 pub mod approval_store;
 pub mod context;
 pub mod filesystem;
+pub mod heartbeat_cron;
 pub mod memory_tool;
 pub mod message;
 pub mod permission;
@@ -120,7 +121,23 @@ impl ToolRegistry {
         self.tools.get(name)
     }
 
-    pub async fn execute(&self, name: &str, args: Value) -> Result<String> {
+    /// Execute a tool by name. If `message_ctx` is provided and the tool is add_heartbeat_task or add_cron_task,
+    /// channel, chat_id, and user_id are injected into args so the task is associated with the current chat.
+    pub async fn execute(
+        &self,
+        name: &str,
+        mut args: Value,
+        message_ctx: Option<(&str, &str, &str)>,
+    ) -> Result<String> {
+        if let Some((channel, chat_id, user_id)) = message_ctx {
+            if name == "add_heartbeat_task" || name == "add_cron_task" {
+                if let Some(obj) = args.as_object_mut() {
+                    obj.insert("channel".into(), serde_json::Value::String(channel.to_string()));
+                    obj.insert("chat_id".into(), serde_json::Value::String(chat_id.to_string()));
+                    obj.insert("user_id".into(), serde_json::Value::String(user_id.to_string()));
+                }
+            }
+        }
         let args_for_log = sanitize_args_for_log(name, &args);
         let span = tracing::info_span!(
             "tool_execution",
@@ -325,7 +342,7 @@ mod tests {
     async fn execute_works_after_register() {
         let mut reg = ToolRegistry::new();
         reg.register(fake_tool("exec_test")).unwrap();
-        let result = reg.execute("exec_test", json!({})).await.unwrap();
+        let result = reg.execute("exec_test", json!({}), None).await.unwrap();
         assert_eq!(result, "exec_test called");
     }
 
@@ -334,7 +351,7 @@ mod tests {
         let mut reg = ToolRegistry::new();
         reg.register(fake_tool("gone")).unwrap();
         reg.deregister("gone").unwrap();
-        let result = reg.execute("gone", json!({})).await;
+        let result = reg.execute("gone", json!({}), None).await;
         assert!(result.is_err());
     }
 }

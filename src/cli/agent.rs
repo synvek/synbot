@@ -55,7 +55,14 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
     };
 
     // Build tools (pass subagent manager, approval manager, and permission policy)
-    let tools = build_default_tools(&cfg, &ws, std::sync::Arc::clone(&subagent_mgr), approval_manager, permission_policy);
+    let tools = build_default_tools(
+        &cfg,
+        &ws,
+        std::sync::Arc::clone(&subagent_mgr),
+        approval_manager,
+        permission_policy,
+        None, // no heartbeat/cron tools in CLI agent mode
+    );
     let tools = std::sync::Arc::new(tools);
 
     // Set up bus

@@ -255,7 +255,7 @@ async fn run_subagent_task(
                         has_tool_calls = true;
                         assistant_contents.push(content.clone());
                         let args = tc.function.arguments.clone();
-                        let result = tools.execute(&tc.function.name, args).await;
+                        let result = tools.execute(&tc.function.name, args, None).await;
                         let result_str = match result {
                             Ok(s) => s,
                             Err(e) => format!("Error: {e}"),

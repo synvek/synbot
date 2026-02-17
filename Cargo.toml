@@ -82,6 +82,9 @@ base64 = "0.22"
 rusqlite = { version = "0.32", features = ["bundled"], optional = true }
 sqlite-vec = { version = "0.1", optional = true }
 
+# Encoding (Windows console output decoding)
+encoding_rs = "0.8"
+
 # Sandbox dependencies
 num_cpus = "1"
 bollard = "0.18"

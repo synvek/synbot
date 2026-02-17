@@ -13,7 +13,6 @@ use tracing::{error, info, warn, Instrument};
 
 use crate::agent::context::ContextBuilder;
 use crate::agent::directive::DirectiveParser;
-use crate::agent::heartbeat_cron_cmd;
 use crate::agent::role_registry::RoleRegistry;
 use crate::agent::session::SessionStore;
 use crate::agent::session_manager::SessionManager;
@@ -36,9 +35,6 @@ pub struct AgentLoop {
     role_registry: Arc<RoleRegistry>,
     session_manager: Arc<RwLock<SessionManager>>,
     subagent_manager: Arc<Mutex<SubagentManager>>,
-    /// When set, heartbeat/cron create commands are handled and config is persisted.
-    config: Option<Arc<RwLock<Config>>>,
-    config_path: Option<PathBuf>,
 }
 
 impl AgentLoop {
@@ -113,15 +109,7 @@ impl AgentLoop {
             role_registry: Arc::new(role_registry),
             session_manager,
             subagent_manager: Arc::new(Mutex::new(subagent_manager)),
-            config: None,
-            config_path: None,
         }
-    }
-
-    /// Set shared config and path for heartbeat/cron command handling (create task from channel).
-    pub fn set_config_for_commands(&mut self, config: Arc<RwLock<Config>>, path: Option<PathBuf>) {
-        self.config = Some(config);
-        self.config_path = path;
     }
 
     pub async fn run(&mut self) -> Result<()> {
@@ -151,28 +139,6 @@ impl AgentLoop {
             if !trigger_agent {
                 self.save_message_only(&msg).await?;
                 return Ok(());
-            }
-
-            if let (Some(ref config), ref path) = (&self.config, &self.config_path) {
-                if let Some(reply) = heartbeat_cron_cmd::try_handle_heartbeat_cron(
-                    &msg.channel,
-                    &msg.chat_id,
-                    &msg.sender_id,
-                    &msg.content,
-                    config,
-                    path.as_deref(),
-                )
-                .await
-                {
-                    let _ = self.outbound_tx.send(OutboundMessage::chat(
-                        msg.channel.clone(),
-                        msg.chat_id.clone(),
-                        reply,
-                        vec![],
-                        None,
-                    ));
-                    return Ok(());
-                }
             }
 
             let start = std::time::Instant::now();
@@ -329,6 +295,7 @@ impl AgentLoop {
                     &self.tools,
                     &msg.channel,
                     &msg.chat_id,
+                    &msg.sender_id,
                     &self.outbound_tx,
                 )
                 .await
@@ -464,6 +431,7 @@ impl AgentLoop {
             let channel_for_meta = channel.clone();
             let chat_id = msg.chat_id.clone();
             let sender_id = msg.sender_id.clone();
+            let sender_id_for_loop = msg.sender_id.clone();
             let sk = session_key.clone();
             let aid = agent_id.clone();
             let aid_for_meta = aid.clone();
@@ -488,6 +456,7 @@ impl AgentLoop {
                     &tools,
                     &channel,
                     &chat_id,
+                    &sender_id_for_loop,
                     &outbound_tx,
                 ).await
                 }).await?;
@@ -619,8 +588,10 @@ async fn run_completion_loop(
     tools: &ToolRegistry,
     channel: &str,
     chat_id: &str,
+    sender_id: &str,
     outbound_tx: &broadcast::Sender<OutboundMessage>,
 ) -> Result<u32> {
+    let message_ctx = Some((channel, chat_id, sender_id));
     let mut iterations = 0u32;
 
     loop {
@@ -660,7 +631,7 @@ async fn run_completion_loop(
                     has_tool_calls = true;
                     assistant_contents.push(content.clone());
                     let args = tc.function.arguments.clone();
-                    let result = tools.execute(&tc.function.name, args).await;
+                    let result = tools.execute(&tc.function.name, args, message_ctx).await;
                     let result_str = match &result {
                         Ok(s) => s.clone(),
                         Err(e) => format!("Error: {e}"),

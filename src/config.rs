@@ -136,6 +136,8 @@ pub struct ProvidersConfig {
     #[serde(default)]
     pub deepseek: ProviderEntry,
     #[serde(default)]
+    pub moonshot: ProviderEntry,
+    #[serde(default)]
     pub ollama: ProviderEntry,
 }
 
@@ -1114,10 +1116,63 @@ pub fn load_config(path: Option<&Path>) -> Result<Config> {
     Ok(cfg)
 }
 
+/// Number of config backup slots: config.json.bak.1 .. config.json.bak.5.
+const CONFIG_BACKUP_COUNT: u32 = 5;
+
+/// Before overwriting config, backup the current file to one of config.json.bak.1 .. .bak.5.
+/// Uses the first slot that doesn't exist; if all exist, overwrites the oldest by mtime.
+fn backup_config_before_save(config_path: &Path) -> Result<()> {
+    if !config_path.exists() {
+        return Ok(());
+    }
+    let bak_path_for = |i: u32| {
+        let name = config_path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "config.json".to_string());
+        config_path.parent().map_or_else(
+            || PathBuf::from(format!("{}.bak.{}", name, i)),
+            |parent| parent.join(format!("{}.bak.{}", name, i)),
+        )
+    };
+    let mut slot_to_use: Option<u32> = None;
+    for i in 1..=CONFIG_BACKUP_COUNT {
+        if !bak_path_for(i).exists() {
+            slot_to_use = Some(i);
+            break;
+        }
+    }
+    let slot = match slot_to_use {
+        Some(s) => s,
+        None => {
+            let mut oldest: Option<(u32, std::time::SystemTime)> = None;
+            for i in 1..=CONFIG_BACKUP_COUNT {
+                let bak = bak_path_for(i);
+                if let Ok(meta) = std::fs::metadata(&bak) {
+                    if let Ok(mtime) = meta.modified() {
+                        let use_this = oldest
+                            .map(|(_, t)| mtime < t)
+                            .unwrap_or(true);
+                        if use_this {
+                            oldest = Some((i, mtime));
+                        }
+                    }
+                }
+            }
+            oldest.map(|(i, _)| i).unwrap_or(1)
+        }
+    };
+    let bak_path = bak_path_for(slot);
+    std::fs::copy(config_path, &bak_path)?;
+    Ok(())
+}
+
 pub fn save_config(cfg: &Config, path: Option<&Path>) -> Result<()> {
     let p = path
         .map(PathBuf::from)
         .unwrap_or_else(config_path);
+
+    backup_config_before_save(&p)?;
 
     if let Some(parent) = p.parent() {
         std::fs::create_dir_all(parent)?;

@@ -3321,6 +3321,7 @@ dependencies = [
  "criterion",
  "cron",
  "dirs",
+ "encoding_rs",
  "futures-util",
  "glob",
  "idna 0.2.3",

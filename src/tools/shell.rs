@@ -13,6 +13,34 @@ use crate::tools::DynTool;
 
 const MAX_OUTPUT: usize = 10_000;
 
+/// Decode process output bytes to a UTF-8 String. On Windows, cmd.exe often outputs
+/// in the system OEM code page (e.g. GBK/CP936 on Chinese systems); decoding as UTF-8
+/// produces mojibake. We try UTF-8 first, then GBK when on Windows.
+fn decode_output_bytes(bytes: &[u8]) -> String {
+    if bytes.is_empty() {
+        return String::new();
+    }
+    #[cfg(windows)]
+    {
+        if let Ok(s) = std::str::from_utf8(bytes) {
+            if !s.contains('\u{FFFD}') {
+                return s.to_string();
+            }
+        }
+        let (decoded, _, had_errors) = encoding_rs::GBK.decode(bytes);
+        let s = decoded.into_owned();
+        if had_errors {
+            String::from_utf8_lossy(bytes).into_owned()
+        } else {
+            s
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        String::from_utf8_lossy(bytes).into_owned()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // CommandPolicy – configurable deny/allow pattern matching
 // ---------------------------------------------------------------------------
@@ -298,8 +326,8 @@ impl DynTool for ExecTool {
 
         let duration_ms = start.elapsed().as_millis() as u64;
 
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let stdout = decode_output_bytes(&output.stdout);
+        let stderr = decode_output_bytes(&output.stderr);
         let working_dir = cwd.display().to_string();
 
         let total_size = stdout.len() + stderr.len();

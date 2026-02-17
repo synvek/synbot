@@ -35,6 +35,9 @@ pub fn resolve_provider(cfg: &config::Config) -> (String, Option<String>) {
     if !cfg.providers.deepseek.api_key.is_empty() {
         return (cfg.providers.deepseek.api_key.clone(), normalize_base(&cfg.providers.deepseek.api_base));
     }
+    if !cfg.providers.moonshot.api_key.is_empty() {
+        return (cfg.providers.moonshot.api_key.clone(), normalize_base(&cfg.providers.moonshot.api_base));
+    }
     if !cfg.providers.ollama.api_key.is_empty() {
         return (cfg.providers.ollama.api_key.clone(), normalize_base(&cfg.providers.ollama.api_base));
     }
@@ -50,6 +53,8 @@ pub fn detect_rig_provider(model: &str) -> rig_dyn::Provider {
         rig_dyn::Provider::OpenAI
     } else if lower.contains("deepseek") {
         rig_dyn::Provider::DeepSeek
+    } else if lower.contains("moonshot") {
+        rig_dyn::Provider::Moonshot
     } else if lower.contains("ollama") {
         rig_dyn::Provider::Ollama
     } else {
@@ -58,6 +63,12 @@ pub fn detect_rig_provider(model: &str) -> rig_dyn::Provider {
     }
 }
 
+/// Optional context for heartbeat/cron tools (shared config + path). When provided, list/add/delete heartbeat and cron tools are registered.
+pub type HeartbeatCronContext = Option<(
+    std::sync::Arc<tokio::sync::RwLock<config::Config>>,
+    Option<std::path::PathBuf>,
+)>;
+
 /// Build default tool registry.
 pub fn build_default_tools(
     cfg: &config::Config,
@@ -65,6 +76,7 @@ pub fn build_default_tools(
     subagent_mgr: std::sync::Arc<tokio::sync::Mutex<crate::agent::subagent::SubagentManager>>,
     approval_manager: std::sync::Arc<crate::tools::approval::ApprovalManager>,
     permission_policy: Option<std::sync::Arc<crate::tools::permission::CommandPermissionPolicy>>,
+    heartbeat_cron: HeartbeatCronContext,
 ) -> crate::tools::ToolRegistry {
     use crate::tools::*;
     let restrict = cfg.tools.exec.restrict_to_workspace;
@@ -100,5 +112,31 @@ pub fn build_default_tools(
     })).expect("register SpawnTool");
     reg.register(std::sync::Arc::new(memory_tool::RememberTool::new("main"))).expect("register RememberTool");
     reg.register(std::sync::Arc::new(memory_tool::ListMemoryTool::new("main"))).expect("register ListMemoryTool");
+
+    if let Some((config, config_path)) = heartbeat_cron {
+        let inner = heartbeat_cron::HeartbeatCronTools {
+            config,
+            config_path,
+        };
+        reg.register(std::sync::Arc::new(heartbeat_cron::ListHeartbeatTasksTool {
+            inner: inner.clone(),
+        })).expect("register ListHeartbeatTasksTool");
+        reg.register(std::sync::Arc::new(heartbeat_cron::AddHeartbeatTaskTool {
+            inner: inner.clone(),
+        })).expect("register AddHeartbeatTaskTool");
+        reg.register(std::sync::Arc::new(heartbeat_cron::DeleteHeartbeatTaskTool {
+            inner: inner.clone(),
+        })).expect("register DeleteHeartbeatTaskTool");
+        reg.register(std::sync::Arc::new(heartbeat_cron::ListCronTasksTool {
+            inner: inner.clone(),
+        })).expect("register ListCronTasksTool");
+        reg.register(std::sync::Arc::new(heartbeat_cron::AddCronTaskTool {
+            inner: inner.clone(),
+        })).expect("register AddCronTaskTool");
+        reg.register(std::sync::Arc::new(heartbeat_cron::DeleteCronTaskTool {
+            inner: inner.clone(),
+        })).expect("register DeleteCronTaskTool");
+    }
+
     reg
 }
