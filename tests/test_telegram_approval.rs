@@ -16,11 +16,14 @@ fn create_test_channel(
     approval_manager: Option<Arc<ApprovalManager>>,
 ) -> TelegramChannel {
     let config = TelegramConfig {
+        name: "".to_string(),
         token: "test_token".to_string(),
-        allow_from: vec![],
+        allowlist: vec![],
+        enable_allowlist: false,
         enabled: true,
         proxy: None,
         show_tool_calls: true,
+        group_my_name: None,
     };
     
     let mut channel = TelegramChannel::new(config, inbound_tx, outbound_rx, true);

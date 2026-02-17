@@ -325,6 +325,10 @@ mod tests {
                     api_key: "".to_string(),
                     api_base: None,
                 },
+                moonshot: ProviderEntry {
+                    api_key: "".to_string(),
+                    api_base: None,
+                },
                 ollama: ProviderEntry {
                     api_key: "".to_string(),
                     api_base: Some("http://localhost:11434".to_string()),
@@ -339,6 +343,7 @@ mod tests {
                     password: "password123".to_string(),
                 }),
                 cors_origins: vec![],
+                show_tool_calls: true,
             },
             ..Default::default()
         };

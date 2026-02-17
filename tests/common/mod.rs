@@ -48,7 +48,7 @@ pub async fn create_test_app_state_with_approval(
     use std::path::PathBuf;
     
     let config = Arc::new(Config::default());
-    let session_manager = Arc::new(RwLock::new(SessionManager::new(vec![], vec![])));
+    let session_manager = Arc::new(RwLock::new(SessionManager::new()));
     let cron_service = Arc::new(RwLock::new(CronService::new(PathBuf::from("test_cron.json"))));
     let role_registry = Arc::new(RoleRegistry::new());
     let skills_loader = Arc::new(SkillsLoader::new(&PathBuf::from(".")));

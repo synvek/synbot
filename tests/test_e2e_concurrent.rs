@@ -139,7 +139,7 @@ async fn test_e2e_concurrent_different_channels() {
     
     for (i, channel) in channels.iter().enumerate() {
         let manager_clone = approval_manager.clone();
-        let channel_str = channel.to_string();
+        let channel_str = channel.to_string().as_str();
         
         let handle = tokio::spawn(async move {
             let request_id = format!("channel_{}_{}", channel_str, i);
@@ -164,7 +164,7 @@ async fn test_e2e_concurrent_different_channels() {
             manager_clone
                 .request_approval(
                     format!("session_{}_{}", channel_str, i),
-                    channel_str.clone(),
+                    channel_str.to_string(),
                     format!("chat_{}_{}", channel_str, i),
                     format!("command from {}", channel_str),
                     "/tmp".to_string(),

@@ -16,10 +16,13 @@ fn create_test_channel(
     approval_manager: Option<Arc<ApprovalManager>>,
 ) -> DiscordChannel {
     let config = DiscordConfig {
+        name: "".to_string(),
         token: "test_token".to_string(),
-        allow_from: vec![],
+        allowlist: vec![],
+        enable_allowlist: false,
         enabled: true,
         show_tool_calls: true,
+        group_my_name: None,
     };
     
     let mut channel = DiscordChannel::new(config, inbound_tx, outbound_rx, true);
