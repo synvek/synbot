@@ -78,7 +78,7 @@ export default function Chat() {
                     result={message.approvalResult}
                   />
                 ) : message.role === 'tool_call' || message.role === 'tool_result' ? (
-                  <div className="max-w-[70%] rounded-lg px-3 py-1.5 bg-background/80 border border-border text-text-secondary text-sm">
+                  <div className="max-w-[70%] rounded-lg px-3 py-1.5 bg-tool-execution text-text-secondary text-sm">
                     <div className="whitespace-pre-wrap break-words">{message.content}</div>
                     <div className="text-xs mt-0.5 opacity-70 text-text-secondary">
                       {new Date(message.timestamp).toLocaleTimeString()}
@@ -111,7 +111,7 @@ export default function Chat() {
             <>
               {toolProgressList.map((item, idx) => (
                 <div key={`tool-${idx}-${item.tool_name}`} className="flex justify-start">
-                  <div className="max-w-[70%] rounded-lg px-3 py-1.5 bg-background/80 border border-border text-text-secondary text-sm">
+                  <div className="max-w-[70%] rounded-lg px-3 py-1.5 bg-tool-execution text-text-secondary text-sm">
                     <span className="font-medium">{item.tool_name}</span>
                     <span className="mx-2">—</span>
                     <span>{item.status}</span>

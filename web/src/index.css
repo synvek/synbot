@@ -125,6 +125,12 @@ a:focus-visible {
   color: var(--color-error);
 }
 
+/* Tool 执行信息框：与聊天区背景区分，使用轻微 info 色底 */
+.bg-tool-execution {
+  background-color: color-mix(in srgb, var(--color-info) 10%, var(--color-surface));
+  border: 1px solid color-mix(in srgb, var(--color-info) 28%, var(--color-border));
+}
+
 /* 暗黑模式下的阴影优化 */
 .dark .shadow-sm {
   box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
