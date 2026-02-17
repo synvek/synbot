@@ -62,6 +62,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
         approval_manager,
         permission_policy,
         None, // no heartbeat/cron tools in CLI agent mode
+        &None, // no sandbox in CLI agent mode
     );
     let tools = std::sync::Arc::new(tools);
 

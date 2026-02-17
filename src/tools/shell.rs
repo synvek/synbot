@@ -215,6 +215,9 @@ fn validate_workspace_path(
 // ExecTool
 // ---------------------------------------------------------------------------
 
+/// Context for running exec inside a tool sandbox when configured.
+pub type ExecSandboxContext = Option<(Arc<crate::sandbox::SandboxManager>, String)>;
+
 pub struct ExecTool {
     pub workspace: PathBuf,
     pub timeout_secs: u64,
@@ -227,6 +230,8 @@ pub struct ExecTool {
     pub session_id: Option<String>,
     pub channel: Option<String>,
     pub chat_id: Option<String>,
+    /// When set, exec runs inside this sandbox instead of on the host.
+    pub sandbox_context: ExecSandboxContext,
 }
 
 #[async_trait::async_trait]
@@ -353,6 +358,64 @@ impl DynTool for ExecTool {
         }
 
         let start = Instant::now();
+        let working_dir = cwd.display().to_string();
+
+        // Run inside tool sandbox when configured
+        if let Some((ref manager, ref sandbox_id)) = self.sandbox_context {
+            let timeout = Duration::from_secs(self.timeout_secs);
+            let (command, args) = if cfg!(windows) {
+                ("cmd".to_string(), vec!["/C".to_string(), cmd_str.to_string()])
+            } else {
+                ("sh".to_string(), vec!["-c".to_string(), cmd_str.to_string()])
+            };
+            match manager.execute_in_sandbox(sandbox_id, &command, &args, timeout).await {
+                Ok(exec_result) => {
+                    let stdout = decode_output_bytes(&exec_result.stdout);
+                    let stderr = decode_output_bytes(&exec_result.stderr);
+                    let duration_ms = exec_result.duration.as_millis() as u64;
+                    let total_size = stdout.len() + stderr.len();
+                    let needs_truncation = total_size > MAX_OUTPUT;
+                    let (truncated_stdout, truncated_stderr, original_size) = if needs_truncation {
+                        let (out_r, err_r) = smart_truncate_streams(&stdout, &stderr, MAX_OUTPUT);
+                        (out_r.content, err_r.content, Some(total_size))
+                    } else {
+                        (stdout, stderr, None)
+                    };
+                    let exec_result_display = ExecResult {
+                        exit_code: exec_result.exit_code,
+                        stdout: truncated_stdout.clone(),
+                        stderr: truncated_stderr.clone(),
+                        duration_ms,
+                        working_dir: working_dir.clone(),
+                        truncated: needs_truncation,
+                        original_size,
+                    };
+                    if exec_result_display.exit_code == 0 {
+                        info!(
+                            command = %cmd_str,
+                            exit_code = exec_result_display.exit_code,
+                            duration_ms = exec_result_display.duration_ms,
+                            working_dir = %working_dir,
+                            sandbox = true,
+                            "Command executed successfully (sandbox)"
+                        );
+                    } else {
+                        warn!(
+                            command = %cmd_str,
+                            exit_code = exec_result_display.exit_code,
+                            duration_ms = exec_result_display.duration_ms,
+                            working_dir = %working_dir,
+                            sandbox = true,
+                            "Command execution failed (sandbox)"
+                        );
+                    }
+                    return Ok(exec_result_display.to_display_string());
+                }
+                Err(e) => {
+                    return Err(anyhow::anyhow!("Sandbox execution failed: {}", e));
+                }
+            }
+        }
 
         let output = tokio::time::timeout(
             Duration::from_secs(self.timeout_secs),
@@ -372,7 +435,6 @@ impl DynTool for ExecTool {
 
         let stdout = decode_output_bytes(&output.stdout);
         let stderr = decode_output_bytes(&output.stderr);
-        let working_dir = cwd.display().to_string();
 
         let total_size = stdout.len() + stderr.len();
         let needs_truncation = total_size > MAX_OUTPUT;
@@ -699,6 +761,7 @@ mod tests {
             session_id: None,
             channel: None,
             chat_id: None,
+            sandbox_context: None,
         };
 
         let args = json!({
@@ -736,6 +799,7 @@ mod tests {
             session_id: None,
             channel: None,
             chat_id: None,
+            sandbox_context: None,
         };
 
         let args = json!({
@@ -772,6 +836,7 @@ mod tests {
             session_id: None,
             channel: None,
             chat_id: None,
+            sandbox_context: None,
         };
 
         let args = json!({
@@ -812,6 +877,7 @@ mod tests {
             session_id: Some("test-session".to_string()),
             channel: Some("test".to_string()),
             chat_id: Some("test-chat".to_string()),
+            sandbox_context: None,
         };
 
         // Verify that the tool has approval manager configured
@@ -832,6 +898,7 @@ mod tests {
             session_id: None,
             channel: None,
             chat_id: None,
+            sandbox_context: None,
         };
 
         let args = json!({
@@ -862,6 +929,7 @@ mod tests {
             session_id: None,
             channel: None,
             chat_id: None,
+            sandbox_context: None,
         };
 
         let args = json!({

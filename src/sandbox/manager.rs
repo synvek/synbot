@@ -2,7 +2,8 @@
 
 use super::error::{Result, SandboxError};
 use super::sandbox_trait::Sandbox;
-use super::types::{SandboxConfig, SandboxInfo};
+use super::types::{SandboxConfig, SandboxInfo, ExecutionResult};
+use std::time::Duration;
 use super::config::ConfigurationManager;
 use super::monitoring::MonitoringModule;
 use super::security::{SecurityValidator, EscapePrevention, PrivilegeEscalationPrevention, ResourceExhaustionPrevention};
@@ -307,6 +308,32 @@ impl SandboxManager {
     pub async fn sandbox_exists(&self, sandbox_id: &str) -> bool {
         let sandboxes = self.sandboxes.read().await;
         sandboxes.contains_key(sandbox_id)
+    }
+    
+    /// Execute a command inside a sandbox.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `sandbox_id` - The sandbox ID (e.g. "synbot-tool")
+    /// * `command` - The command to run (e.g. "sh" or "cmd")
+    /// * `args` - Command arguments (e.g. ["-c", "echo hello"])
+    /// * `timeout` - Maximum execution time
+    /// 
+    /// # Errors
+    /// 
+    /// Returns an error if the sandbox is not found or execution fails.
+    pub async fn execute_in_sandbox(
+        &self,
+        sandbox_id: &str,
+        command: &str,
+        args: &[String],
+        timeout: Duration,
+    ) -> Result<ExecutionResult> {
+        let sandboxes = self.sandboxes.read().await;
+        let sandbox = sandboxes
+            .get(sandbox_id)
+            .ok_or(SandboxError::NotFound)?;
+        sandbox.execute(command, args, timeout)
     }
     
     /// Get reference to the monitoring module

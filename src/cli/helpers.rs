@@ -69,6 +69,14 @@ pub type HeartbeatCronContext = Option<(
     Option<std::path::PathBuf>,
 )>;
 
+/// When sandbox is configured: (manager, tool_sandbox_id).
+/// If tool_sandbox_id is Some("synbot-tool"), exec runs inside it; if None, manager is kept alive (e.g. for app sandbox only).
+/// Pass by reference so the caller can keep the manager alive for the process lifetime when only app_sandbox is running.
+pub type SandboxContext = Option<(
+    std::sync::Arc<crate::sandbox::SandboxManager>,
+    Option<String>, // tool_sandbox_id when tool sandbox started, None when only app sandbox or tool failed
+)>;
+
 /// Build default tool registry.
 pub fn build_default_tools(
     cfg: &config::Config,
@@ -77,6 +85,7 @@ pub fn build_default_tools(
     approval_manager: std::sync::Arc<crate::tools::approval::ApprovalManager>,
     permission_policy: Option<std::sync::Arc<crate::tools::permission::CommandPermissionPolicy>>,
     heartbeat_cron: HeartbeatCronContext,
+    sandbox_context: &SandboxContext,
 ) -> crate::tools::ToolRegistry {
     use crate::tools::*;
     let restrict = cfg.tools.exec.restrict_to_workspace;
@@ -104,6 +113,7 @@ pub fn build_default_tools(
         session_id: None,
         channel: None,
         chat_id: None,
+        sandbox_context: sandbox_context.as_ref().and_then(|(m, id)| id.as_ref().map(|sid| (m.clone(), sid.clone()))),
     })).expect("register ExecTool");
     if !cfg.tools.web.brave_api_key.is_empty() {
         reg.register(std::sync::Arc::new(web::WebSearchTool {

@@ -33,51 +33,53 @@ impl Wsl2Integration {
     pub fn is_wsl2_available() -> Result<bool> {
         #[cfg(target_os = "windows")]
         {
-            // Check if wsl.exe exists and is accessible
-            let wsl_check = Command::new("wsl.exe")
-                .arg("--status")
+            // Prefer wsl -l -v (available on all WSL installs); then try wsl --status (newer builds).
+            let list_output = Command::new("wsl.exe")
+                .args(["-l", "-v"])
                 .output();
-            
-            match wsl_check {
-                Ok(output) => {
-                    if !output.status.success() {
-                        return Ok(false);
+
+            if let Ok(list_result) = list_output {
+                let list_stdout = String::from_utf8_lossy(&list_result.stdout);
+                // Lines look like: "  NAME            STATE           VERSION" then "* Ubuntu    Running         2"
+                // Or with locale: version number is last column. Match "2" as version (WSL2).
+                for line in list_stdout.lines() {
+                    let line = line.trim();
+                    // Skip header
+                    if line.eq_ignore_ascii_case("version") || line.is_empty() {
+                        continue;
                     }
-                    
-                    // Parse output to check for WSL2
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    
-                    // Check if default version is 2 or if any distribution uses version 2
-                    if stdout.contains("Default Version: 2") || stdout.contains("version 2") {
-                        return Ok(true);
-                    }
-                    
-                    // Alternative check: list distributions and check versions
-                    let list_output = Command::new("wsl.exe")
-                        .arg("-l")
-                        .arg("-v")
-                        .output();
-                    
-                    if let Ok(list_result) = list_output {
-                        let list_stdout = String::from_utf8_lossy(&list_result.stdout);
-                        // Check if any distribution shows VERSION 2
-                        if list_stdout.contains(" 2 ") {
+                    // Last token is often the version number (1 or 2)
+                    if let Some(last) = line.split_whitespace().last() {
+                        if last == "2" {
                             return Ok(true);
                         }
                     }
-                    
-                    Ok(false)
                 }
-                Err(_) => {
-                    // WSL is not installed or not accessible
-                    Ok(false)
+                // Fallback: simple substring (handles " 2 " in table)
+                if list_stdout.contains(" 2 ") && (list_stdout.contains("Running") || list_stdout.contains("Stopped")) {
+                    return Ok(true);
                 }
             }
+
+            // Fallback: wsl --status (may not exist on older Windows 10)
+            if let Ok(output) = Command::new("wsl.exe").arg("--status").output() {
+                if output.status.success() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let lower = stdout.to_lowercase();
+                    if lower.contains("default version: 2")
+                        || lower.contains("version: 2")
+                        || lower.contains("version 2")
+                    {
+                        return Ok(true);
+                    }
+                }
+            }
+
+            Ok(false)
         }
-        
+
         #[cfg(not(target_os = "windows"))]
         {
-            // WSL2 is only available on Windows
             Ok(false)
         }
     }

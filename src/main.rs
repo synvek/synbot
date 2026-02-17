@@ -10,6 +10,7 @@ mod heartbeat;
 mod logging;
 mod tools;
 mod web;
+mod sandbox;
 
 mod url_utils;
 

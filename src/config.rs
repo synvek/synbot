@@ -673,6 +673,152 @@ pub struct CronConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Sandbox config (app_sandbox / tool_sandbox / monitoring)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SandboxFilesystemConfig {
+    #[serde(default)]
+    pub readonly_paths: Vec<String>,
+    #[serde(default)]
+    pub writable_paths: Vec<String>,
+    #[serde(default)]
+    pub hidden_paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SandboxNetworkConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub allowed_hosts: Vec<String>,
+    #[serde(default)]
+    pub allowed_ports: Vec<u16>,
+}
+
+/// Resource limits; max_memory and max_disk can be "2G", "512M", or bytes number.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SandboxResourceConfig {
+    #[serde(default)]
+    pub max_memory: Option<SandboxSize>,
+    #[serde(default)]
+    pub max_cpu: Option<f64>,
+    #[serde(default)]
+    pub max_disk: Option<SandboxSize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum SandboxSize {
+    String(String),
+    Number(u64),
+}
+
+impl Default for SandboxSize {
+    fn default() -> Self {
+        SandboxSize::String("1G".to_string())
+    }
+}
+
+/// Parse size string ("2G", "512M", "1K") or number to bytes.
+pub fn parse_sandbox_size_bytes(v: &SandboxSize) -> anyhow::Result<u64> {
+    match v {
+        SandboxSize::String(s) => parse_size_str(s),
+        SandboxSize::Number(n) => Ok(*n),
+    }
+}
+
+fn parse_size_str(s: &str) -> anyhow::Result<u64> {
+    let s = s.trim();
+    let (num_str, unit) = if s.ends_with('G') || s.ends_with('g') {
+        (&s[..s.len() - 1], 1024 * 1024 * 1024u64)
+    } else if s.ends_with('M') || s.ends_with('m') {
+        (&s[..s.len() - 1], 1024 * 1024)
+    } else if s.ends_with('K') || s.ends_with('k') {
+        (&s[..s.len() - 1], 1024)
+    } else {
+        (s, 1u64)
+    };
+    let num: u64 = num_str
+        .parse()
+        .map_err(|_| anyhow::anyhow!("Invalid sandbox size: {}", s))?;
+    Ok(num * unit)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SandboxProcessConfig {
+    #[serde(default)]
+    pub allow_fork: Option<bool>,
+    #[serde(default)]
+    pub max_processes: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowsSandboxConfig {
+    #[serde(default)]
+    pub r#type: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AppSandboxConfig {
+    #[serde(default)]
+    pub platform: Option<String>,
+    #[serde(default)]
+    pub windows: Option<WindowsSandboxConfig>,
+    #[serde(default)]
+    pub filesystem: Option<SandboxFilesystemConfig>,
+    #[serde(default)]
+    pub network: Option<SandboxNetworkConfig>,
+    #[serde(default)]
+    pub resources: Option<SandboxResourceConfig>,
+    #[serde(default)]
+    pub process: Option<SandboxProcessConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolSandboxConfig {
+    #[serde(default)]
+    pub image: Option<String>,
+    #[serde(default)]
+    pub filesystem: Option<SandboxFilesystemConfig>,
+    #[serde(default)]
+    pub network: Option<SandboxNetworkConfig>,
+    #[serde(default)]
+    pub resources: Option<SandboxResourceConfig>,
+    #[serde(default)]
+    pub process: Option<SandboxProcessConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SandboxLogOutputConfig {
+    #[serde(rename = "type")]
+    pub output_type: String,
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub rotation: Option<String>,
+    #[serde(default)]
+    pub max_size: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SandboxMonitoringConfig {
+    #[serde(default)]
+    pub log_level: Option<String>,
+    #[serde(default)]
+    pub log_output: Vec<SandboxLogOutputConfig>,
+}
+
+// ---------------------------------------------------------------------------
 // Root config
 // ---------------------------------------------------------------------------
 
@@ -708,6 +854,176 @@ pub struct Config {
     /// Cron: scheduled tasks from config (schedule, description, enabled, command, channel, userId).
     #[serde(default)]
     pub cron: CronConfig,
+    /// Optional app sandbox (isolates main process; platform-specific).
+    #[serde(default)]
+    pub app_sandbox: Option<AppSandboxConfig>,
+    /// Optional tool sandbox (exec and other tools run inside this).
+    #[serde(default)]
+    pub tool_sandbox: Option<ToolSandboxConfig>,
+    /// Optional sandbox monitoring (log_level, log_output for sandbox audit).
+    #[serde(default)]
+    pub sandbox_monitoring: Option<SandboxMonitoringConfig>,
+}
+
+/// Expand paths that start with "~" to the user's home directory.
+fn expand_sandbox_paths(paths: &[String]) -> Vec<String> {
+    let home = dirs::home_dir();
+    paths
+        .iter()
+        .map(|p| {
+            let s = p.trim();
+            if s.starts_with("~/") || s == "~" {
+                home.as_ref()
+                    .map(|h| h.join(s.trim_start_matches('~').trim_start_matches('/')).display().to_string())
+                    .unwrap_or_else(|| p.to_string())
+            } else if s.starts_with("~\\") || (cfg!(windows) && s.starts_with('~')) {
+                home.as_ref()
+                    .map(|h| {
+                        let rest = s.trim_start_matches('~').trim_start_matches('\\');
+                        h.join(rest).display().to_string()
+                    })
+                    .unwrap_or_else(|| p.to_string())
+            } else {
+                p.to_string()
+            }
+        })
+        .collect()
+}
+
+fn build_sandbox_monitoring(mon: &Option<SandboxMonitoringConfig>) -> crate::sandbox::types::MonitoringConfig {
+    match mon {
+        None => crate::sandbox::types::MonitoringConfig::default(),
+        Some(m) => crate::sandbox::types::MonitoringConfig {
+            log_level: m.log_level.clone().unwrap_or_else(|| "info".to_string()),
+            log_output: m
+                .log_output
+                .iter()
+                .map(|o| crate::sandbox::types::LogOutput {
+                    output_type: o.output_type.clone(),
+                    path: o.path.clone(),
+                    facility: String::new(),
+                })
+                .collect(),
+            audit: crate::sandbox::types::AuditConfig::default(),
+            metrics: crate::sandbox::types::MetricsConfig::default(),
+        },
+    }
+}
+
+/// Build SandboxConfig for app sandbox from Config.
+pub fn build_app_sandbox_config(
+    cfg: &AppSandboxConfig,
+    monitoring: &Option<SandboxMonitoringConfig>,
+) -> anyhow::Result<crate::sandbox::types::SandboxConfig> {
+    let platform = cfg
+        .platform
+        .as_deref()
+        .unwrap_or("auto")
+        .to_string();
+    let fs = cfg.filesystem.as_ref().map(|f| SandboxFilesystemConfig {
+        readonly_paths: f.readonly_paths.clone(),
+        writable_paths: f.writable_paths.clone(),
+        hidden_paths: f.hidden_paths.clone(),
+    }).unwrap_or_default();
+    let net = cfg
+        .network
+        .as_ref()
+        .cloned()
+        .unwrap_or_default();
+    let res = cfg.resources.as_ref();
+    let max_memory = res
+        .and_then(|r| r.max_memory.as_ref())
+        .map(|v| parse_sandbox_size_bytes(v))
+        .transpose()?
+        .unwrap_or(2 * 1024 * 1024 * 1024);
+    let max_cpu = res
+        .and_then(|r| r.max_cpu)
+        .unwrap_or(2.0);
+    let max_disk = res
+        .and_then(|r| r.max_disk.as_ref())
+        .map(|v| parse_sandbox_size_bytes(v))
+        .transpose()?
+        .unwrap_or(10 * 1024 * 1024 * 1024);
+    let process = cfg.process.as_ref();
+    Ok(crate::sandbox::types::SandboxConfig {
+        sandbox_id: "synbot-app".to_string(),
+        platform,
+        filesystem: crate::sandbox::types::FilesystemConfig {
+            readonly_paths: expand_sandbox_paths(&fs.readonly_paths),
+            writable_paths: expand_sandbox_paths(&fs.writable_paths),
+            hidden_paths: expand_sandbox_paths(&fs.hidden_paths),
+        },
+        network: crate::sandbox::types::NetworkConfig {
+            enabled: net.enabled,
+            allowed_hosts: net.allowed_hosts,
+            allowed_ports: net.allowed_ports,
+        },
+        resources: crate::sandbox::types::ResourceConfig {
+            max_memory,
+            max_cpu,
+            max_disk,
+        },
+        process: crate::sandbox::types::ProcessConfig {
+            allow_fork: process.and_then(|p| p.allow_fork).unwrap_or(false),
+            max_processes: process.and_then(|p| p.max_processes).unwrap_or(10),
+        },
+        monitoring: build_sandbox_monitoring(monitoring),
+    })
+}
+
+/// Build SandboxConfig for tool sandbox from Config.
+pub fn build_tool_sandbox_config(
+    cfg: &ToolSandboxConfig,
+    monitoring: &Option<SandboxMonitoringConfig>,
+) -> anyhow::Result<crate::sandbox::types::SandboxConfig> {
+    let platform = "auto".to_string();
+    let fs = cfg.filesystem.as_ref().map(|f| SandboxFilesystemConfig {
+        readonly_paths: f.readonly_paths.clone(),
+        writable_paths: f.writable_paths.clone(),
+        hidden_paths: f.hidden_paths.clone(),
+    }).unwrap_or_default();
+    let net = cfg
+        .network
+        .as_ref()
+        .cloned()
+        .unwrap_or_default();
+    let res = cfg.resources.as_ref();
+    let max_memory = res
+        .and_then(|r| r.max_memory.as_ref())
+        .map(|v| parse_sandbox_size_bytes(v))
+        .transpose()?
+        .unwrap_or(1024 * 1024 * 1024);
+    let max_cpu = res.and_then(|r| r.max_cpu).unwrap_or(1.0);
+    let max_disk = res
+        .and_then(|r| r.max_disk.as_ref())
+        .map(|v| parse_sandbox_size_bytes(v))
+        .transpose()?
+        .unwrap_or(5 * 1024 * 1024 * 1024);
+    let process = cfg.process.as_ref();
+    Ok(crate::sandbox::types::SandboxConfig {
+        sandbox_id: "synbot-tool".to_string(),
+        platform,
+        filesystem: crate::sandbox::types::FilesystemConfig {
+            readonly_paths: expand_sandbox_paths(&fs.readonly_paths),
+            writable_paths: expand_sandbox_paths(&fs.writable_paths),
+            hidden_paths: expand_sandbox_paths(&fs.hidden_paths),
+        },
+        network: crate::sandbox::types::NetworkConfig {
+            enabled: net.enabled,
+            allowed_hosts: net.allowed_hosts,
+            allowed_ports: net.allowed_ports,
+        },
+        resources: crate::sandbox::types::ResourceConfig {
+            max_memory,
+            max_cpu,
+            max_disk,
+        },
+        process: crate::sandbox::types::ProcessConfig {
+            allow_fork: process.and_then(|p| p.allow_fork).unwrap_or(false),
+            max_processes: process.and_then(|p| p.max_processes).unwrap_or(5),
+        },
+        monitoring: build_sandbox_monitoring(monitoring),
+    })
 }
 
 // ---------------------------------------------------------------------------

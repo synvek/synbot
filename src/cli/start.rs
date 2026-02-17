@@ -1,7 +1,7 @@
 //! Start command - Start the full daemon (channels + heartbeat + cron).
 
 use anyhow::Result;
-use tracing::info;
+use tracing::{info, warn};
 use crate::config;
 use crate::logging;
 use crate::channels::Channel;
@@ -70,6 +70,10 @@ pub async fn cmd_start() -> Result<()> {
 
     let heartbeat_cron_ctx: super::helpers::HeartbeatCronContext =
         Some((std::sync::Arc::clone(&shared_config), Some(config::config_path())));
+
+    // Optional sandbox: create and start app/tool sandboxes when configured.
+    let sandbox_context = init_sandbox_if_configured(&cfg).await;
+
     let tools = std::sync::Arc::new(build_default_tools(
         &cfg,
         &ws,
@@ -77,6 +81,7 @@ pub async fn cmd_start() -> Result<()> {
         std::sync::Arc::clone(&approval_manager),
         permission_policy.clone(),
         heartbeat_cron_ctx,
+        &sandbox_context,
     ));
 
     // Initialize components for web server
@@ -236,4 +241,67 @@ pub async fn cmd_start() -> Result<()> {
         info!("Shutting down...");
     }
     Ok(())
+}
+
+/// If app_sandbox or tool_sandbox is configured, create SandboxManager, create/start sandboxes.
+/// Returns (manager, Some(tool_sandbox_id)) when tool sandbox is running (exec uses it),
+/// or (manager, None) when only app sandbox is running (keeps manager alive so app sandbox is not stopped).
+async fn init_sandbox_if_configured(
+    cfg: &config::Config,
+) -> Option<(std::sync::Arc<crate::sandbox::SandboxManager>, Option<String>)> {
+    let has_app = cfg.app_sandbox.is_some();
+    let has_tool = cfg.tool_sandbox.is_some();
+    if !has_app && !has_tool {
+        return None;
+    }
+
+    let manager = std::sync::Arc::new(crate::sandbox::SandboxManager::with_defaults());
+    let monitoring = &cfg.sandbox_monitoring;
+    let mut app_started = false;
+
+    if let Some(ref app_cfg) = cfg.app_sandbox {
+        match config::build_app_sandbox_config(app_cfg, monitoring) {
+            Ok(sandbox_config) => {
+                match manager.create_app_sandbox(sandbox_config).await {
+                    Ok(id) => {
+                        if let Err(e) = manager.start_sandbox(&id).await {
+                            warn!(sandbox_id = %id, error = %e, "App sandbox start failed");
+                        } else {
+                            app_started = true;
+                            info!(sandbox_id = %id, "App sandbox started");
+                        }
+                    }
+                    Err(e) => warn!(error = %e, "App sandbox creation failed (daemon runs without app sandbox)"),
+                }
+            }
+            Err(e) => warn!(error = %e, "App sandbox config invalid"),
+        }
+    }
+
+    let tool_sandbox_id = "synbot-tool".to_string();
+    if let Some(ref tool_cfg) = cfg.tool_sandbox {
+        match config::build_tool_sandbox_config(tool_cfg, monitoring) {
+            Ok(sandbox_config) => {
+                match manager.create_tool_sandbox(sandbox_config).await {
+                    Ok(id) => {
+                        if let Err(e) = manager.start_sandbox(&id).await {
+                            warn!(sandbox_id = %id, error = %e, "Tool sandbox start failed (exec will run on host)");
+                        } else {
+                            info!(sandbox_id = %id, "Tool sandbox started (exec runs in sandbox)");
+                            return Some((manager, Some(tool_sandbox_id)));
+                        }
+                    }
+                    Err(e) => warn!(error = %e, "Tool sandbox creation failed (exec will run on host)"),
+                }
+            }
+            Err(e) => warn!(error = %e, "Tool sandbox config invalid"),
+        }
+    }
+
+    // Keep manager alive when app sandbox was started so it is not dropped and stopped.
+    if app_started {
+        Some((manager, None))
+    } else {
+        None
+    }
 }

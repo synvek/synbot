@@ -242,8 +242,18 @@ impl SandboxFactory {
         // Create platform-specific tool sandbox
         #[cfg(target_os = "windows")]
         {
-            use crate::sandbox::Wsl2GVisorSandbox;
-            Ok(Box::new(Wsl2GVisorSandbox::new(config)?))
+            use crate::sandbox::{GVisorDockerSandbox, Wsl2GVisorSandbox};
+            match Wsl2GVisorSandbox::new(config.clone()) {
+                Ok(sb) => Ok(Box::new(sb)),
+                Err(e) => {
+                    let msg = e.to_string();
+                    if msg.contains("WSL2") || msg.contains("Docker is not accessible") {
+                        GVisorDockerSandbox::new(config).map(|sb| Box::new(sb) as Box<dyn Sandbox>)
+                    } else {
+                        Err(e)
+                    }
+                }
+            }
         }
         
         #[cfg(any(target_os = "linux", target_os = "macos"))]

@@ -97,12 +97,14 @@ impl GVisorDockerSandbox {
 impl Sandbox for GVisorDockerSandbox {
     fn start(&mut self) -> Result<()> {
         self.status.state = SandboxState::Starting;
-        
-        // Create container with gVisor runtime
-        let runtime = tokio::runtime::Runtime::new()
-            .map_err(|e| SandboxError::CreationFailed(format!("Failed to create runtime: {}", e)))?;
-        
-        runtime.block_on(async {
+
+        // Run Docker async work in a blocking thread to avoid "runtime within runtime" when
+        // start() is called from an async context (e.g. init_sandbox_if_configured).
+        tokio::task::block_in_place(|| {
+            let runtime = tokio::runtime::Runtime::new()
+                .map_err(|e| SandboxError::CreationFailed(format!("Failed to create runtime: {}", e)))?;
+
+            runtime.block_on(async {
             let options = CreateContainerOptions {
                 name: self.config.sandbox_id.clone(),
                 platform: None,
@@ -150,6 +152,7 @@ impl Sandbox for GVisorDockerSandbox {
             self.status.started_at = Some(Utc::now());
             
             Ok(())
+            })
         })
     }
     
@@ -159,11 +162,12 @@ impl Sandbox for GVisorDockerSandbox {
         }
         
         self.status.state = SandboxState::Stopping;
-        
-        let runtime = tokio::runtime::Runtime::new()
-            .map_err(|e| SandboxError::ExecutionFailed(format!("Failed to create runtime: {}", e)))?;
-        
-        runtime.block_on(async {
+
+        tokio::task::block_in_place(|| {
+            let runtime = tokio::runtime::Runtime::new()
+                .map_err(|e| SandboxError::ExecutionFailed(format!("Failed to create runtime: {}", e)))?;
+
+            runtime.block_on(async {
             if let Some(container_id) = &self.container_id {
                 // Stop the container
                 self.docker
@@ -188,6 +192,7 @@ impl Sandbox for GVisorDockerSandbox {
             self.status.stopped_at = Some(Utc::now());
             
             Ok(())
+            })
         })
     }
     
@@ -195,11 +200,12 @@ impl Sandbox for GVisorDockerSandbox {
         let container_id = self.container_id
             .as_ref()
             .ok_or(SandboxError::NotStarted)?;
-        
-        let runtime = tokio::runtime::Runtime::new()
-            .map_err(|e| SandboxError::ExecutionFailed(format!("Failed to create runtime: {}", e)))?;
-        
-        runtime.block_on(async {
+
+        tokio::task::block_in_place(|| {
+            let runtime = tokio::runtime::Runtime::new()
+                .map_err(|e| SandboxError::ExecutionFailed(format!("Failed to create runtime: {}", e)))?;
+
+            runtime.block_on(async {
             // Prepare command with arguments
             let mut cmd = vec![command];
             cmd.extend(args.iter().map(|s| s.as_str()));
@@ -271,6 +277,7 @@ impl Sandbox for GVisorDockerSandbox {
                     Err(SandboxError::ExecutionFailed("Unexpected exec result".to_string()))
                 }
             }
+            })
         })
     }
     
@@ -282,14 +289,15 @@ impl Sandbox for GVisorDockerSandbox {
         let mut checks = HashMap::new();
         
         if let Some(container_id) = &self.container_id {
-            let runtime = tokio::runtime::Runtime::new().unwrap();
-            
-            let container_running = runtime.block_on(async {
-                self.docker
-                    .inspect_container(container_id, None)
-                    .await
-                    .map(|info| info.state.and_then(|s| s.running).unwrap_or(false))
-                    .unwrap_or(false)
+            let container_running = tokio::task::block_in_place(|| {
+                let runtime = tokio::runtime::Runtime::new().unwrap();
+                runtime.block_on(async {
+                    self.docker
+                        .inspect_container(container_id, None)
+                        .await
+                        .map(|info| info.state.and_then(|s| s.running).unwrap_or(false))
+                        .unwrap_or(false)
+                })
             });
             
             checks.insert("container_running".to_string(), container_running);
