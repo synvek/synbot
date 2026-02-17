@@ -314,6 +314,7 @@ impl FeishuChannel {
                                         });
                                         return;
                                     }
+                                    // Strip only bot mention then 0+ spaces; do not strip @@role so agent loop can route @@dev etc.
                                     let stripped = trimmed
                                         .strip_prefix(&mention)
                                         .map(str::trim_start)
@@ -402,6 +403,7 @@ impl FeishuChannel {
                                             });
                                             return;
                                         }
+                                        // Strip only bot mention then 0+ spaces; do not strip @@role so agent loop can route @@dev etc.
                                         let stripped = trimmed
                                             .strip_prefix(&mention)
                                             .map(str::trim_start)

@@ -630,6 +630,7 @@ impl DiscordChannel {
                                                                 serde_json::json!(true);
                                                             (false, true)
                                                         } else {
+                                                            // Strip only bot mention then 0+ spaces; do not strip @@role so agent loop can route @@dev etc.
                                                             let stripped = trimmed
                                                                 .strip_prefix(&mention_prefix)
                                                                 .or_else(|| trimmed.strip_prefix(&mention_prefix_alt))
@@ -687,6 +688,7 @@ impl DiscordChannel {
                                                                     serde_json::json!(true);
                                                                 (false, true)
                                                             } else {
+                                                                // Strip only bot mention then 0+ spaces; do not strip @@role so agent loop can route @@dev etc.
                                                                 let stripped = trimmed
                                                                     .strip_prefix(&mention_prefix)
                                                                     .or_else(|| trimmed.strip_prefix(&mention_prefix_alt))
