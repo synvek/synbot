@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use tokio::process::Command;
 use tracing::{info, warn};
 
+use crate::tools::approval::ApprovalOutcome;
 use crate::tools::truncation::smart_truncate_streams;
 use crate::tools::DynTool;
 
@@ -297,7 +298,7 @@ impl DynTool for ExecTool {
                             .map(|s| s.trim().to_string())
                             .filter(|s| !s.is_empty());
                         
-                        let approved = approval_manager
+                        let outcome = approval_manager
                             .request_approval(
                                 session_id.clone(),
                                 channel.clone(),
@@ -310,11 +311,20 @@ impl DynTool for ExecTool {
                             )
                             .await?;
                         
-                        if !approved {
-                            return Err(anyhow::anyhow!(
-                                "Execution rejected: {} (user did not approve or request timed out)",
-                                cmd_str
-                            ));
+                        match outcome {
+                            ApprovalOutcome::Approved => { /* continue to execute */ }
+                            ApprovalOutcome::Rejected => {
+                                return Err(anyhow::anyhow!(
+                                    "Execution rejected by user: {} (user declined approval; do not retry this command)",
+                                    cmd_str
+                                ));
+                            }
+                            ApprovalOutcome::Timeout => {
+                                return Err(anyhow::anyhow!(
+                                    "Execution not run: {} (approval timed out; you may ask the user to approve and try again)",
+                                    cmd_str
+                                ));
+                            }
                         }
                     } else {
                         // If approval manager or session info is not available, deny by default

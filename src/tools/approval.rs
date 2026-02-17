@@ -43,6 +43,14 @@ pub enum ApprovalStatus {
     Timeout,
 }
 
+/// Result of waiting for approval: caller can distinguish user rejection vs timeout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovalOutcome {
+    Approved,
+    Rejected,
+    Timeout,
+}
+
 #[derive(Debug, Default)]
 pub struct ApprovalMetrics {
     pub total_requests: AtomicU64,
@@ -162,7 +170,7 @@ impl ApprovalManager {
         context: String,
         timeout_secs: u64,
         display_message: Option<String>,
-    ) -> anyhow::Result<bool> {
+    ) -> anyhow::Result<ApprovalOutcome> {
         // 增加总请求数
         self.metrics.total_requests.fetch_add(1, Ordering::Relaxed);
         
@@ -258,7 +266,8 @@ impl ApprovalManager {
                     ApprovalStatus::Rejected(response)
                 };
                 self.add_to_history(request, status).await;
-                return Ok(approved);
+                let outcome = if approved { ApprovalOutcome::Approved } else { ApprovalOutcome::Rejected };
+                return Ok(outcome);
             }
             Ok(None) => {
                 warn!(
@@ -283,7 +292,7 @@ impl ApprovalManager {
 
         self.add_to_history(request, status).await;
 
-        Ok(false)
+        Ok(ApprovalOutcome::Timeout)
     }
 
     pub async fn submit_response(&self, response: ApprovalResponse) -> anyhow::Result<()> {
@@ -357,7 +366,7 @@ mod tests {
         // 等待超时
         let result = handle.await.unwrap();
         assert!(result.is_ok());
-        assert!(!result.unwrap()); // 超时应该返回 false
+        assert_eq!(result.unwrap(), ApprovalOutcome::Timeout);
 
         // 检查历史记录
         let history = manager.get_history().await;
@@ -408,7 +417,7 @@ mod tests {
         // 等待请求完成
         let result = handle.await.unwrap();
         assert!(result.is_ok());
-        assert!(result.unwrap()); // 应该返回 true（批准）
+        assert_eq!(result.unwrap(), ApprovalOutcome::Approved);
 
         // 检查历史记录
         let history = manager.get_history().await;
@@ -459,7 +468,7 @@ mod tests {
         // 等待请求完成
         let result = handle.await.unwrap();
         assert!(result.is_ok());
-        assert!(!result.unwrap()); // 应该返回 false（拒绝）
+        assert_eq!(result.unwrap(), ApprovalOutcome::Rejected);
 
         // 检查历史记录
         let history = manager.get_history().await;
@@ -486,7 +495,7 @@ mod tests {
             .await;
 
         assert!(result.is_ok());
-        assert!(!result.unwrap()); // 超时应该返回 false
+        assert_eq!(result.unwrap(), ApprovalOutcome::Timeout);
 
         // 检查历史记录
         let history = manager.get_history().await;
@@ -664,7 +673,7 @@ mod tests {
         // 等待请求完成
         let result = handle.await.unwrap();
         assert!(result.is_ok());
-        assert!(result.unwrap());
+        assert_eq!(result.unwrap(), ApprovalOutcome::Approved);
     }
 
     #[tokio::test]
@@ -692,7 +701,7 @@ mod tests {
         // 等待超时
         let result = handle.await.unwrap();
         assert!(result.is_ok());
-        assert!(!result.unwrap()); // 超时应该返回 false
+        assert_eq!(result.unwrap(), ApprovalOutcome::Timeout);
     }
 
     #[tokio::test]
@@ -792,7 +801,7 @@ mod tests {
 
         // 创建一个批准的请求
         let manager_clone = manager.clone_for_test();
-        let handle1: tokio::task::JoinHandle<anyhow::Result<bool>> = tokio::spawn(async move {
+        let handle1: tokio::task::JoinHandle<anyhow::Result<ApprovalOutcome>> = tokio::spawn(async move {
             manager_clone
                 .request_approval(
                     "session1".to_string(),
@@ -822,7 +831,7 @@ mod tests {
             timestamp: Utc::now(),
         };
         manager.submit_response(response).await.unwrap();
-        handle1.await.unwrap().unwrap();
+        assert_eq!(handle1.await.unwrap().unwrap(), ApprovalOutcome::Approved);
 
         // 创建一个拒绝的请求
         let manager_clone = manager.clone_for_test();
@@ -855,7 +864,7 @@ mod tests {
             timestamp: Utc::now(),
         };
         manager.submit_response(response).await.unwrap();
-        handle2.await.unwrap().unwrap();
+        assert_eq!(handle2.await.unwrap().unwrap(), ApprovalOutcome::Rejected);
 
         // 创建一个超时的请求
         manager
