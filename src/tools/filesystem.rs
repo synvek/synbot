@@ -134,20 +134,45 @@ pub struct ListDirTool {
 #[async_trait::async_trait]
 impl DynTool for ListDirTool {
     fn name(&self) -> &str { "list_dir" }
-    fn description(&self) -> &str { "List contents of a directory." }
+    fn description(&self) -> &str {
+        "List contents of a directory: returns both subdirectories and files, clearly labeled. Prefer this over exec for listing a folder so one tool call is enough."
+    }
     fn parameters_schema(&self) -> Value {
-        json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})
+        json!({"type":"object","properties":{"path":{"type":"string","description":"Directory path (default '.' for current workspace)"}},"required":["path"]})
     }
     async fn call(&self, args: Value) -> anyhow::Result<String> {
         let path = resolve_path(args["path"].as_str().unwrap_or("."), &self.workspace, self.restrict)?;
         info!(path = %path.display(), "list_dir");
         let mut entries = tokio::fs::read_dir(&path).await?;
-        let mut lines = Vec::new();
+        let mut dirs = Vec::new();
+        let mut files = Vec::new();
         while let Some(entry) = entries.next_entry().await? {
+            let name = entry.file_name().to_string_lossy().into_owned();
             let ft = entry.file_type().await?;
-            let prefix = if ft.is_dir() { "d" } else { "-" };
-            lines.push(format!("{} {}", prefix, entry.file_name().to_string_lossy()));
+            if ft.is_dir() {
+                dirs.push(name);
+            } else {
+                files.push(name);
+            }
         }
-        Ok(lines.join("\n"))
+        dirs.sort();
+        files.sort();
+        let mut out = Vec::new();
+        if !dirs.is_empty() {
+            out.push("Directories:".to_string());
+            for d in &dirs {
+                out.push(format!("  {} (dir)", d));
+            }
+        }
+        if !files.is_empty() {
+            out.push("Files:".to_string());
+            for f in &files {
+                out.push(format!("  {}", f));
+            }
+        }
+        if out.is_empty() {
+            out.push("(empty directory)".to_string());
+        }
+        Ok(out.join("\n"))
     }
 }
