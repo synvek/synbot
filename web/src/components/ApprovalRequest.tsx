@@ -36,11 +36,11 @@ export default function ApprovalRequest({
   };
 
   return (
-    <div className="bg-surface border-2 border-warning rounded-lg shadow-lg p-4 max-w-2xl">
+    <div className="max-w-[70%] rounded-lg px-4 py-2 shadow-sm bg-background border border-border text-text">
       {/* Header */}
       <div className="flex items-center gap-2 mb-4 pb-3 border-b border-border">
         <svg
-          className="w-6 h-6 text-warning"
+          className="w-5 h-5 text-primary flex-shrink-0"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -52,7 +52,7 @@ export default function ApprovalRequest({
             d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
           />
         </svg>
-        <h3 className="text-lg font-semibold text-text">
+        <h3 className="text-base font-semibold text-text">
           {t('approval.title', '命令执行审批请求')}
         </h3>
       </div>
@@ -63,7 +63,7 @@ export default function ApprovalRequest({
           <label className="text-sm font-medium text-text-secondary block mb-1">
             {t('approval.command', '命令')}:
           </label>
-          <code className="block bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono break-all">
+          <code className="block bg-surface border border-border rounded px-3 py-2 text-sm text-text font-mono break-all">
             {request.command}
           </code>
         </div>
@@ -72,7 +72,7 @@ export default function ApprovalRequest({
           <label className="text-sm font-medium text-text-secondary block mb-1">
             {t('approval.workingDir', '工作目录')}:
           </label>
-          <code className="block bg-background border border-border rounded px-3 py-2 text-sm text-text font-mono">
+          <code className="block bg-surface border border-border rounded px-3 py-2 text-sm text-text font-mono">
             {request.working_dir}
           </code>
         </div>
@@ -81,12 +81,12 @@ export default function ApprovalRequest({
           <label className="text-sm font-medium text-text-secondary block mb-1">
             {t('approval.context', '上下文')}:
           </label>
-          <div className="bg-background border border-border rounded px-3 py-2 text-sm text-text whitespace-pre-wrap">
+          <div className="bg-surface border border-border rounded px-3 py-2 text-sm text-text whitespace-pre-wrap">
             {request.context}
           </div>
         </div>
 
-        <div className="flex items-center justify-between text-sm text-text-secondary">
+        <div className="flex items-center justify-between text-xs text-text-secondary">
           <span>
             {t('approval.requestTime', '请求时间')}: {formatTimestamp(request.timestamp)}
           </span>
@@ -101,7 +101,7 @@ export default function ApprovalRequest({
         <div className="flex gap-3">
           <button
             onClick={handleApprove}
-            className="flex-1 px-4 py-2 bg-success text-white rounded-lg hover:bg-success/90 transition-colors font-medium flex items-center justify-center gap-2"
+            className="flex-1 px-4 py-2 bg-primary text-white rounded-lg hover:opacity-90 transition-opacity font-medium flex items-center justify-center gap-2"
           >
             <svg
               className="w-5 h-5"
@@ -120,7 +120,7 @@ export default function ApprovalRequest({
           </button>
           <button
             onClick={handleReject}
-            className="flex-1 px-4 py-2 bg-error text-white rounded-lg hover:bg-error/90 transition-colors font-medium flex items-center justify-center gap-2"
+            className="flex-1 px-4 py-2 border border-border bg-surface text-text rounded-lg hover:bg-background transition-colors font-medium flex items-center justify-center gap-2"
           >
             <svg
               className="w-5 h-5"
@@ -140,10 +140,8 @@ export default function ApprovalRequest({
         </div>
       ) : (
         <div
-          className={`px-4 py-3 rounded-lg flex items-center gap-2 ${
-            result?.approved
-              ? 'bg-success/10 border border-success/30 text-success'
-              : 'bg-error/10 border border-error/30 text-error'
+          className={`px-4 py-3 rounded-lg flex items-center gap-2 font-medium ${
+            result?.approved ? 'approval-result-approved' : 'approval-result-rejected'
           }`}
         >
           {result?.approved ? (

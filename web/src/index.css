@@ -113,6 +113,18 @@ a:focus-visible {
   background: var(--color-textSecondary);
 }
 
+/* 审批结果条：使用主题变量，避免 Tailwind 对 CSS 变量 opacity 修饰符不生效 */
+.approval-result-approved {
+  background-color: color-mix(in srgb, var(--color-success) 12%, var(--color-surface));
+  border: 1px solid color-mix(in srgb, var(--color-success) 35%, var(--color-border));
+  color: var(--color-success);
+}
+.approval-result-rejected {
+  background-color: color-mix(in srgb, var(--color-error) 12%, var(--color-surface));
+  border: 1px solid color-mix(in srgb, var(--color-error) 35%, var(--color-border));
+  color: var(--color-error);
+}
+
 /* 暗黑模式下的阴影优化 */
 .dark .shadow-sm {
   box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
