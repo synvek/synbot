@@ -5,26 +5,18 @@ use std::collections::HashMap;
 use std::sync::RwLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// 命令权限级别
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PermissionLevel {
-    /// 允许自动执行
     Allow,
-    /// 需要用户批准
     RequireApproval,
-    /// 禁止执行
     Deny,
 }
 
-/// 命令权限规则
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PermissionRule {
-    /// 命令模式（支持通配符 *）
     pub pattern: String,
-    /// 权限级别
     pub level: PermissionLevel,
-    /// 规则描述（可选）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 }

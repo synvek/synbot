@@ -204,6 +204,8 @@ fn validate_workspace_path(
 pub struct ExecTool {
     pub workspace: PathBuf,
     pub timeout_secs: u64,
+    /// 审批超时秒数（仅当需要审批时使用）
+    pub approval_timeout_secs: u64,
     pub restrict_to_workspace: bool,
     pub policy: CommandPolicy,
     pub permission_policy: Option<Arc<crate::tools::permission::CommandPermissionPolicy>>,
@@ -226,7 +228,8 @@ impl DynTool for ExecTool {
             "type": "object",
             "properties": {
                 "command": { "type": "string", "description": "Shell command to run" },
-                "working_dir": { "type": "string", "description": "Optional working directory" }
+                "working_dir": { "type": "string", "description": "Optional working directory" },
+                "approval_message": { "type": "string", "description": "Optional. When the command requires approval, this message is shown to the user. Use the same language as the user (e.g. if the user writes in Japanese, write the approval request in Japanese). Include: command, working dir, context, and how to approve/reject (e.g. yes/no, approve/reject). If omitted, a default format is used." }
             },
             "required": ["command"]
         })
@@ -246,7 +249,7 @@ impl DynTool for ExecTool {
             match permission {
                 crate::tools::permission::PermissionLevel::Deny => {
                     return Err(anyhow::anyhow!(
-                        "命令被拒绝执行：{}。该命令已被策略禁止。",
+                        "Command denied by policy: {}",
                         cmd_str
                     ));
                 }
@@ -260,9 +263,14 @@ impl DynTool for ExecTool {
                             .unwrap_or_else(|| self.workspace.to_str().unwrap_or("."));
                         
                         let context = format!(
-                            "Agent 请求执行命令。\n会话: {}\n渠道: {}",
+                            "session: {} channel: {}",
                             session_id, channel
                         );
+                        
+                        let approval_message = args["approval_message"]
+                            .as_str()
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty());
                         
                         let approved = approval_manager
                             .request_approval(
@@ -272,20 +280,21 @@ impl DynTool for ExecTool {
                                 cmd_str.to_string(),
                                 cwd.to_string(),
                                 context,
-                                300, // 5 分钟超时
+                                self.approval_timeout_secs,
+                                approval_message,
                             )
                             .await?;
                         
                         if !approved {
                             return Err(anyhow::anyhow!(
-                                "命令执行被拒绝：{}。用户未批准或请求超时。",
+                                "Execution rejected: {} (user did not approve or request timed out)",
                                 cmd_str
                             ));
                         }
                     } else {
                         // If approval manager or session info is not available, deny by default
                         return Err(anyhow::anyhow!(
-                            "命令需要审批但审批系统未配置：{}",
+                            "Approval required but approval system not configured: {}",
                             cmd_str
                         ));
                     }
@@ -647,6 +656,7 @@ mod tests {
         let tool = ExecTool {
             workspace: PathBuf::from("."),
             timeout_secs: 10,
+            approval_timeout_secs: 300,
             restrict_to_workspace: false,
             policy: CommandPolicy::default(),
             permission_policy: Some(Arc::new(policy)),
@@ -662,7 +672,7 @@ mod tests {
 
         let result = tool.call(args).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("命令被拒绝执行"));
+        assert!(result.unwrap_err().to_string().contains("Command denied by policy"));
     }
 
     #[tokio::test]
@@ -683,6 +693,7 @@ mod tests {
         let tool = ExecTool {
             workspace: PathBuf::from("."),
             timeout_secs: 10,
+            approval_timeout_secs: 300,
             restrict_to_workspace: false,
             policy: CommandPolicy::default(),
             permission_policy: Some(Arc::new(policy)),
@@ -718,6 +729,7 @@ mod tests {
         let tool = ExecTool {
             workspace: PathBuf::from("."),
             timeout_secs: 10,
+            approval_timeout_secs: 300,
             restrict_to_workspace: false,
             policy: CommandPolicy::default(),
             permission_policy: Some(Arc::new(policy)),
@@ -733,7 +745,7 @@ mod tests {
 
         let result = tool.call(args).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("审批系统未配置"));
+        assert!(result.unwrap_err().to_string().contains("approval system not configured"));
     }
 
     #[tokio::test]
@@ -757,6 +769,7 @@ mod tests {
         let tool = ExecTool {
             workspace: PathBuf::from("."),
             timeout_secs: 10,
+            approval_timeout_secs: 300,
             restrict_to_workspace: false,
             policy: CommandPolicy::default(),
             permission_policy: Some(Arc::new(policy)),
@@ -776,6 +789,7 @@ mod tests {
         let tool = ExecTool {
             workspace: PathBuf::from("."),
             timeout_secs: 10,
+            approval_timeout_secs: 300,
             restrict_to_workspace: false,
             policy: CommandPolicy::default(),
             permission_policy: None,
@@ -805,6 +819,7 @@ mod tests {
         let tool = ExecTool {
             workspace: PathBuf::from("."),
             timeout_secs: 10,
+            approval_timeout_secs: 300,
             restrict_to_workspace: false,
             policy: CommandPolicy::default(),
             permission_policy: Some(Arc::new(policy)),
@@ -820,6 +835,6 @@ mod tests {
 
         let result = tool.call(args).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("命令被拒绝执行"));
+        assert!(result.unwrap_err().to_string().contains("Command denied by policy"));
     }
 }

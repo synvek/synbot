@@ -30,33 +30,29 @@ impl InboundMessage {
     }
 }
 
-/// 审批请求消息（Agent → 用户）
+/// Approval request (agent → user)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApprovalRequestMessage {
     pub request: ApprovalRequest,
 }
 
-/// 审批响应消息（用户 → Agent）
+/// Approval response (user → agent)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApprovalResponseMessage {
     pub response: ApprovalResponse,
 }
 
-/// 出站消息类型枚举
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OutboundMessageType {
-    /// 普通聊天消息
     Chat {
         content: String,
         #[serde(default)]
         media: Vec<String>,
     },
-    /// 审批请求消息
     ApprovalRequest {
         request: ApprovalRequest,
     },
-    /// 工具执行进度（实时发给前端，便于展示「正在调用 list_memory…」等）
     ToolProgress {
         tool_name: String,
         status: String,
@@ -74,7 +70,6 @@ pub struct OutboundMessage {
 }
 
 impl OutboundMessage {
-    /// 创建普通聊天消息
     pub fn chat(
         channel: String,
         chat_id: String,
@@ -90,7 +85,6 @@ impl OutboundMessage {
         }
     }
 
-    /// 创建审批请求消息
     pub fn approval_request(
         channel: String,
         chat_id: String,
@@ -105,7 +99,6 @@ impl OutboundMessage {
         }
     }
 
-    /// 创建工具执行进度消息（实时发给客户端）
     pub fn tool_progress(
         channel: String,
         chat_id: String,
@@ -258,6 +251,7 @@ mod tests {
             context: "Test approval".to_string(),
             timestamp: Utc::now(),
             timeout_secs: 300,
+            display_message: None,
         };
 
         let msg = OutboundMessage::approval_request(
@@ -303,6 +297,7 @@ mod tests {
             context: "Push to production".to_string(),
             timestamp: Utc::now(),
             timeout_secs: 600,
+            display_message: None,
         };
 
         let msg = ApprovalRequestMessage {
@@ -391,6 +386,7 @@ mod tests {
             context: "test".to_string(),
             timestamp: Utc::now(),
             timeout_secs: 300,
+            display_message: None,
         };
         let approval_type = OutboundMessageType::ApprovalRequest { request };
         let json = serde_json::to_string(&approval_type).unwrap();

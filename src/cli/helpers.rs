@@ -87,9 +87,13 @@ pub fn build_default_tools(
     reg.register(std::sync::Arc::new(filesystem::WriteFileTool { workspace: ws.clone(), restrict })).expect("register WriteFileTool");
     reg.register(std::sync::Arc::new(filesystem::EditFileTool { workspace: ws.clone(), restrict })).expect("register EditFileTool");
     reg.register(std::sync::Arc::new(filesystem::ListDirTool { workspace: ws.clone(), restrict })).expect("register ListDirTool");
+    reg.register(std::sync::Arc::new(approval_tool::SubmitApprovalResponseTool {
+        approval_manager: approval_manager.clone(),
+    })).expect("register SubmitApprovalResponseTool");
     reg.register(std::sync::Arc::new(shell::ExecTool {
         workspace: ws.clone(),
         timeout_secs: cfg.tools.exec.timeout_secs,
+        approval_timeout_secs: cfg.tools.exec.permissions.approval_timeout_secs,
         restrict_to_workspace: restrict,
         policy: shell::CommandPolicy::new(
             cfg.tools.exec.deny_patterns.clone(),

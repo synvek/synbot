@@ -14,9 +14,9 @@ use tokio::sync::{broadcast, mpsc, RwLock};
 use tracing::{error, info, warn};
 
 use crate::bus::{InboundMessage, OutboundMessage};
-use crate::channels::{approval_parser, Channel, RetryPolicy, RetryState};
+use crate::channels::{approval_formatter, Channel, RetryPolicy, RetryState};
 use crate::config::{AllowlistEntry, TelegramConfig};
-use crate::tools::approval::{ApprovalManager, ApprovalResponse};
+use crate::tools::approval::ApprovalManager;
 
 const API_BASE: &str = "https://api.telegram.org/bot";
 
@@ -121,24 +121,8 @@ impl TelegramChannel {
         pending.contains_key(user_id)
     }
 
-    /// 格式化审批请求消息
     fn format_approval_request(request: &crate::tools::approval::ApprovalRequest) -> String {
-        format!(
-            "🔐 <b>命令执行审批请求</b>\n\n\
-            <b>命令：</b><code>{}</code>\n\
-            <b>工作目录：</b><code>{}</code>\n\
-            <b>上下文：</b>{}\n\
-            <b>请求时间：</b>{}\n\n\
-            请回复以下关键词进行审批：\n\
-            • 同意 / 批准 / yes / y - 批准执行\n\
-            • 拒绝 / 不同意 / no / n - 拒绝执行\n\n\
-            ⏱️ 请求将在 {} 秒后超时",
-            request.command,
-            request.working_dir,
-            request.context,
-            request.timestamp.format("%Y-%m-%d %H:%M:%S UTC"),
-            request.timeout_secs
-        )
+        approval_formatter::format_approval_request(request)
     }
 
     fn api_url(&self, method: &str) -> String {
@@ -308,23 +292,13 @@ impl Channel for TelegramChannel {
                                 let mut pending = pending_approvals.write().await;
                                 pending.insert(user_id, (request.id.clone(), msg.chat_id.clone()));
                             }
-                            
-                            format!(
-                                "🔐 <b>命令执行审批请求</b>\n\n\
-                                <b>命令：</b><code>{}</code>\n\
-                                <b>工作目录：</b><code>{}</code>\n\
-                                <b>上下文：</b>{}\n\
-                                <b>请求时间：</b>{}\n\n\
-                                请回复以下关键词进行审批：\n\
-                                • 同意 / 批准 / yes / y - 批准执行\n\
-                                • 拒绝 / 不同意 / no / n - 拒绝执行\n\n\
-                                ⏱️ 请求将在 {} 秒后超时",
-                                request.command,
-                                request.working_dir,
-                                request.context,
-                                request.timestamp.format("%Y-%m-%d %H:%M:%S UTC"),
-                                request.timeout_secs
-                            )
+                            // 优先使用 Agent 按用户语言生成的展示文案
+                            request
+                                .display_message
+                                .as_deref()
+                                .filter(|s| !s.is_empty())
+                                .map(String::from)
+                                .unwrap_or_else(|| Self::format_approval_request(&request))
                         }
                     };
                     for chunk in content.as_bytes().chunks(4000) {
@@ -475,50 +449,27 @@ impl Channel for TelegramChannel {
                                         }
                                     }
                                 };
-                                // 检查是否为审批响应
-                                if let Some(approved) = approval_parser::is_approval_response(&content) {
-                                    // 检查用户是否有待处理的审批请求
-                                    if let Some((request_id, chat_id_str)) = self.take_pending_approval(&sender).await {
-                                        if let Some(ref manager) = self.approval_manager {
-                                            let response = ApprovalResponse {
-                                                request_id: request_id.clone(),
-                                                approved,
-                                                responder: sender.clone(),
-                                                timestamp: chrono::Utc::now(),
-                                            };
-                                            
-                                            if let Err(e) = manager.submit_response(response).await {
-                                                error!("Failed to submit approval response: {}", e);
-                                                // 发送错误反馈
-                                                if let Ok(chat_id) = chat_id_str.parse::<i64>() {
-                                                    let _ = self.send_text(
-                                                        chat_id,
-                                                        "❌ 审批响应提交失败，请重试。"
-                                                    ).await;
-                                                }
-                                            } else {
-                                                info!(
-                                                    user_id = %sender,
-                                                    request_id = %request_id,
-                                                    approved = approved,
-                                                    "Approval response submitted"
-                                                );
-                                                
-                                                // 发送成功反馈
-                                                if let Ok(chat_id) = chat_id_str.parse::<i64>() {
-                                                    let feedback = if approved {
-                                                        "✅ <b>审批已通过</b>\n\n命令将继续执行。"
-                                                    } else {
-                                                        "🚫 <b>审批已拒绝</b>\n\n命令执行已取消。"
-                                                    };
-                                                    let _ = self.send_text(chat_id, feedback).await;
-                                                }
-                                            }
-                                        }
-                                        continue; // 不将审批响应作为普通消息发送
+                                // If user has pending approval, forward message to agent with metadata for LLM to interpret
+                                if let Some((request_id, _chat_id_str)) = self.take_pending_approval(&sender).await {
+                                    let mut meta = serde_json::json!({
+                                        "trigger_agent": true,
+                                        "pending_approval_request_id": request_id
+                                    });
+                                    if is_group_meta {
+                                        meta["group"] = serde_json::json!(true);
                                     }
+                                    let _ = self.inbound_tx.send(InboundMessage {
+                                        channel: self.config.name.clone(),
+                                        sender_id: sender,
+                                        chat_id: m.chat.id.to_string(),
+                                        content: content.clone(),
+                                        timestamp: chrono::Utc::now(),
+                                        media: vec![],
+                                        metadata: meta,
+                                    }).await;
+                                    continue;
                                 }
-                                // 普通消息处理
+                                // Normal message
                                 let mut meta = serde_json::json!({ "trigger_agent": true });
                                 if is_group_meta {
                                     meta["group"] = serde_json::json!(true);
@@ -596,10 +547,12 @@ impl Channel for TelegramChannel {
         let chat_id: i64 = msg.chat_id.parse()?;
         let content = match &msg.message_type {
             crate::bus::OutboundMessageType::Chat { content, .. } => content.clone(),
-            crate::bus::OutboundMessageType::ApprovalRequest { request } => {
-                format!("🔐 命令执行审批请求\n\n命令：{}\n工作目录：{}\n上下文：{}\n\n请回复以下关键词进行审批：\n• 同意 / 批准 / yes / y - 批准执行\n• 拒绝 / 不同意 / no / n - 拒绝执行\n\n⏱️ 请求将在 {} 秒后超时", 
-                    request.command, request.working_dir, request.context, request.timeout_secs)
-            }
+            crate::bus::OutboundMessageType::ApprovalRequest { request } => request
+                .display_message
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .unwrap_or_else(|| approval_formatter::format_approval_request(request)),
             crate::bus::OutboundMessageType::ToolProgress {
                 tool_name,
                 status,

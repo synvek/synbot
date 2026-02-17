@@ -192,6 +192,7 @@ mod tests {
             context: "test context".to_string(),
             timestamp: Utc::now(),
             timeout_secs: 300,
+            display_message: None,
         }
     }
 

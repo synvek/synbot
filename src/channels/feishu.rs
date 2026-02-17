@@ -23,9 +23,9 @@ use tokio::sync::{broadcast, mpsc, oneshot, RwLock};
 use tracing::{error, info, warn};
 
 use crate::bus::{InboundMessage, OutboundMessage};
-use crate::channels::{approval_parser, Channel, RetryPolicy, RetryState};
+use crate::channels::{approval_formatter, Channel, RetryPolicy, RetryState};
 use crate::config::{AllowlistEntry, FeishuConfig};
-use crate::tools::approval::{ApprovalManager, ApprovalResponse};
+use crate::tools::approval::ApprovalManager;
 
 pub struct FeishuChannel {
     config: FeishuConfig,
@@ -121,24 +121,8 @@ impl FeishuChannel {
         pending.contains_key(user_id)
     }
 
-    /// 格式化审批请求消息
     fn format_approval_request(request: &crate::tools::approval::ApprovalRequest) -> String {
-        format!(
-            "🔐 命令执行审批请求\n\n\
-            命令：{}\n\
-            工作目录：{}\n\
-            上下文：{}\n\
-            请求时间：{}\n\n\
-            请回复以下关键词进行审批：\n\
-            • 同意 / 批准 / yes / y - 批准执行\n\
-            • 拒绝 / 不同意 / no / n - 拒绝执行\n\n\
-            ⏱️ 请求将在 {} 秒后超时",
-            request.command,
-            request.working_dir,
-            request.context,
-            request.timestamp.format("%Y-%m-%d %H:%M:%S UTC"),
-            request.timeout_secs
-        )
+        approval_formatter::format_approval_request(request)
     }
 
     /// Build a LarkClient for API calls (bot info, send messages).
@@ -416,87 +400,54 @@ impl FeishuChannel {
                             }
                         };
 
-                        // 检查是否为审批响应
-                        if let Some(approved) = approval_parser::is_approval_response(&content) {
-                            // 需要在异步上下文中处理审批响应
-                            let approval_manager_clone = approval_manager.clone();
-                            let pending_approvals_clone = pending_approvals.clone();
-                            let sender_id = sender_open_id.clone();
-                            let _chat_id = msg.chat_id.clone();
-                            let app_id_clone = app_id.clone();
-                            let app_secret_clone = app_secret.clone();
-                            
-                            tokio::task::spawn_local(async move {
-                                let mut pending = pending_approvals_clone.write().await;
-                                if let Some((request_id, chat_id_str)) = pending.remove(&sender_id) {
-                                    if let Some(ref manager) = approval_manager_clone {
-                                        let response = ApprovalResponse {
-                                            request_id: request_id.clone(),
-                                            approved,
-                                            responder: sender_id.clone(),
-                                            timestamp: chrono::Utc::now(),
-                                        };
-                                        
-                                        // 构建客户端用于发送反馈
-                                        let feedback_client = LarkClient::builder(&app_id_clone, &app_secret_clone)
-                                            .with_app_type(AppType::SelfBuild)
-                                            .with_enable_token_cache(true)
-                                            .build();
-                                        
-                                        if let Err(e) = manager.submit_response(response).await {
-                                            error!("Failed to submit approval response: {}", e);
-                                            // 发送错误反馈
-                                            let error_feedback = "❌ 审批响应提交失败，请重试。";
-                                            let _ = Self::send_text_static(&feedback_client, &chat_id_str, error_feedback).await;
-                                        } else {
-                                            info!(
-                                                user_id = %sender_id,
-                                                request_id = %request_id,
-                                                approved = approved,
-                                                "Feishu approval response submitted"
-                                            );
-                                            
-                                            // 发送成功反馈
-                                            let feedback = if approved {
-                                                "✅ 审批已通过\n\n命令将继续执行。"
-                                            } else {
-                                                "🚫 审批已拒绝\n\n命令执行已取消。"
-                                            };
-                                            let _ = Self::send_text_static(&feedback_client, &chat_id_str, feedback).await;
-                                        }
-                                    }
+                        // Async work in spawn (closure is sync): check pending approval then send either approval or normal message
+                        let inbound_tx_fwd = inbound_tx.clone();
+                        let pending_approvals_fwd = pending_approvals.clone();
+                        let sender_open_id_fwd = sender_open_id.clone();
+                        let channel_name_fwd = channel_name.clone();
+                        let content_fwd = content.clone();
+                        let chat_id_fwd = msg.chat_id.clone();
+                        let is_group_meta_fwd = is_group_meta;
+                        let message_id_fwd = msg.message_id.clone();
+                        let message_type_fwd = msg.message_type.clone();
+                        let chat_type_fwd = msg.chat_type.clone();
+                        tokio::task::spawn_local(async move {
+                            let mut pending = pending_approvals_fwd.write().await;
+                            let removed = pending.remove(&sender_open_id_fwd);
+                            drop(pending);
+                            let (meta, content_send) = if let Some((request_id, _)) = removed {
+                                let mut meta = serde_json::json!({
+                                    "pending_approval_request_id": request_id
+                                });
+                                if is_group_meta_fwd {
+                                    meta["group"] = serde_json::json!(true);
                                 }
-                            });
-                            return; // 不将审批响应作为普通消息发送
-                        }
-
-                        let mut meta = serde_json::json!({
-                            "message_id": msg.message_id,
-                            "message_type": msg.message_type,
-                            "chat_type": msg.chat_type,
-                        });
-                        if is_group_meta {
-                            meta["group"] = serde_json::json!(true);
-                        }
-                        let inbound = InboundMessage {
-                            channel: channel_name.clone(),
-                            sender_id: sender_open_id,
-                            chat_id: msg.chat_id.clone(),
-                            content,
-                            timestamp: chrono::Utc::now(),
-                            media: vec![],
-                            metadata: meta,
-                        };
-
-                        // Use try_send to avoid needing async context.
-                        // The mpsc channel has capacity 256, so this
-                        // should not fail under normal conditions.
-                        match inbound_tx.try_send(inbound) {
-                            Ok(()) => info!("Feishu inbound message forwarded to bus"),
-                            Err(e) => {
-                                error!("Failed to forward Feishu inbound message: {e}")
+                                (meta, content_fwd)
+                            } else {
+                                let mut meta = serde_json::json!({
+                                    "message_id": message_id_fwd,
+                                    "message_type": message_type_fwd,
+                                    "chat_type": chat_type_fwd,
+                                });
+                                if is_group_meta_fwd {
+                                    meta["group"] = serde_json::json!(true);
+                                }
+                                (meta, content_fwd)
+                            };
+                            let inbound = InboundMessage {
+                                channel: channel_name_fwd,
+                                sender_id: sender_open_id_fwd,
+                                chat_id: chat_id_fwd,
+                                content: content_send,
+                                timestamp: chrono::Utc::now(),
+                                media: vec![],
+                                metadata: meta,
+                            };
+                            match inbound_tx_fwd.try_send(inbound) {
+                                Ok(()) => info!("Feishu inbound message forwarded to bus"),
+                                Err(e) => error!("Failed to forward Feishu inbound message: {e}"),
                             }
-                        }
+                        });
                     })
                     .expect("Failed to register im.message.receive_v1 handler")
                     .build();
@@ -623,23 +574,13 @@ impl Channel for FeishuChannel {
                             let mut pending = pending_approvals_clone.write().await;
                             pending.insert(user_id, (request.id.clone(), msg.chat_id.clone()));
                         }
-                        
-                        format!(
-                            "🔐 命令执行审批请求\n\n\
-                            命令：{}\n\
-                            工作目录：{}\n\
-                            上下文：{}\n\
-                            请求时间：{}\n\n\
-                            请回复以下关键词进行审批：\n\
-                            • 同意 / 批准 / yes / y - 批准执行\n\
-                            • 拒绝 / 不同意 / no / n - 拒绝执行\n\n\
-                            ⏱️ 请求将在 {} 秒后超时",
-                            request.command,
-                            request.working_dir,
-                            request.context,
-                            request.timestamp.format("%Y-%m-%d %H:%M:%S UTC"),
-                            request.timeout_secs
-                        )
+                        // 优先使用 Agent 按用户语言生成的展示文案
+                        request
+                            .display_message
+                            .as_deref()
+                            .filter(|s| !s.is_empty())
+                            .map(String::from)
+                            .unwrap_or_else(|| Self::format_approval_request(&request))
                     }
                 };
                 if let Err(e) =
@@ -743,10 +684,12 @@ impl Channel for FeishuChannel {
         let client = self.build_lark_client();
         let content = match &msg.message_type {
             crate::bus::OutboundMessageType::Chat { content, .. } => content.clone(),
-            crate::bus::OutboundMessageType::ApprovalRequest { request } => {
-                format!("🔐 命令执行审批请求\n\n命令：{}\n工作目录：{}\n上下文：{}\n\n请回复以下关键词进行审批：\n• 同意 / 批准 / yes / y - 批准执行\n• 拒绝 / 不同意 / no / n - 拒绝执行\n\n⏱️ 请求将在 {} 秒后超时", 
-                    request.command, request.working_dir, request.context, request.timeout_secs)
-            }
+            crate::bus::OutboundMessageType::ApprovalRequest { request } => request
+                .display_message
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .unwrap_or_else(|| approval_formatter::format_approval_request(request)),
             crate::bus::OutboundMessageType::ToolProgress {
                 tool_name,
                 status,

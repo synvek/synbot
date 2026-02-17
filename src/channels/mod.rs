@@ -1,7 +1,6 @@
 pub mod telegram;
 pub mod discord;
 pub mod feishu;
-pub mod approval_parser;
 pub mod approval_formatter;
 
 use std::time::Duration;

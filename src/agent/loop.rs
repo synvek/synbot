@@ -261,11 +261,19 @@ impl AgentLoop {
                 memory_dir: agent_memory_dir,
             };
 
-            // User-visible content: preserve "@@role" so it shows in session and after refresh
-            let user_content = if agent_id == "main" {
+            // When message is a response to a pending approval, prepend instruction so the agent calls submit_approval_response
+            let base_content = if agent_id == "main" {
                 directive.content.clone()
             } else {
                 format!("@@{} {}", agent_id, directive.content)
+            };
+            let user_content = if let Some(rid) = msg.metadata.get("pending_approval_request_id").and_then(|v| v.as_str()) {
+                format!(
+                    "[Context: The user is responding to a pending command approval request (request_id: {}). Interpret their message as approve or reject and call submit_approval_response with request_id \"{}\" and approved (true or false).]\n\nUser: {}",
+                    rid, rid, base_content
+                )
+            } else {
+                base_content
             };
 
             let tool_defs = self.tools.rig_definitions();
@@ -385,11 +393,18 @@ impl AgentLoop {
 
             let tool_defs = self.tools.rig_definitions();
 
-            // User-visible content: preserve "@@role" so it shows after refresh
-            let user_content = if agent_id == "main" {
+            let base_content = if agent_id == "main" {
                 directive.content.clone()
             } else {
                 format!("@@{} {}", agent_id, directive.content)
+            };
+            let user_content = if let Some(rid) = msg.metadata.get("pending_approval_request_id").and_then(|v| v.as_str()) {
+                format!(
+                    "[Context: The user is responding to a pending command approval request (request_id: {}). Interpret their message as approve or reject and call submit_approval_response with request_id \"{}\" and approved (true or false).]\n\nUser: {}",
+                    rid, rid, base_content
+                )
+            } else {
+                base_content
             };
 
             // Push user message into session history before spawning

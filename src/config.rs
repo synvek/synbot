@@ -248,7 +248,7 @@ pub struct PermissionConfig {
     /// 默认权限级别（未匹配任何规则时使用）
     #[serde(default = "default_permission_level")]
     pub default_level: PermissionLevel,
-    /// 审批请求超时时间（秒）
+    /// Approval request timeout (seconds)
     #[serde(default = "default_approval_timeout")]
     pub approval_timeout_secs: u64,
     /// 权限规则列表（按顺序匹配）

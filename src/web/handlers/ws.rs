@@ -312,9 +312,9 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsSession {
                                 let (request_id, approved) = result;
                                 // Send confirmation back to client
                                 let message = if approved {
-                                    "审批已批准".to_string()
+                                    "approved".to_string()
                                 } else {
-                                    "审批已拒绝".to_string()
+                                    "rejected".to_string()
                                 };
                                 actor.send_message(
                                     ctx,

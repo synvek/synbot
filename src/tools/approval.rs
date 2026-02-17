@@ -9,43 +9,32 @@ use tokio::time::sleep;
 use uuid::Uuid;
 use tracing::{info, warn};
 
-/// 审批请求
+/// Approval request (agent → user)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApprovalRequest {
-    /// 请求 ID
     pub id: String,
-    /// 会话 ID（用于识别发起者）
     pub session_id: String,
-    /// 渠道（web, telegram, discord, feishu）
     pub channel: String,
-    /// 聊天 ID
     pub chat_id: String,
-    /// 待执行的命令
     pub command: String,
-    /// 工作目录
     pub working_dir: String,
-    /// 执行上下文描述
     pub context: String,
-    /// 请求时间
     pub timestamp: DateTime<Utc>,
-    /// 超时时间（秒）
     pub timeout_secs: u64,
+    /// Display message in user's language; when None/empty, channels use a neutral fallback
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_message: Option<String>,
 }
 
-/// 审批响应
+/// Approval response (user → agent, submitted via submit_approval_response tool)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApprovalResponse {
-    /// 请求 ID
     pub request_id: String,
-    /// 是否批准
     pub approved: bool,
-    /// 响应用户
     pub responder: String,
-    /// 响应时间
     pub timestamp: DateTime<Utc>,
 }
 
-/// 审批状态
 #[derive(Debug, Clone)]
 pub enum ApprovalStatus {
     Pending,
@@ -54,24 +43,17 @@ pub enum ApprovalStatus {
     Timeout,
 }
 
-/// 审批性能监控指标
 #[derive(Debug, Default)]
 pub struct ApprovalMetrics {
-    /// 审批请求总数
     pub total_requests: AtomicU64,
-    /// 批准的请求数
     pub approved_count: AtomicU64,
-    /// 拒绝的请求数
     pub rejected_count: AtomicU64,
-    /// 超时的请求数
     pub timeout_count: AtomicU64,
-    /// 平均响应时间（毫秒）- 使用累计和计数来计算
     total_response_time_ms: AtomicU64,
     response_count: AtomicU64,
 }
 
 impl ApprovalMetrics {
-    /// 获取平均响应时间（毫秒）
     pub fn avg_response_time_ms(&self) -> f64 {
         let total = self.total_response_time_ms.load(Ordering::Relaxed);
         let count = self.response_count.load(Ordering::Relaxed);
@@ -82,13 +64,11 @@ impl ApprovalMetrics {
         }
     }
     
-    /// 记录响应时间
     pub fn record_response_time(&self, duration_ms: u64) {
         self.total_response_time_ms.fetch_add(duration_ms, Ordering::Relaxed);
         self.response_count.fetch_add(1, Ordering::Relaxed);
     }
-    
-    /// 获取批准率（0.0 - 1.0）
+
     pub fn approval_rate(&self) -> f64 {
         let approved = self.approved_count.load(Ordering::Relaxed);
         let total = self.total_requests.load(Ordering::Relaxed);
@@ -99,7 +79,6 @@ impl ApprovalMetrics {
         }
     }
     
-    /// 重置所有指标
     pub fn reset(&self) {
         self.total_requests.store(0, Ordering::Relaxed);
         self.approved_count.store(0, Ordering::Relaxed);
@@ -110,17 +89,11 @@ impl ApprovalMetrics {
     }
 }
 
-/// 审批管理器
 pub struct ApprovalManager {
-    /// 待处理的审批请求
     pending: Arc<RwLock<HashMap<String, (ApprovalRequest, mpsc::Sender<ApprovalResponse>)>>>,
-    /// 审批历史（用于审计）- 使用环形缓冲区限制内存
     history: Arc<RwLock<Vec<(ApprovalRequest, ApprovalStatus)>>>,
-    /// 历史记录最大容量
     history_capacity: usize,
-    /// 消息总线发送器（用于广播审批请求）
     outbound_tx: Option<tokio::sync::broadcast::Sender<crate::bus::OutboundMessage>>,
-    /// 性能监控指标
     metrics: Arc<ApprovalMetrics>,
 }
 
@@ -128,8 +101,7 @@ impl ApprovalManager {
     pub fn new() -> Self {
         Self::with_capacity(1000)
     }
-    
-    /// 创建指定容量的审批管理器
+
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             pending: Arc::new(RwLock::new(HashMap::new())),
@@ -140,7 +112,6 @@ impl ApprovalManager {
         }
     }
 
-    /// 创建带消息总线的审批管理器
     pub fn with_outbound(
         outbound_tx: tokio::sync::broadcast::Sender<crate::bus::OutboundMessage>,
     ) -> Self {
@@ -153,7 +124,6 @@ impl ApprovalManager {
         }
     }
     
-    /// 创建带消息总线和指定容量的审批管理器
     pub fn with_outbound_and_capacity(
         outbound_tx: tokio::sync::broadcast::Sender<crate::bus::OutboundMessage>,
         capacity: usize,
@@ -167,11 +137,8 @@ impl ApprovalManager {
         }
     }
     
-    /// 添加历史记录（使用环形缓冲区）
     async fn add_to_history(&self, request: ApprovalRequest, status: ApprovalStatus) {
         let mut history = self.history.write().await;
-        
-        // 如果达到容量限制，移除最旧的记录
         if history.len() >= self.history_capacity {
             history.remove(0);
         }
@@ -179,13 +146,12 @@ impl ApprovalManager {
         history.push((request, status));
     }
     
-    /// 获取历史容量信息
     pub async fn history_stats(&self) -> (usize, usize) {
         let history = self.history.read().await;
         (history.len(), self.history_capacity)
     }
 
-    /// 创建审批请求并等待响应
+    /// Create an approval request and wait for response (via submit_approval_response tool).
     pub async fn request_approval(
         &self,
         session_id: String,
@@ -195,6 +161,7 @@ impl ApprovalManager {
         working_dir: String,
         context: String,
         timeout_secs: u64,
+        display_message: Option<String>,
     ) -> anyhow::Result<bool> {
         // 增加总请求数
         self.metrics.total_requests.fetch_add(1, Ordering::Relaxed);
@@ -211,6 +178,7 @@ impl ApprovalManager {
             context: context.clone(),
             timestamp: Utc::now(),
             timeout_secs,
+            display_message: display_message.filter(|s| !s.is_empty()),
         };
 
         info!(
@@ -315,10 +283,9 @@ impl ApprovalManager {
 
         self.add_to_history(request, status).await;
 
-        Ok(false) // 超时默认拒绝
+        Ok(false)
     }
 
-    /// 提交审批响应
     pub async fn submit_response(&self, response: ApprovalResponse) -> anyhow::Result<()> {
         let pending = self.pending.write().await;
 
@@ -329,24 +296,20 @@ impl ApprovalManager {
         Ok(())
     }
 
-    /// 获取待处理的审批请求（用于显示）
     pub async fn get_pending_request(&self, request_id: &str) -> Option<ApprovalRequest> {
         let pending = self.pending.read().await;
         pending.get(request_id).map(|(req, _)| req.clone())
     }
 
-    /// 获取审批历史
     pub async fn get_history(&self) -> Vec<(ApprovalRequest, ApprovalStatus)> {
         let history = self.history.read().await;
         history.clone()
     }
     
-    /// 获取性能指标
     pub fn metrics(&self) -> Arc<ApprovalMetrics> {
         Arc::clone(&self.metrics)
     }
     
-    /// 重置性能指标
     pub fn reset_metrics(&self) {
         self.metrics.reset();
     }
@@ -379,6 +342,7 @@ mod tests {
                     "/home/user".to_string(),
                     "Test context".to_string(),
                     1, // 1 秒超时
+                    None,
                 )
                 .await
         });
@@ -417,6 +381,7 @@ mod tests {
                     "/home/user".to_string(),
                     "Test context".to_string(),
                     10, // 10 秒超时
+                    None,
                 )
                 .await
         });
@@ -467,6 +432,7 @@ mod tests {
                     "/home/user".to_string(),
                     "Test context".to_string(),
                     10, // 10 秒超时
+                    None,
                 )
                 .await
         });
@@ -515,6 +481,7 @@ mod tests {
                 "/home/user".to_string(),
                 "Test timeout".to_string(),
                 1, // 1 秒超时
+                None,
             )
             .await;
 
@@ -550,6 +517,7 @@ mod tests {
                         "/home/user".to_string(),
                         format!("Context {}", i),
                         1, // 1 秒超时
+                        None,
                     )
                     .await
             });
@@ -587,6 +555,7 @@ mod tests {
                     "/home/user".to_string(),
                     "Test context".to_string(),
                     10, // 10 秒超时
+                    None,
                 )
                 .await
         });
@@ -657,6 +626,7 @@ mod tests {
                     "/home/user".to_string(),
                     "Test broadcast".to_string(),
                     10, // 10 秒超时
+                    None,
                 )
                 .await
         });
@@ -714,6 +684,7 @@ mod tests {
                     "/home/user".to_string(),
                     "Test without broadcast".to_string(),
                     1, // 1 秒超时
+                    None,
                 )
                 .await
         });
@@ -741,6 +712,7 @@ mod tests {
                     "/home/user".to_string(),
                     format!("Context {}", i),
                     1, // 1 秒超时
+                    None,
                 )
                 .await;
             assert!(result.is_ok());
@@ -778,6 +750,7 @@ mod tests {
                     "/home/user".to_string(),
                     format!("Context {}", i),
                     1,
+                    None,
                 )
                 .await
                 .unwrap();
@@ -800,6 +773,7 @@ mod tests {
                     "/home/user".to_string(),
                     format!("Context {}", i),
                     1,
+                    None,
                 )
                 .await
                 .unwrap();
@@ -828,6 +802,7 @@ mod tests {
                     "/home/user".to_string(),
                     "Test".to_string(),
                     10,
+                    None,
                 )
                 .await
         });
@@ -861,6 +836,7 @@ mod tests {
                     "/home/user".to_string(),
                     "Test".to_string(),
                     10,
+                    None,
                 )
                 .await
         });
@@ -891,6 +867,7 @@ mod tests {
                 "/home/user".to_string(),
                 "Test".to_string(),
                 1,
+                None,
             )
             .await
             .unwrap();
@@ -923,6 +900,7 @@ mod tests {
                 "/home/user".to_string(),
                 "Test".to_string(),
                 1,
+                None,
             )
             .await
             .unwrap();

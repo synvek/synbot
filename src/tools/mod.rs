@@ -1,5 +1,6 @@
 pub mod approval;
 pub mod approval_store;
+pub mod approval_tool;
 pub mod context;
 pub mod filesystem;
 pub mod heartbeat_cron;
@@ -42,6 +43,10 @@ fn sanitize_args_for_log(tool_name: &str, args: &Value) -> String {
             .get("agent_id")
             .and_then(|v| v.as_str())
             .map(|s| format!("agent_id={}", s)),
+        "submit_approval_response" => obj
+            .get("request_id")
+            .and_then(|v| v.as_str())
+            .map(|s| format!("request_id={}", truncate_for_log(s, 36))),
         _ => None,
     };
     part.unwrap_or_else(|| "args=...".to_string())
@@ -135,6 +140,11 @@ impl ToolRegistry {
                     obj.insert("channel".into(), serde_json::Value::String(channel.to_string()));
                     obj.insert("chat_id".into(), serde_json::Value::String(chat_id.to_string()));
                     obj.insert("user_id".into(), serde_json::Value::String(user_id.to_string()));
+                }
+            }
+            if name == "submit_approval_response" {
+                if let Some(obj) = args.as_object_mut() {
+                    obj.insert("responder".into(), serde_json::Value::String(user_id.to_string()));
                 }
             }
         }
