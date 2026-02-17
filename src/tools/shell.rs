@@ -13,6 +13,19 @@ use crate::tools::DynTool;
 
 const MAX_OUTPUT: usize = 10_000;
 
+/// Normalize tool-provided command strings before execution.
+///
+/// Tool call JSON sometimes contains literal backslash-quote (e.g. `print(\"x\")`)
+/// which then gets written into files by echo. Strip every backslash that precedes
+/// a double-quote so the command runs with real quotes. Applied on all platforms.
+fn normalize_command_input(cmd: &str) -> String {
+    let mut s = cmd.to_string();
+    while s.contains("\\\"") {
+        s = s.replace("\\\"", "\"");
+    }
+    s
+}
+
 /// Decode process output bytes to a UTF-8 String. On Windows, cmd.exe often outputs
 /// in the system OEM code page (e.g. GBK/CP936 on Chinese systems); decoding as UTF-8
 /// produces mojibake. We try UTF-8 first, then GBK when on Windows.
@@ -221,7 +234,7 @@ impl DynTool for ExecTool {
         "exec"
     }
     fn description(&self) -> &str {
-        "Execute a shell command and return output. Dangerous commands are blocked."
+        "Execute a shell command and return output. Dangerous commands are blocked. Prefer read_file/write_file/edit_file/list_dir for filesystem operations."
     }
     fn parameters_schema(&self) -> Value {
         json!({
@@ -235,16 +248,16 @@ impl DynTool for ExecTool {
         })
     }
     async fn call(&self, args: Value) -> Result<String> {
-        let cmd_str = args["command"].as_str().unwrap_or("");
+        let cmd_str = normalize_command_input(args["command"].as_str().unwrap_or(""));
 
         // Validate command against policy
         self.policy
-            .validate(cmd_str)
+            .validate(&cmd_str)
             .map_err(|e| anyhow::anyhow!(e))?;
 
         // Check permission level if permission policy is enabled
         if let Some(permission_policy) = &self.permission_policy {
-            let permission = permission_policy.check_permission(cmd_str);
+            let permission = permission_policy.check_permission(&cmd_str);
             
             match permission {
                 crate::tools::permission::PermissionLevel::Deny => {
@@ -323,9 +336,9 @@ impl DynTool for ExecTool {
             Duration::from_secs(self.timeout_secs),
             Command::new(if cfg!(windows) { "cmd" } else { "sh" })
                 .args(if cfg!(windows) {
-                    vec!["/C", cmd_str]
+                    vec!["/C", &cmd_str]
                 } else {
-                    vec!["-c", cmd_str]
+                    vec!["-c", &cmd_str]
                 })
                 .current_dir(&cwd)
                 .output(),
