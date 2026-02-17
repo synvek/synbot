@@ -47,8 +47,15 @@ pub async fn cmd_start() -> Result<()> {
         ),
     );
 
-    // Create approval manager
-    let approval_manager = std::sync::Arc::new(crate::tools::approval::ApprovalManager::new());
+    // Message bus (create early so approval manager can broadcast to channels)
+    let mut bus = crate::bus::MessageBus::new();
+    let inbound_tx = bus.inbound_sender();
+    let inbound_rx = bus.take_inbound_receiver().unwrap();
+
+    // Create approval manager with outbound sender so approval requests reach Web/other channels
+    let approval_manager = std::sync::Arc::new(
+        crate::tools::approval::ApprovalManager::with_outbound(bus.outbound_tx_clone()),
+    );
 
     // Load permission policy if enabled
     let permission_policy = if cfg.tools.exec.permissions.enabled {
@@ -70,10 +77,6 @@ pub async fn cmd_start() -> Result<()> {
         permission_policy.clone(),
         heartbeat_cron_ctx,
     ));
-
-    let mut bus = crate::bus::MessageBus::new();
-    let inbound_tx = bus.inbound_sender();
-    let inbound_rx = bus.take_inbound_receiver().unwrap();
 
     // Initialize components for web server
     let session_manager = std::sync::Arc::new(tokio::sync::RwLock::new(

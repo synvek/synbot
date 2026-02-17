@@ -126,15 +126,17 @@ impl ToolRegistry {
         self.tools.get(name)
     }
 
-    /// Execute a tool by name. If `message_ctx` is provided and the tool is add_heartbeat_task or add_cron_task,
-    /// channel, chat_id, and user_id are injected into args so the task is associated with the current chat.
+    /// Execute a tool by name. If `message_ctx` is provided:
+    /// - add_heartbeat_task / add_cron_task: channel, chat_id, user_id are injected so the task is associated with the current chat.
+    /// - submit_approval_response: responder (user_id) is injected.
+    /// - exec: _channel, _chat_id, _session_id are injected so approval requests are sent to the current conversation.
     pub async fn execute(
         &self,
         name: &str,
         mut args: Value,
-        message_ctx: Option<(&str, &str, &str)>,
+        message_ctx: Option<(&str, &str, &str, &str)>,
     ) -> Result<String> {
-        if let Some((channel, chat_id, user_id)) = message_ctx {
+        if let Some((channel, chat_id, user_id, session_id)) = message_ctx {
             if name == "add_heartbeat_task" || name == "add_cron_task" {
                 if let Some(obj) = args.as_object_mut() {
                     obj.insert("channel".into(), serde_json::Value::String(channel.to_string()));
@@ -145,6 +147,13 @@ impl ToolRegistry {
             if name == "submit_approval_response" {
                 if let Some(obj) = args.as_object_mut() {
                     obj.insert("responder".into(), serde_json::Value::String(user_id.to_string()));
+                }
+            }
+            if name == "exec" {
+                if let Some(obj) = args.as_object_mut() {
+                    obj.insert("_channel".into(), serde_json::Value::String(channel.to_string()));
+                    obj.insert("_chat_id".into(), serde_json::Value::String(chat_id.to_string()));
+                    obj.insert("_session_id".into(), serde_json::Value::String(session_id.to_string()));
                 }
             }
         }

@@ -267,9 +267,21 @@ impl DynTool for ExecTool {
                     ));
                 }
                 crate::tools::permission::PermissionLevel::RequireApproval => {
-                    // Request approval if approval manager is available
-                    if let (Some(approval_manager), Some(session_id), Some(channel), Some(chat_id)) = 
-                        (&self.approval_manager, &self.session_id, &self.channel, &self.chat_id) 
+                    // Prefer session/channel/chat_id injected by the agent loop (current conversation); otherwise use tool-level values.
+                    let session_id = args["_session_id"]
+                        .as_str()
+                        .map(String::from)
+                        .or_else(|| self.session_id.clone());
+                    let channel = args["_channel"]
+                        .as_str()
+                        .map(String::from)
+                        .or_else(|| self.channel.clone());
+                    let chat_id = args["_chat_id"]
+                        .as_str()
+                        .map(String::from)
+                        .or_else(|| self.chat_id.clone());
+                    if let (Some(approval_manager), Some(session_id), Some(channel), Some(chat_id)) =
+                        (&self.approval_manager, session_id, channel, chat_id)
                     {
                         let cwd = args["working_dir"]
                             .as_str()

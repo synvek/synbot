@@ -304,6 +304,7 @@ impl AgentLoop {
                     &msg.channel,
                     &msg.chat_id,
                     &msg.sender_id,
+                    &session_key,
                     &self.outbound_tx,
                 )
                 .await
@@ -460,6 +461,7 @@ impl AgentLoop {
             let task_future = Box::pin(async move {
                 let mut sessions_guard = sessions.lock().await;
                 let history = sessions_guard.entry(sk.clone()).or_default();
+                let session_id_str = sk.clone();
                 let iterations = scope(tool_ctx, async move {
                     run_completion_loop(
                     &*model,
@@ -472,6 +474,7 @@ impl AgentLoop {
                     &channel,
                     &chat_id,
                     &sender_id_for_loop,
+                    &session_id_str,
                     &outbound_tx,
                 ).await
                 }).await?;
@@ -604,9 +607,10 @@ async fn run_completion_loop(
     channel: &str,
     chat_id: &str,
     sender_id: &str,
+    session_id: &str,
     outbound_tx: &broadcast::Sender<OutboundMessage>,
 ) -> Result<u32> {
-    let message_ctx = Some((channel, chat_id, sender_id));
+    let message_ctx = Some((channel, chat_id, sender_id, session_id));
     let mut iterations = 0u32;
 
     loop {
