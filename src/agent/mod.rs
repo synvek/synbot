@@ -1,5 +1,6 @@
 pub mod context;
 pub mod directive;
+pub mod heartbeat_cron_cmd;
 pub mod memory;
 #[cfg(feature = "memory-index")]
 pub mod memory_backend;

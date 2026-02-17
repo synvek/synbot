@@ -591,6 +591,86 @@ pub struct ToolsConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Heartbeat config
+// ---------------------------------------------------------------------------
+
+/// A single heartbeat task: run periodically and send result to the given channel/chat.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeartbeatTask {
+    /// Channel name (e.g. "feishu", "telegram").
+    pub channel: String,
+    /// Conversation id (group id or user id for DM) where to send the result.
+    pub chat_id: String,
+    /// User id of the task creator (for display / reply_to).
+    pub user_id: String,
+    /// Task content to execute (e.g. "检查当前目录文件").
+    pub target: String,
+}
+
+/// Heartbeat: periodic execution of tasks from config, results sent to configured channel/user.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeartbeatConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Interval in seconds (default 300 = 5 minutes).
+    #[serde(default = "default_heartbeat_interval")]
+    pub interval: u64,
+    #[serde(default)]
+    pub tasks: Vec<HeartbeatTask>,
+}
+
+fn default_heartbeat_interval() -> u64 {
+    300
+}
+
+impl Default for HeartbeatConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            interval: default_heartbeat_interval(),
+            tasks: Vec::new(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Cron config (config-file cron tasks; similar to heartbeat but with cron schedule)
+// ---------------------------------------------------------------------------
+
+/// A single cron task from config.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CronTaskConfig {
+    /// Cron expression (e.g. "0 9 * * 1-5").
+    pub schedule: String,
+    /// Human-readable description (e.g. "每周一到周五的9:00").
+    #[serde(default)]
+    pub description: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Task content to execute.
+    #[serde(default)]
+    pub command: String,
+    /// Channel name for result (e.g. "feishu").
+    pub channel: String,
+    /// User id to receive result.
+    pub user_id: String,
+    /// Conversation id where to send result (defaults to user_id for DM).
+    #[serde(default)]
+    pub chat_id: Option<String>,
+}
+
+/// Cron config: array of cron tasks (schedule, command, channel, userId).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CronConfig {
+    #[serde(default)]
+    pub tasks: Vec<CronTaskConfig>,
+}
+
+// ---------------------------------------------------------------------------
 // Root config
 // ---------------------------------------------------------------------------
 
@@ -620,6 +700,12 @@ pub struct Config {
     pub log: LogConfig,
     #[serde(default)]
     pub main_channel: String,
+    /// Heartbeat: periodic tasks (enabled, interval, tasks with channel/userId/target).
+    #[serde(default)]
+    pub heartbeat: HeartbeatConfig,
+    /// Cron: scheduled tasks from config (schedule, description, enabled, command, channel, userId).
+    #[serde(default)]
+    pub cron: CronConfig,
 }
 
 // ---------------------------------------------------------------------------

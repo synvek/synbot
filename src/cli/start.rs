@@ -9,7 +9,8 @@ use super::helpers::{resolve_provider, detect_rig_provider, build_default_tools}
 
 pub async fn cmd_start() -> Result<()> {
     let cfg = config::load_config(None)?;
-    
+    let shared_config = std::sync::Arc::new(tokio::sync::RwLock::new(cfg.clone()));
+
     // Create log buffer and channel for web UI before logging init
     let log_buffer = crate::web::create_log_buffer(1000);
     let (log_tx, mut log_rx) = tokio::sync::mpsc::channel(256);
@@ -107,18 +108,31 @@ pub async fn cmd_start() -> Result<()> {
         std::sync::Arc::clone(&session_manager),
     )
     .await;
+    agent_loop.set_config_for_commands(
+        std::sync::Arc::clone(&shared_config),
+        Some(config::config_path()),
+    );
     tokio::spawn(async move {
         if let Err(e) = agent_loop.run().await {
             tracing::error!("Agent loop error: {e:#}");
         }
     });
 
-    // Start heartbeat
-    let hb = crate::heartbeat::HeartbeatService::new(&ws, true);
+    // Start heartbeat (reads config.heartbeat.tasks each interval)
+    let hb = crate::heartbeat::HeartbeatService::new(std::sync::Arc::clone(&shared_config));
     let hb_tx = inbound_tx.clone();
     tokio::spawn(async move {
         if let Err(e) = hb.run(hb_tx).await {
             tracing::error!("Heartbeat error: {e:#}");
+        }
+    });
+
+    // Start config-based cron runner (reads config.cron.tasks, fires due jobs)
+    let cron_runner = crate::cron::config_runner::ConfigCronRunner::new(std::sync::Arc::clone(&shared_config));
+    let cron_inbound = inbound_tx.clone();
+    tokio::spawn(async move {
+        if let Err(e) = cron_runner.run(cron_inbound).await {
+            tracing::error!("Config cron runner error: {e:#}");
         }
     });
 
