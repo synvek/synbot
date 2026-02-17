@@ -37,7 +37,6 @@ fn create_workspace_templates(ws: &std::path::Path) -> Result<()> {
         ("SOUL.md", include_str!("../../templates/agent/SOUL.md")),
         ("USER.md", include_str!("../../templates/agent/USER.md")),
         ("TOOLS.md", include_str!("../../templates/agent/TOOLS.md")),
-        ("HEARTBEAT.md", include_str!("../../templates/agent/HEARTBEAT.md")),
     ];
     for (name, content) in templates {
         let path = ws.join(name);
