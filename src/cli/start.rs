@@ -37,6 +37,7 @@ pub async fn cmd_start() -> Result<()> {
     let provider = detect_rig_provider(&provider_name);
     let client = provider.client(&api_key, api_base.as_deref())?;
     let completion_model = client.completion_model(&model).await;
+    let completion_model = std::sync::Arc::from(completion_model);
 
     // Subagent manager (shared via Arc<Mutex<>>)
     let subagent_mgr = std::sync::Arc::new(
@@ -110,7 +111,7 @@ pub async fn cmd_start() -> Result<()> {
 
     // Start agent loop
     let mut agent_loop = crate::agent::r#loop::AgentLoop::new(
-        completion_model,
+        std::sync::Arc::clone(&completion_model),
         ws.clone(),
         tools,
         cfg.agent.max_tool_iterations,
@@ -170,10 +171,14 @@ pub async fn cmd_start() -> Result<()> {
         let feishu_inbound = inbound_tx.clone();
         let feishu_outbound = bus.subscribe_outbound();
         let show_tool_calls = cfg.show_tool_calls && feishu_cfg.show_tool_calls;
+        let feishu_approval = std::sync::Arc::clone(&approval_manager);
+        let feishu_classifier = std::sync::Arc::clone(&completion_model);
         tokio::spawn(async move {
             let mut ch = crate::channels::feishu::FeishuChannel::new(
                 feishu_cfg, feishu_inbound, feishu_outbound, show_tool_calls,
-            );
+            )
+            .with_approval_manager(feishu_approval)
+            .with_approval_classifier(feishu_classifier);
             if let Err(e) = ch.start().await {
                 tracing::error!("Feishu channel error: {e:#}");
             }

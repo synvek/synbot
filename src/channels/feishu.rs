@@ -19,23 +19,25 @@ use anyhow::Result;
 use async_trait::async_trait;
 use open_lark::client::ws_client::LarkWsClient;
 use open_lark::prelude::*;
+use rig_dyn::CompletionModel;
 use tokio::sync::{broadcast, mpsc, oneshot, RwLock};
 use tracing::{error, info, warn};
 
 use crate::bus::{InboundMessage, OutboundMessage};
+use crate::channels::approval_classifier;
 use crate::channels::{approval_formatter, Channel, RetryPolicy, RetryState};
 use crate::config::{AllowlistEntry, FeishuConfig};
-use crate::tools::approval::ApprovalManager;
+use crate::tools::approval::{ApprovalManager, ApprovalResponse};
 
 pub struct FeishuChannel {
     config: FeishuConfig,
-    /// When true, forward tool execution progress to this channel (global && channel show_tool_calls).
     show_tool_calls: bool,
     inbound_tx: mpsc::Sender<InboundMessage>,
     outbound_rx: Option<broadcast::Receiver<OutboundMessage>>,
     running: bool,
     approval_manager: Option<Arc<ApprovalManager>>,
-    /// 用户待处理审批请求映射：user_id -> (request_id, chat_id)
+    /// Optional LLM for classifying approval replies (approve/reject). When set, used instead of keyword matching.
+    approval_classifier: Option<Arc<dyn CompletionModel>>,
     pending_approvals: Arc<RwLock<HashMap<String, (String, String)>>>,
 }
 
@@ -61,6 +63,33 @@ impl std::fmt::Display for FeishuWsError {
 ///
 /// Errors containing authentication-related keywords (401, 403, "invalid",
 /// "unauthorized", "forbidden", "credential") are treated as unrecoverable.
+/// Keyword fallback when LLM classifier is not used or returns unknown. Some(true)=approve, Some(false)=reject, None=ambiguous.
+fn parse_approval_response_keywords(text: &str) -> Option<bool> {
+    let t = text.trim();
+    if t.is_empty() {
+        return None;
+    }
+    let t_lower = t.to_lowercase();
+    // Reject first so "不同意" is not mistaken for approve
+    let reject_exact = ["no", "n", "reject", "拒绝", "否", "deny", "不同意"];
+    if reject_exact.iter().any(|s| t_lower == *s || t_lower.starts_with(&format!("{} ", s)) || t_lower.ends_with(&format!(" {}", s))) {
+        return Some(false);
+    }
+    if t.contains("不同意") || t.contains("拒绝") {
+        return Some(false);
+    }
+    // Approve: exact / prefix / suffix
+    let approve_exact = ["yes", "y", "approve", "批准", "是", "ok", "同意", "好", "1"];
+    if approve_exact.iter().any(|s| t_lower == *s || t_lower.starts_with(&format!("{} ", s)) || t_lower.ends_with(&format!(" {}", s))) {
+        return Some(true);
+    }
+    // Approve: contain "同意" / "批准" / "好" without "不" (e.g. "我同意", "批准执行")
+    if (t.contains("同意") || t.contains("批准") || t.contains("好")) && !t.contains("不") {
+        return Some(true);
+    }
+    None
+}
+
 fn classify_feishu_error(error_msg: &str) -> FeishuWsError {
     let lower = error_msg.to_lowercase();
     if lower.contains("401")
@@ -92,6 +121,7 @@ impl FeishuChannel {
             outbound_rx: Some(outbound_rx),
             running: false,
             approval_manager: None,
+            approval_classifier: None,
             pending_approvals: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -99,6 +129,12 @@ impl FeishuChannel {
     /// 设置审批管理器
     pub fn with_approval_manager(mut self, manager: Arc<ApprovalManager>) -> Self {
         self.approval_manager = Some(manager);
+        self
+    }
+
+    /// 设置审批回复分类器（LLM）。若设置，将用大模型判断用户回复是同意/拒绝，否则用关键词匹配。
+    pub fn with_approval_classifier(mut self, model: Arc<dyn CompletionModel>) -> Self {
+        self.approval_classifier = Some(model);
         self
     }
 
@@ -205,6 +241,7 @@ impl FeishuChannel {
         app_id: String,
         app_secret: String,
         approval_manager: Option<Arc<ApprovalManager>>,
+        approval_classifier: Option<Arc<dyn CompletionModel>>,
         pending_approvals: Arc<RwLock<HashMap<String, (String, String)>>>,
     ) -> std::result::Result<(), FeishuWsError> {
         let (result_tx, result_rx) = oneshot::channel::<Result<(), String>>();
@@ -400,9 +437,11 @@ impl FeishuChannel {
                             }
                         };
 
-                        // Async work in spawn (closure is sync): check pending approval then send either approval or normal message
+                        // Async work in spawn (closure is sync): if user has pending approval, classify (LLM or keywords) and submit so the waiting exec unblocks; else forward to bus.
                         let inbound_tx_fwd = inbound_tx.clone();
                         let pending_approvals_fwd = pending_approvals.clone();
+                        let approval_manager_fwd = approval_manager.clone();
+                        let approval_classifier_fwd = approval_classifier.clone();
                         let sender_open_id_fwd = sender_open_id.clone();
                         let channel_name_fwd = channel_name.clone();
                         let content_fwd = content.clone();
@@ -413,32 +452,72 @@ impl FeishuChannel {
                         let chat_type_fwd = msg.chat_type.clone();
                         tokio::task::spawn_local(async move {
                             let mut pending = pending_approvals_fwd.write().await;
-                            let removed = pending.remove(&sender_open_id_fwd);
+                            // Look up by chat_id: we register by chat_id (session_id's last segment for dm)
+                            let removed = pending.remove(&chat_id_fwd);
                             drop(pending);
-                            let (meta, content_send) = if let Some((request_id, _)) = removed {
+                            if let Some((request_id, _)) = removed {
+                                let mut approved_opt: Option<bool> = None;
+                                if let Some(ref model) = approval_classifier_fwd {
+                                    approved_opt = approval_classifier::classify_approval_response(
+                                        model.as_ref(),
+                                        &content_fwd,
+                                    )
+                                    .await;
+                                }
+                                if approved_opt.is_none() {
+                                    approved_opt = parse_approval_response_keywords(&content_fwd);
+                                }
+                                if let Some(ref mgr) = approval_manager_fwd {
+                                    if let Some(approved) = approved_opt {
+                                        let response = ApprovalResponse {
+                                            request_id: request_id.clone(),
+                                            approved,
+                                            responder: sender_open_id_fwd.clone(),
+                                            timestamp: chrono::Utc::now(),
+                                        };
+                                        if let Err(e) = mgr.submit_response(response).await {
+                                            error!("Feishu failed to submit approval response: {e:#}");
+                                        } else {
+                                            info!(
+                                                request_id = %request_id,
+                                                approved = approved,
+                                                "Feishu approval response submitted, exec will continue"
+                                            );
+                                            return;
+                                        }
+                                    }
+                                }
                                 let mut meta = serde_json::json!({
                                     "pending_approval_request_id": request_id
                                 });
                                 if is_group_meta_fwd {
                                     meta["group"] = serde_json::json!(true);
                                 }
-                                (meta, content_fwd)
-                            } else {
-                                let mut meta = serde_json::json!({
-                                    "message_id": message_id_fwd,
-                                    "message_type": message_type_fwd,
-                                    "chat_type": chat_type_fwd,
-                                });
-                                if is_group_meta_fwd {
-                                    meta["group"] = serde_json::json!(true);
-                                }
-                                (meta, content_fwd)
-                            };
+                                let inbound = InboundMessage {
+                                    channel: channel_name_fwd.clone(),
+                                    sender_id: sender_open_id_fwd.clone(),
+                                    chat_id: chat_id_fwd.clone(),
+                                    content: content_fwd.clone(),
+                                    timestamp: chrono::Utc::now(),
+                                    media: vec![],
+                                    metadata: meta,
+                                };
+                                let _ = inbound_tx_fwd.try_send(inbound);
+                                return;
+                            }
+                            let mut meta = serde_json::json!({
+                                "message_id": message_id_fwd,
+                                "message_type": message_type_fwd,
+                                "chat_type": chat_type_fwd,
+                            });
+                            if is_group_meta_fwd {
+                                meta["group"] = serde_json::json!(true);
+                            }
                             let inbound = InboundMessage {
                                 channel: channel_name_fwd,
                                 sender_id: sender_open_id_fwd,
                                 chat_id: chat_id_fwd,
-                                content: content_send,
+                                content: content_fwd,
                                 timestamp: chrono::Utc::now(),
                                 media: vec![],
                                 metadata: meta,
@@ -605,6 +684,7 @@ impl Channel for FeishuChannel {
                 self.config.app_id.clone(),
                 self.config.app_secret.clone(),
                 self.approval_manager.clone(),
+                self.approval_classifier.clone(),
                 self.pending_approvals.clone(),
             )
             .await;

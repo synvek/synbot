@@ -77,7 +77,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
 
     // Agent loop
     let mut agent_loop = crate::agent::r#loop::AgentLoop::new(
-        completion_model,
+        completion_model.into(),
         ws,
         tools,
         cfg.agent.max_tool_iterations,

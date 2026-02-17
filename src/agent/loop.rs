@@ -39,7 +39,7 @@ pub struct AgentLoop {
 
 impl AgentLoop {
     pub async fn new(
-        model: Box<dyn CompletionModel>,
+        model: Arc<dyn CompletionModel>,
         workspace: PathBuf,
         tools: Arc<ToolRegistry>,
         max_iterations: u32,
@@ -99,7 +99,7 @@ impl AgentLoop {
         }
         Self {
             workspace,
-            model: Arc::from(model),
+            model,
             tools,
             max_iterations,
             inbound_rx,
