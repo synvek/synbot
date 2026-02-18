@@ -15,7 +15,7 @@ use chrono::{DateTime, Utc};
 use rig::completion::CompletionRequest;
 use rig::message::{AssistantContent, Message, ToolResultContent, UserContent};
 use rig::OneOrMany;
-use rig_dyn::CompletionModel;
+use crate::rig_provider::SynbotCompletionModel;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
@@ -141,7 +141,7 @@ impl SubagentManager {
         &mut self,
         label: String,
         task: String,
-        model: Box<dyn CompletionModel>,
+        model: Arc<dyn SynbotCompletionModel>,
         workspace: PathBuf,
         tools: Arc<ToolRegistry>,
         agent_id: &str,
@@ -195,7 +195,7 @@ impl SubagentManager {
 /// user message, and collects the assistant's text response (executing any
 /// tool calls along the way, up to a fixed iteration limit).
 async fn run_subagent_task(
-    model: Box<dyn CompletionModel>,
+    model: Arc<dyn SynbotCompletionModel>,
     workspace: PathBuf,
     tools: Arc<ToolRegistry>,
     task: String,
@@ -227,14 +227,19 @@ async fn run_subagent_task(
                 break;
             }
 
+            let chat_history = if history.is_empty() {
+                rig::OneOrMany::one(Message::user(""))
+            } else {
+                rig::OneOrMany::many(history.clone()).expect("non-empty history")
+            };
             let request = CompletionRequest {
                 preamble: Some(system_prompt.clone()),
-                chat_history: history.clone(),
-                prompt: Message::user(""),
+                chat_history,
                 tools: tool_defs.clone(),
                 documents: vec![],
                 temperature: None,
                 max_tokens: None,
+                tool_choice: None,
                 additional_params: None,
             };
 
@@ -245,10 +250,13 @@ async fn run_subagent_task(
             let mut assistant_contents = Vec::new();
             let mut tool_results = Vec::new();
 
-            for content in response.iter() {
-                match content {
+            for content in response.choice.clone().into_iter() {
+                match &content {
                     AssistantContent::Text(t) => {
                         text_parts.push(t.text.clone());
+                        assistant_contents.push(content.clone());
+                    }
+                    AssistantContent::Reasoning(_) | AssistantContent::Image(_) => {
                         assistant_contents.push(content.clone());
                     }
                     AssistantContent::ToolCall(tc) => {
@@ -270,7 +278,10 @@ async fn run_subagent_task(
                     1 => OneOrMany::one(assistant_contents.into_iter().next().unwrap()),
                     _ => OneOrMany::many(assistant_contents).expect("non-empty"),
                 };
-                history.push(Message::Assistant { content });
+                history.push(Message::Assistant {
+                    id: None,
+                    content,
+                });
                 for (id, result_str) in tool_results {
                     history.push(Message::User {
                         content: OneOrMany::one(UserContent::tool_result(

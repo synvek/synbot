@@ -19,7 +19,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use open_lark::client::ws_client::LarkWsClient;
 use open_lark::prelude::*;
-use rig_dyn::CompletionModel;
+use crate::rig_provider::SynbotCompletionModel;
 use tokio::sync::{broadcast, mpsc, oneshot, RwLock};
 use tracing::{error, info, warn};
 
@@ -37,7 +37,7 @@ pub struct FeishuChannel {
     running: bool,
     approval_manager: Option<Arc<ApprovalManager>>,
     /// Optional LLM for classifying approval replies (approve/reject). When set, used instead of keyword matching.
-    approval_classifier: Option<Arc<dyn CompletionModel>>,
+    approval_classifier: Option<Arc<dyn SynbotCompletionModel>>,
     pending_approvals: Arc<RwLock<HashMap<String, (String, String)>>>,
 }
 
@@ -133,7 +133,7 @@ impl FeishuChannel {
     }
 
     /// 设置审批回复分类器（LLM）。若设置，将用大模型判断用户回复是同意/拒绝，否则用关键词匹配。
-    pub fn with_approval_classifier(mut self, model: Arc<dyn CompletionModel>) -> Self {
+    pub fn with_approval_classifier(mut self, model: Arc<dyn SynbotCompletionModel>) -> Self {
         self.approval_classifier = Some(model);
         self
     }
@@ -245,7 +245,7 @@ impl FeishuChannel {
         app_id: String,
         app_secret: String,
         approval_manager: Option<Arc<ApprovalManager>>,
-        approval_classifier: Option<Arc<dyn CompletionModel>>,
+        approval_classifier: Option<Arc<dyn SynbotCompletionModel>>,
         pending_approvals: Arc<RwLock<HashMap<String, (String, String)>>>,
     ) -> std::result::Result<(), FeishuWsError> {
         let (result_tx, result_rx) = oneshot::channel::<Result<(), String>>();

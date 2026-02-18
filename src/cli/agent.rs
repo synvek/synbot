@@ -4,7 +4,7 @@ use anyhow::Result;
 use tracing::info;
 use crate::config;
 use crate::logging;
-use super::helpers::{resolve_provider, detect_rig_provider, build_default_tools};
+use super::helpers::{resolve_provider, build_rig_completion_model, build_default_tools};
 
 pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model: Option<String>) -> Result<()> {
     let cfg = config::load_config(None)?;
@@ -26,11 +26,14 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
     let model_name = model.unwrap_or(cfg.agent.model.clone());
     info!(model = %model_name, "Starting agent");
 
-    // Build rig provider via rig-dyn
+    // Build rig completion model via rig-core (no rig-dyn)
     let provider_name = provider.unwrap_or(cfg.agent.provider.clone());
-    let provider = detect_rig_provider(&provider_name);
-    let client = provider.client(&api_key, api_base.as_deref())?;
-    let completion_model = client.completion_model(model_name.as_str()).await;
+    let completion_model = build_rig_completion_model(
+        &provider_name,
+        &model_name,
+        &api_key,
+        api_base.as_deref(),
+    )?;
 
     // Subagent manager (shared via Arc<Mutex<>>)
     let subagent_mgr = std::sync::Arc::new(
@@ -78,7 +81,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
 
     // Agent loop
     let mut agent_loop = crate::agent::r#loop::AgentLoop::new(
-        completion_model.into(),
+        completion_model,
         ws,
         tools,
         cfg.agent.max_tool_iterations,

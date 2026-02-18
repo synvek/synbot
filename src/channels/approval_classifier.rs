@@ -3,7 +3,7 @@
 
 use rig::completion::CompletionRequest;
 use rig::message::{AssistantContent, Message};
-use rig_dyn::CompletionModel;
+use crate::rig_provider::SynbotCompletionModel;
 use tracing::warn;
 
 const SYSTEM_PROMPT: &str = r#"You are a classifier. The user was asked to approve or reject running a command (e.g. "Run python script X?"). They replied with a short message.
@@ -18,7 +18,7 @@ Reply with exactly one word: APPROVE, REJECT, or UNKNOWN. No other text."#;
 /// Classify user message as approval intent using the LLM.
 /// Returns `Some(true)` = approve, `Some(false)` = reject, `None` = unknown or error.
 pub async fn classify_approval_response(
-    model: &dyn CompletionModel,
+    model: &dyn SynbotCompletionModel,
     user_message: &str,
 ) -> Option<bool> {
     let trimmed = user_message.trim();
@@ -28,12 +28,12 @@ pub async fn classify_approval_response(
 
     let request = CompletionRequest {
         preamble: Some(SYSTEM_PROMPT.to_string()),
-        chat_history: vec![],
-        prompt: Message::user(trimmed),
+        chat_history: rig::OneOrMany::one(Message::user(trimmed)),
         tools: vec![],
         documents: vec![],
         temperature: Some(0.0),
         max_tokens: Some(20),
+        tool_choice: None,
         additional_params: None,
     };
 
@@ -49,7 +49,7 @@ pub async fn classify_approval_response(
     };
 
     let mut first_text = String::new();
-    for content in response.iter() {
+    for content in response.choice.clone().into_iter() {
         if let AssistantContent::Text(t) = content {
             first_text.push_str(&t.text);
             break;

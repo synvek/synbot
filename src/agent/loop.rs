@@ -4,7 +4,7 @@ use anyhow::Result;
 use rig::completion::CompletionRequest;
 use rig::message::{AssistantContent, Message, ToolResultContent, UserContent};
 use rig::OneOrMany;
-use rig_dyn::CompletionModel;
+use crate::rig_provider::SynbotCompletionModel;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -23,7 +23,7 @@ use crate::config;
 use crate::tools::{scope, ToolContext, ToolRegistry};
 
 pub struct AgentLoop {
-    model: Arc<dyn CompletionModel>,
+    model: Arc<dyn SynbotCompletionModel>,
     /// Main agent workspace (for bootstrap files and session store). Memory for "main" is at ~/.synbot/memory/main.
     workspace: PathBuf,
     tools: Arc<ToolRegistry>,
@@ -39,7 +39,7 @@ pub struct AgentLoop {
 
 impl AgentLoop {
     pub async fn new(
-        model: Arc<dyn CompletionModel>,
+        model: Arc<dyn SynbotCompletionModel>,
         workspace: PathBuf,
         tools: Arc<ToolRegistry>,
         max_iterations: u32,
@@ -292,6 +292,7 @@ impl AgentLoop {
                 sm.append(&session_id, user_msg);
             }
 
+            tracing::debug!("History check: {:?}", history);
             let iterations = scope(tool_ctx, async {
                 run_completion_loop(
                     &*self.model,
@@ -597,7 +598,7 @@ impl AgentLoop {
 // ---------------------------------------------------------------------------
 
 async fn run_completion_loop(
-    model: &dyn CompletionModel,
+    model: &dyn SynbotCompletionModel,
     system_prompt: &str,
     max_iterations: u32,
     agent_id: &str,
@@ -620,18 +621,25 @@ async fn run_completion_loop(
             break;
         }
 
+        tracing::debug!("History check again: {:?}", history);
+
+        let chat_history = if history.is_empty() {
+            OneOrMany::one(Message::user(""))
+        } else {
+            OneOrMany::many(history.clone()).expect("non-empty history")
+        };
         let request = CompletionRequest {
             preamble: Some(system_prompt.to_string()),
-            chat_history: history.clone(),
-            prompt: Message::user(""),
+            chat_history,
             tools: tool_defs.to_vec(),
             documents: vec![],
             temperature: None,
             max_tokens: None,
+            tool_choice: None,
             additional_params: None,
         };
 
-        tracing::debug!("Request prompt: {}", system_prompt);
+        tracing::debug!("Request prompt: {:?}", request);
 
         let response = model.completion(request).await?;
 
@@ -640,10 +648,14 @@ async fn run_completion_loop(
         let mut assistant_contents = Vec::new();
         let mut tool_results = Vec::new();
 
-        for content in response.iter() {
-            match content {
+        for content in response.choice.clone().into_iter() {
+            match &content {
                 AssistantContent::Text(t) => {
                     text_parts.push(t.text.clone());
+                    assistant_contents.push(content.clone());
+                }
+                AssistantContent::Reasoning(_) | AssistantContent::Image(_) => {
+                    // Preserve reasoning/image in history (e.g. DeepSeek requires reasoning_content in assistant messages)
                     assistant_contents.push(content.clone());
                 }
                 AssistantContent::ToolCall(tc) => {
@@ -686,7 +698,10 @@ async fn run_completion_loop(
                 1 => OneOrMany::one(assistant_contents.into_iter().next().unwrap()),
                 _ => OneOrMany::many(assistant_contents).expect("non-empty"),
             };
-            history.push(Message::Assistant { content });
+            history.push(Message::Assistant {
+                id: None,
+                content,
+            });
             for (id, result_str) in tool_results {
                 history.push(Message::User {
                     content: OneOrMany::one(UserContent::tool_result(

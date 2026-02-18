@@ -6,7 +6,7 @@ use tracing::{info, warn};
 use crate::config;
 use crate::logging;
 use crate::channels::Channel;
-use super::helpers::{resolve_provider, detect_rig_provider, build_default_tools};
+use super::helpers::{resolve_provider, build_rig_completion_model, build_default_tools};
 
 pub async fn cmd_start() -> Result<()> {
     // Immediate stderr so sandbox parent sees child has started (before any logging init)
@@ -77,10 +77,12 @@ pub async fn cmd_start() -> Result<()> {
 
     let model = cfg.agent.model.clone();
     let provider_name = cfg.agent.provider.clone();
-    let provider = detect_rig_provider(&provider_name);
-    let client = provider.client(&api_key, api_base.as_deref())?;
-    let completion_model = client.completion_model(&model).await;
-    let completion_model = std::sync::Arc::from(completion_model);
+    let completion_model = build_rig_completion_model(
+        &provider_name,
+        &model,
+        &api_key,
+        api_base.as_deref(),
+    )?;
 
     // Subagent manager (shared via Arc<Mutex<>>)
     let subagent_mgr = std::sync::Arc::new(

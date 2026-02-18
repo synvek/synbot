@@ -83,7 +83,7 @@ impl SessionMessage {
                     timestamp: Utc::now(),
                 }
             }
-            Message::Assistant { content } => {
+            Message::Assistant { content, .. } => {
                 let mut parts: Vec<String> = Vec::new();
                 let mut has_text = false;
                 let mut has_tool_call = false;
@@ -93,6 +93,7 @@ impl SessionMessage {
                             has_text = true;
                             parts.push(t.text.clone());
                         }
+                        AssistantContent::Reasoning(_) | AssistantContent::Image(_) => {}
                         AssistantContent::ToolCall(tc) => {
                             has_tool_call = true;
                             let name = &tc.function.name;

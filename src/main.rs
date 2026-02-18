@@ -8,6 +8,7 @@ mod config;
 mod cron;
 mod heartbeat;
 mod logging;
+mod rig_provider;
 mod tools;
 mod web;
 mod sandbox;

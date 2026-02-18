@@ -44,23 +44,19 @@ pub fn resolve_provider(cfg: &config::Config) -> (String, Option<String>) {
     (String::new(), None)
 }
 
-/// Detect rig provider from model name.
-pub fn detect_rig_provider(model: &str) -> rig_dyn::Provider {
-    let lower = model.to_lowercase();
-    if lower.contains("anthropic") || lower.contains("claude") {
-        rig_dyn::Provider::Anthropic
-    } else if lower.contains("openai") || lower.contains("gpt") {
-        rig_dyn::Provider::OpenAI
-    } else if lower.contains("deepseek") {
-        rig_dyn::Provider::DeepSeek
-    } else if lower.contains("moonshot") {
-        rig_dyn::Provider::Moonshot
-    } else if lower.contains("ollama") {
-        rig_dyn::Provider::Ollama
-    } else {
-        // Default to OpenAI-compatible (works with OpenRouter etc.)
-        rig_dyn::Provider::OpenAI
-    }
+/// Build a rig completion model using rig-core (no rig-dyn). Returns Arc<dyn SynbotCompletionModel>.
+pub fn build_rig_completion_model(
+    provider_name: &str,
+    model_name: &str,
+    api_key: &str,
+    api_base: Option<&str>,
+) -> anyhow::Result<std::sync::Arc<dyn crate::rig_provider::SynbotCompletionModel>> {
+    crate::rig_provider::build_completion_model(
+        provider_name,
+        model_name,
+        api_key,
+        api_base,
+    )
 }
 
 /// Optional context for heartbeat/cron tools (shared config + path). When provided, list/add/delete heartbeat and cron tools are registered.
