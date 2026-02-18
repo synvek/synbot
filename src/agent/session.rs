@@ -276,6 +276,13 @@ impl SessionStore {
             .await
             .context("failed to write tmp session file")?;
 
+        // On Windows (e.g. AppContainer), rename overwriting an existing file can fail
+        // with "access denied" if the process lacks DELETE on the target. Remove first
+        // so we only need rename to a non-existing path.
+        #[cfg(target_os = "windows")]
+        if target.exists() {
+            let _ = fs::remove_file(&target).await;
+        }
         fs::rename(&tmp, &target)
             .await
             .context("failed to rename tmp to target")?;

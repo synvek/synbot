@@ -766,10 +766,13 @@ fn grant_appcontainer_path_access(path: &Path, container_sid: *mut std::ffi::c_v
         return Err(SandboxError::CreationFailed("container_sid is null".to_string()));
     }
     let path_wide = to_wide_null(&path.to_string_lossy());
+    // Writable needs DELETE (0x10000) so that rename(tmp, target) can overwrite existing
+    // session files (MoveFileEx overwrite requires DELETE on the target in AppContainer).
+    const FILE_DELETE: u32 = 0x0001_0000;
     let perms = if read_only {
         FILE_GENERIC_READ.0
     } else {
-        FILE_GENERIC_READ.0 | FILE_GENERIC_WRITE.0
+        FILE_GENERIC_READ.0 | FILE_GENERIC_WRITE.0 | FILE_DELETE
     };
     unsafe {
         let mut sd: PSECURITY_DESCRIPTOR = PSECURITY_DESCRIPTOR(null_mut());
