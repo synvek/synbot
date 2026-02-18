@@ -259,7 +259,15 @@ pub async fn cmd_start() -> Result<()> {
 
     // Start web server if enabled
     if cfg.web.enabled {
-        let web_config = cfg.web.clone();
+        let mut web_config = cfg.web.clone();
+        // Inside AppContainer the process is network-isolated; bind to 0.0.0.0 so
+        // LAN clients can reach the web UI (inbound firewall rule is added by the
+        // parent sandbox process for the configured ports).
+        #[cfg(target_os = "windows")]
+        if std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some() && web_config.host == "127.0.0.1" {
+            web_config.host = "0.0.0.0".to_string();
+            info!("AppContainer: web server binding overridden to 0.0.0.0:{}", web_config.port);
+        }
         let web_state = crate::web::AppState::new(
             std::sync::Arc::new(cfg.clone()),
             session_manager,

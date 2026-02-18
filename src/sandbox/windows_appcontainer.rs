@@ -396,6 +396,9 @@ fn add_wfp_permit_for_appcontainer(container_sid: *mut std::ffi::c_void) -> Resu
     let filter_key_v6 = GUID::from_u128(0x8e1d4f50_6172_8d9e_0f1a_2b3c4d5e6f70);
     let filter_flow_v4_key = GUID::from_u128(0x9f2e5f61_7283_9e0f_1a2b_3c4d5e6f7081);
     let filter_flow_v6_key = GUID::from_u128(0xa03f6072_8394_0f1a_2b3c_4d5e6f708192);
+    // Inbound accept layers (allow AppContainer to receive connections).
+    let filter_recv_v4_key = GUID::from_u128(0xb14f7183_9405_1f2b_3c4d_5e6f70819203);
+    let filter_recv_v6_key = GUID::from_u128(0xc25f8294_a516_2f3c_4d5e_6f7081920314);
 
     unsafe {
         // WFP requires non-null displayData.name (FWP_E_NULL_DISPLAY_NAME); keep buffers alive for the whole block.
@@ -405,6 +408,8 @@ fn add_wfp_permit_for_appcontainer(container_sid: *mut std::ffi::c_void) -> Resu
         let filter_v6_name = to_wide_null("SynBot AppContainer Outbound V6");
         let filter_flow_v4_name = to_wide_null("SynBot AppContainer Flow V4");
         let filter_flow_v6_name = to_wide_null("SynBot AppContainer Flow V6");
+        let filter_recv_v4_name = to_wide_null("SynBot AppContainer Inbound V4");
+        let filter_recv_v6_name = to_wide_null("SynBot AppContainer Inbound V6");
 
         let mut engine: HANDLE = HANDLE::default();
         let err = FwpmEngineOpen0(
@@ -593,6 +598,36 @@ fn add_wfp_permit_for_appcontainer(container_sid: *mut std::ffi::c_void) -> Resu
         filter_flow_v6.filterCondition = &mut condition as *mut _;
         let _ = FwpmFilterAdd0(engine, &filter_flow_v6, None, None as Option<*mut u64>);
 
+        // Permit inbound connections to the AppContainer (ALE_AUTH_RECV_ACCEPT).
+        // Without this, Windows blocks all inbound connections to AppContainer processes
+        // even when a firewall allow rule exists.
+        use windows::Win32::NetworkManagement::WindowsFilteringPlatform::{
+            FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4, FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6,
+        };
+        let mut filter_recv_v4 = FWPM_FILTER0 {
+            filterKey: filter_recv_v4_key,
+            displayData: FWPM_DISPLAY_DATA0 {
+                name: windows::core::PWSTR(filter_recv_v4_name.as_ptr() as *mut u16),
+                description: windows::core::PWSTR::null(),
+            },
+            layerKey: FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V4,
+            ..filter_v4
+        };
+        filter_recv_v4.filterCondition = &mut condition as *mut _;
+        let _ = FwpmFilterAdd0(engine, &filter_recv_v4, None, None as Option<*mut u64>);
+
+        let mut filter_recv_v6 = FWPM_FILTER0 {
+            filterKey: filter_recv_v6_key,
+            displayData: FWPM_DISPLAY_DATA0 {
+                name: windows::core::PWSTR(filter_recv_v6_name.as_ptr() as *mut u16),
+                description: windows::core::PWSTR::null(),
+            },
+            layerKey: FWPM_LAYER_ALE_AUTH_RECV_ACCEPT_V6,
+            ..filter_v4
+        };
+        filter_recv_v6.filterCondition = &mut condition as *mut _;
+        let _ = FwpmFilterAdd0(engine, &filter_recv_v6, None, None as Option<*mut u64>);
+
         let _ = FwpmEngineClose0(engine);
         Ok(())
     }
@@ -615,6 +650,8 @@ fn remove_wfp_permit_filters() {
     let filter_key_v6 = GUID::from_u128(0x8e1d4f50_6172_8d9e_0f1a_2b3c4d5e6f70);
     let filter_flow_v4_key = GUID::from_u128(0x9f2e5f61_7283_9e0f_1a2b_3c4d5e6f7081);
     let filter_flow_v6_key = GUID::from_u128(0xa03f6072_8394_0f1a_2b3c_4d5e6f708192);
+    let filter_recv_v4_key = GUID::from_u128(0xb14f7183_9405_1f2b_3c4d_5e6f70819203);
+    let filter_recv_v6_key = GUID::from_u128(0xc25f8294_a516_2f3c_4d5e_6f7081920314);
 
     unsafe {
         let mut engine = HANDLE::default();
@@ -625,6 +662,8 @@ fn remove_wfp_permit_filters() {
         let _ = FwpmFilterDeleteByKey0(engine, &filter_key_v6);
         let _ = FwpmFilterDeleteByKey0(engine, &filter_flow_v4_key);
         let _ = FwpmFilterDeleteByKey0(engine, &filter_flow_v6_key);
+        let _ = FwpmFilterDeleteByKey0(engine, &filter_recv_v4_key);
+        let _ = FwpmFilterDeleteByKey0(engine, &filter_recv_v6_key);
         let _ = FwpmSubLayerDeleteByKey0(engine, &sublayer_key);
         let _ = FwpmProviderDeleteByKey0(engine, &provider_key);
         let _ = FwpmEngineClose0(engine);
@@ -646,6 +685,76 @@ fn remove_firewall_rule_by_name(rule_name: &str) -> Result<()> {
         let name_bstr = BSTR::from(rule_name);
         rules.Remove(&name_bstr)
             .map_err(|e| SandboxError::CreationFailed(format!("Rules.Remove: {}", e)))?;
+    }
+    Ok(())
+}
+
+/// Add a Windows Firewall inbound allow rule for a specific port (TCP), so LAN clients can
+/// reach the web server running inside the AppContainer.
+/// Note: inbound rules must NOT set LocalAppPackageId — that field only applies to outbound
+/// rules. A plain port-based inbound rule is sufficient; the AppContainer process binds the
+/// port and the OS routes inbound packets to it normally.
+fn add_firewall_inbound_rule_for_port(rule_name: &str, port: u16) -> Result<()> {
+    use windows::core::BSTR;
+    use windows::Win32::Foundation::VARIANT_TRUE;
+    use windows::Win32::NetworkManagement::WindowsFirewall::{
+        INetFwPolicy2, INetFwRule, NetFwPolicy2, NetFwRule,
+        NET_FW_ACTION_ALLOW, NET_FW_IP_PROTOCOL_TCP, NET_FW_PROFILE2_ALL, NET_FW_RULE_DIR_IN,
+    };
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
+    };
+
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let policy: INetFwPolicy2 =
+            CoCreateInstance(&NetFwPolicy2, None, CLSCTX_INPROC_SERVER).map_err(|e| {
+                SandboxError::CreationFailed(format!("CoCreateInstance(NetFwPolicy2): {}", e))
+            })?;
+        let rules = policy.Rules().map_err(|e| {
+            SandboxError::CreationFailed(format!("INetFwPolicy2::Rules: {}", e))
+        })?;
+        let rule: INetFwRule = CoCreateInstance(&NetFwRule, None, CLSCTX_INPROC_SERVER)
+            .map_err(|e| SandboxError::CreationFailed(format!("CoCreateInstance(NetFwRule): {}", e)))?;
+        rule.SetName(&BSTR::from(rule_name))
+            .map_err(|e| SandboxError::CreationFailed(format!("SetName: {}", e)))?;
+        rule.SetDirection(NET_FW_RULE_DIR_IN)
+            .map_err(|e| SandboxError::CreationFailed(format!("SetDirection: {}", e)))?;
+        rule.SetAction(NET_FW_ACTION_ALLOW)
+            .map_err(|e| SandboxError::CreationFailed(format!("SetAction: {}", e)))?;
+        rule.SetProtocol(NET_FW_IP_PROTOCOL_TCP.0 as i32)
+            .map_err(|e| SandboxError::CreationFailed(format!("SetProtocol: {}", e)))?;
+        rule.SetLocalPorts(&BSTR::from(port.to_string()))
+            .map_err(|e| SandboxError::CreationFailed(format!("SetLocalPorts: {}", e)))?;
+        rule.SetEnabled(VARIANT_TRUE)
+            .map_err(|e| SandboxError::CreationFailed(format!("SetEnabled: {}", e)))?;
+        rule.SetProfiles(NET_FW_PROFILE2_ALL.0)
+            .map_err(|e| SandboxError::CreationFailed(format!("SetProfiles: {}", e)))?;
+        rules.Add(&rule)
+            .map_err(|e| SandboxError::CreationFailed(format!("Rules.Add: {}", e)))?;
+    }
+    Ok(())
+}
+
+/// Grant the AppContainer loopback exemption so processes on the same machine can connect
+/// to ports bound inside the AppContainer (e.g. the web server on 127.0.0.1).
+/// Equivalent to: CheckNetIsolation.exe LoopbackExempt -a -n="<profile_name>"
+fn add_loopback_exemption_for_appcontainer(container_sid: *mut std::ffi::c_void) -> Result<()> {
+    use windows::Win32::NetworkManagement::WindowsFirewall::NetworkIsolationSetAppContainerConfig;
+    use windows::Win32::Security::SID_AND_ATTRIBUTES;
+
+    let sid_attr = SID_AND_ATTRIBUTES {
+        Sid: windows::Win32::Security::PSID(container_sid),
+        Attributes: 0,
+    };
+    unsafe {
+        let err = NetworkIsolationSetAppContainerConfig(&[sid_attr]);
+        if err != 0 {
+            return Err(SandboxError::CreationFailed(format!(
+                "NetworkIsolationSetAppContainerConfig failed (error {})",
+                err
+            )));
+        }
     }
     Ok(())
 }
@@ -1048,6 +1157,33 @@ impl Sandbox for WindowsAppContainerSandbox {
                     log::warn!("WFP permit for AppContainer: {} (network may be blocked)", e);
                 }
             }
+
+            // Loopback exemption: allow processes on the same machine to connect to ports
+            // bound inside the AppContainer (e.g. web UI on 127.0.0.1).
+            // Equivalent to: CheckNetIsolation.exe LoopbackExempt -a -n="<profile>"
+            match add_loopback_exemption_for_appcontainer(self.container_sid.unwrap()) {
+                Ok(()) => {
+                    let _ = writeln!(std::io::stderr(), "[synbot sandbox] Loopback exemption granted for AppContainer (localhost access enabled)");
+                    let _ = std::io::stderr().flush();
+                }
+                Err(e) => {
+                    log::warn!("Loopback exemption failed: {} (localhost access to web UI may not work)", e);
+                }
+            }
+
+            // Inbound firewall rule: allow LAN clients to reach the web server port.
+            for port in &self.config.network.allowed_ports {
+                let inbound_rule_name = format!("SynBot Sandbox Inbound - {} port {}", self.config.sandbox_id, port);
+                match add_firewall_inbound_rule_for_port(&inbound_rule_name, *port) {
+                    Ok(()) => {
+                        let _ = writeln!(std::io::stderr(), "[synbot sandbox] Firewall inbound rule added for port {}", port);
+                        let _ = std::io::stderr().flush();
+                    }
+                    Err(e) => {
+                        log::warn!("Firewall inbound rule for port {}: {}", port, e);
+                    }
+                }
+            }
         }
 
         log::info!(
@@ -1074,6 +1210,13 @@ impl Sandbox for WindowsAppContainerSandbox {
         if let Some(rule_name) = self.firewall_rule_name.take() {
             if let Err(e) = remove_firewall_rule_by_name(&rule_name) {
                 log::warn!("Failed to remove firewall rule {}: {}", rule_name, e);
+            }
+        }
+        // Remove inbound rules added in start()
+        if self.config.network.enabled {
+            for port in &self.config.network.allowed_ports {
+                let inbound_rule_name = format!("SynBot Sandbox Inbound - {} port {}", self.config.sandbox_id, port);
+                let _ = remove_firewall_rule_by_name(&inbound_rule_name);
             }
         }
 
