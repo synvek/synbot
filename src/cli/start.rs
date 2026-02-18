@@ -41,35 +41,29 @@ pub async fn cmd_start() -> Result<()> {
     // (which is unreadable in AppContainer → "no connections available").
     #[cfg(target_os = "windows")]
     if std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some() {
-        let client_builder = {
-            use std::sync::Arc;
-            let resolver = crate::appcontainer_dns::GoogleDnsResolver::new();
-            reqwest::Client::builder().dns_resolver(Arc::new(resolver))
-        };
-        if let Ok(client) = client_builder.build() {
-            let result = tokio::time::timeout(
-                std::time::Duration::from_secs(5),
-                client.get("https://www.microsoft.com").send(),
-            )
-            .await;
-            match result {
-                Ok(Ok(resp)) => {
-                    info!("AppContainer network diagnostic: GET https://www.microsoft.com -> {}", resp.status());
+        let client = crate::appcontainer_dns::build_reqwest_client();
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.get("https://www.microsoft.com").send(),
+        )
+        .await;
+        match result {
+            Ok(Ok(resp)) => {
+                info!("AppContainer network diagnostic: GET https://www.microsoft.com -> {}", resp.status());
+            }
+            Ok(Err(e)) => {
+                let ae = anyhow::Error::from(e);
+                if let Some(io) = ae.downcast_ref::<std::io::Error>() {
+                    warn!(
+                        "AppContainer network diagnostic: request failed io_error kind={:?} raw_os_error={:?} (see docs/getting-started/appcontainer-network-troubleshooting.md)",
+                        io.kind(),
+                        io.raw_os_error()
+                    );
                 }
-                Ok(Err(e)) => {
-                    let ae = anyhow::Error::from(e);
-                    if let Some(io) = ae.downcast_ref::<std::io::Error>() {
-                        warn!(
-                            "AppContainer network diagnostic: request failed io_error kind={:?} raw_os_error={:?} (see docs/getting-started/appcontainer-network-troubleshooting.md)",
-                            io.kind(),
-                            io.raw_os_error()
-                        );
-                    }
-                    warn!("AppContainer network diagnostic: request failed: {:#}", ae);
-                }
-                Err(_) => {
-                    warn!("AppContainer network diagnostic: request timed out after 5s");
-                }
+                warn!("AppContainer network diagnostic: request failed: {:#}", ae);
+            }
+            Err(_) => {
+                warn!("AppContainer network diagnostic: request timed out after 5s");
             }
         }
     }

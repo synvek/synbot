@@ -168,16 +168,7 @@ impl FeishuChannel {
             .with_enable_token_cache(true);
 
         #[cfg(target_os = "windows")]
-        if std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some() {
-            if let Ok(client) = reqwest::Client::builder()
-                .dns_resolver(std::sync::Arc::new(
-                    crate::appcontainer_dns::GoogleDnsResolver::new(),
-                ))
-                .build()
-            {
-                return builder.with_http_client(client).build();
-            }
-        }
+        let builder = builder.with_http_client(crate::appcontainer_dns::build_reqwest_client());
 
         builder.build()
     }
@@ -380,20 +371,7 @@ impl FeishuChannel {
                                                 .with_app_type(AppType::SelfBuild)
                                                 .with_enable_token_cache(true);
                                             #[cfg(target_os = "windows")]
-                                            let builder = if std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some() {
-                                                if let Ok(c) = reqwest::Client::builder()
-                                                    .dns_resolver(std::sync::Arc::new(
-                                                        crate::appcontainer_dns::GoogleDnsResolver::new(),
-                                                    ))
-                                                    .build()
-                                                {
-                                                    builder.with_http_client(c)
-                                                } else {
-                                                    builder
-                                                }
-                                            } else {
-                                                builder
-                                            };
+                                            let builder = builder.with_http_client(crate::appcontainer_dns::build_reqwest_client());
                                             builder.build()
                                         };
                                         let _ = Self::send_text_static(&client, &chat_id, "未配置聊天许可，请配置。").await;
@@ -567,14 +545,10 @@ impl FeishuChannel {
                         .app_secret(&app_secret_for_config)
                         .req_timeout(std::time::Duration::from_secs(30))
                         .http_client({
-                            let mut cb = reqwest::Client::builder();
                             #[cfg(target_os = "windows")]
-                            if std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some() {
-                                cb = cb.dns_resolver(std::sync::Arc::new(
-                                    crate::appcontainer_dns::GoogleDnsResolver::new(),
-                                ));
-                            }
-                            cb.build().unwrap_or_default()
+                            { crate::appcontainer_dns::build_reqwest_client() }
+                            #[cfg(not(target_os = "windows"))]
+                            { reqwest::Client::new() }
                         })
                         .build(),
                 );

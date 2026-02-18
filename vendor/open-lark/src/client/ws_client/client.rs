@@ -551,76 +551,17 @@ pub struct WsCloseReason {
 /// Connect to a WebSocket URL.
 ///
 /// When `SYNBOT_IN_APP_SANDBOX` is set (Windows AppContainer), system DNS is
-/// unavailable. In that case we resolve the hostname via hickory (Google DNS
-/// 8.8.8.8), build a TCP connection to the resolved IP, then perform the TLS
-/// + WebSocket handshake with the original hostname as the SNI / Host header.
+/// unavailable. In that case we delegate to `appcontainer::ws_connect_appcontainer`
+/// which resolves the hostname via Google DNS (8.8.8.8) before connecting.
 ///
 /// In all other environments this is a thin wrapper around `connect_async`.
 async fn ws_connect(
     url: String,
 ) -> WsClientResult<(WebSocketStream<MaybeTlsStream<TcpStream>>, tungstenite::handshake::client::Response)>
-where
 {
     #[cfg(target_os = "windows")]
     if std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some() {
-        return ws_connect_appcontainer(url).await;
+        return super::appcontainer::ws_connect_appcontainer(url).await;
     }
     tokio_tungstenite::connect_async(url).await.map_err(WsClientError::from)
-}
-
-#[cfg(target_os = "windows")]
-async fn ws_connect_appcontainer(
-    conn_url: String,
-) -> WsClientResult<(WebSocketStream<MaybeTlsStream<TcpStream>>, tungstenite::handshake::client::Response)>
-{
-    use hickory_resolver::config::ResolverConfig;
-    use hickory_resolver::name_server::TokioConnectionProvider;
-    use hickory_resolver::TokioResolver;
-    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-
-    let parsed = Url::parse(&conn_url).map_err(|_| WsClientError::UnexpectedResponse)?;
-    let host = parsed.host_str().ok_or(WsClientError::UnexpectedResponse)?;
-    let port = parsed
-        .port_or_known_default()
-        .ok_or(WsClientError::UnexpectedResponse)?;
-
-    // Resolve via Google DNS (8.8.8.8) — system DNS is unreadable in AppContainer.
-    let resolver = TokioResolver::builder_with_config(
-        ResolverConfig::google(),
-        TokioConnectionProvider::default(),
-    )
-    .build();
-
-    let lookup = resolver
-        .lookup_ip(host)
-        .await
-        .map_err(|e| WsClientError::WsError(Box::new(tungstenite::Error::Io(
-            std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
-        ))))?;
-
-    let ip = lookup
-        .into_iter()
-        .next()
-        .ok_or_else(|| WsClientError::WsError(Box::new(tungstenite::Error::Io(
-            std::io::Error::new(std::io::ErrorKind::Other, format!("DNS: no address for {host}")),
-        ))))?;
-
-    // Build TCP connection to the resolved IP.
-    let tcp = TcpStream::connect((ip, port))
-        .await
-        .map_err(|e| WsClientError::WsError(Box::new(tungstenite::Error::Io(e))))?;
-
-    // Build the WS request keeping the original URL (correct Host + SNI).
-    let mut request = conn_url
-        .into_client_request()
-        .map_err(WsClientError::from)?;
-    // Ensure Host header uses the original hostname (not the IP).
-    request.headers_mut().insert(
-        "host",
-        host.parse().map_err(|_| WsClientError::UnexpectedResponse)?,
-    );
-
-    tokio_tungstenite::client_async_tls_with_config(request, tcp, None, None)
-        .await
-        .map_err(WsClientError::from)
 }

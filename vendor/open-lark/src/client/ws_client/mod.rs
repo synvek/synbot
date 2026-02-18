@@ -1,6 +1,8 @@
 mod client;
 mod frame_handler;
 mod state_machine;
+#[cfg(target_os = "windows")]
+mod appcontainer;
 #[cfg(test)]
 mod tests;
 
