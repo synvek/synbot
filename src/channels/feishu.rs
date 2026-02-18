@@ -70,7 +70,7 @@ fn parse_approval_response_keywords(text: &str) -> Option<bool> {
         return None;
     }
     let t_lower = t.to_lowercase();
-    // Reject first so "不同意" is not mistaken for approve
+    // Reject first so "disagree" / reject keywords are not mistaken for approve
     let reject_exact = ["no", "n", "reject", "拒绝", "否", "deny", "不同意"];
     if reject_exact.iter().any(|s| t_lower == *s || t_lower.starts_with(&format!("{} ", s)) || t_lower.ends_with(&format!(" {}", s))) {
         return Some(false);
@@ -83,7 +83,7 @@ fn parse_approval_response_keywords(text: &str) -> Option<bool> {
     if approve_exact.iter().any(|s| t_lower == *s || t_lower.starts_with(&format!("{} ", s)) || t_lower.ends_with(&format!(" {}", s))) {
         return Some(true);
     }
-    // Approve: contain "同意" / "批准" / "好" without "不" (e.g. "我同意", "批准执行")
+    // Approve: contain approve keywords (e.g. agree, approve, ok) without negation
     if (t.contains("同意") || t.contains("批准") || t.contains("好")) && !t.contains("不") {
         return Some(true);
     }
@@ -126,31 +126,31 @@ impl FeishuChannel {
         }
     }
 
-    /// 设置审批管理器
+    /// Set the approval manager.
     pub fn with_approval_manager(mut self, manager: Arc<ApprovalManager>) -> Self {
         self.approval_manager = Some(manager);
         self
     }
 
-    /// 设置审批回复分类器（LLM）。若设置，将用大模型判断用户回复是同意/拒绝，否则用关键词匹配。
+    /// Set the approval reply classifier (LLM). When set, uses the model to classify approve/reject; otherwise uses keyword matching.
     pub fn with_approval_classifier(mut self, model: Arc<dyn SynbotCompletionModel>) -> Self {
         self.approval_classifier = Some(model);
         self
     }
 
-    /// 记录用户的待处理审批请求
+    /// Register a user's pending approval request.
     async fn register_pending_approval(&self, user_id: String, request_id: String, chat_id: String) {
         let mut pending = self.pending_approvals.write().await;
         pending.insert(user_id, (request_id, chat_id));
     }
 
-    /// 获取并移除用户的待处理审批请求
+    /// Get and remove the user's pending approval request.
     async fn take_pending_approval(&self, user_id: &str) -> Option<(String, String)> {
         let mut pending = self.pending_approvals.write().await;
         pending.remove(user_id)
     }
 
-    /// 检查用户是否有待处理的审批请求
+    /// Check whether the user has a pending approval request.
     #[allow(dead_code)]
     async fn has_pending_approval(&self, user_id: &str) -> bool {
         let pending = self.pending_approvals.read().await;
@@ -660,14 +660,14 @@ impl Channel for FeishuChannel {
                         }
                     }
                     crate::bus::OutboundMessageType::ApprovalRequest { request } => {
-                        // 注册待处理的审批请求
-                        // 从 session_id 中提取 user_id (格式: agent:role:channel:type:user_id)
+                        // Register the pending approval request
+                        // Extract user_id from session_id (format: agent:role:channel:type:user_id)
                         let user_id = request.session_id.split(':').last().unwrap_or("").to_string();
                         if !user_id.is_empty() {
                             let mut pending = pending_approvals_clone.write().await;
                             pending.insert(user_id, (request.id.clone(), msg.chat_id.clone()));
                         }
-                        // 优先使用 Agent 按用户语言生成的展示文案
+                        // Prefer Agent-generated display message for the user's language
                         request
                             .display_message
                             .as_deref()

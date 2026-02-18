@@ -13,8 +13,8 @@ use anyhow::{Context, Result};
 
 use crate::config::{AgentDefaults, RoleConfig};
 
-/// 从 `roles_dir/reference/` 读取 AGENTS.md、SOUL.md、TOOLS.md 并拼接成 system prompt。
-/// 找不到的文件或目录则忽略，返回已读到的内容或空字符串。
+/// Read AGENTS.md, SOUL.md, TOOLS.md from `roles_dir/reference/` and concatenate into system prompt.
+/// Missing files or directories are skipped; returns read content or an empty string.
 fn build_system_prompt_from_role_dir(roles_dir: &Path, reference: &str) -> String {
     let role_dir = roles_dir.join(reference);
     if !role_dir.is_dir() {

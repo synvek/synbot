@@ -30,7 +30,7 @@ pub async fn cmd_onboard() -> Result<()> {
     Ok(())
 }
 
-/// 编译时从 crate 根目录的 templates/ 读取模板内容
+/// At compile time, read template content from crate root templates/.
 fn create_workspace_templates(ws: &std::path::Path) -> Result<()> {
     let templates: &[(&str, &str)] = &[
         ("AGENTS.md", include_str!("../../templates/agent/AGENTS.md")),
@@ -49,7 +49,7 @@ fn create_workspace_templates(ws: &std::path::Path) -> Result<()> {
     Ok(())
 }
 
-/// 将 templates/roles 下的 role 模板写入 ~/.synbot/roles（固定路径）
+/// Write role templates from templates/roles to ~/.synbot/roles (fixed path).
 fn create_roles_templates() -> Result<()> {
     let roles_root = config::roles_dir();
     let role_files: &[(&str, &str, &str)] = &[

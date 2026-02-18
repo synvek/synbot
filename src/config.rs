@@ -145,22 +145,22 @@ pub struct ProvidersConfig {
 // Role configs
 // ---------------------------------------------------------------------------
 
-/// 单个角色的配置
+/// Configuration for a single role.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RoleConfig {
     pub name: String,
-    /// 已废弃：请改用 reference，从 templates/roles/{reference} 的 md 文件生成 prompt
+    /// Deprecated: use `reference` instead; system prompt is generated from templates/roles/{reference} md files.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub system_prompt: Option<String>,
-    /// 引用 templates/roles 下的子目录名，用于从 AGENTS.md、SOUL.md、TOOLS.md 生成 system prompt
+    /// Subdirectory name under templates/roles; used to build system prompt from AGENTS.md, SOUL.md, TOOLS.md.
     #[serde(default)]
     pub reference: Option<String>,
     #[serde(default)]
     pub skills: Vec<String>,
     #[serde(default)]
     pub tools: Vec<String>,
-    /// 以下字段可选，未设置时继承 AgentDefaults
+    /// Optional; when unset, values are inherited from AgentDefaults.
     pub provider: Option<String>,
     pub model: Option<String>,
     pub max_tokens: Option<u32>,
@@ -238,20 +238,20 @@ impl Default for AgentDefaults {
 
 use crate::tools::permission::{PermissionLevel, PermissionRule};
 
-/// 权限配置
+/// Permission configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PermissionConfig {
-    /// 是否启用权限控制
+    /// Whether permission control is enabled.
     #[serde(default)]
     pub enabled: bool,
-    /// 默认权限级别（未匹配任何规则时使用）
+    /// Default permission level when no rule matches.
     #[serde(default = "default_permission_level")]
     pub default_level: PermissionLevel,
     /// Approval request timeout (seconds)
     #[serde(default = "default_approval_timeout")]
     pub approval_timeout_secs: u64,
-    /// 权限规则列表（按顺序匹配）
+    /// List of permission rules (matched in order).
     #[serde(default)]
     pub rules: Vec<PermissionRule>,
 }
@@ -606,7 +606,7 @@ pub struct HeartbeatTask {
     pub chat_id: String,
     /// User id of the task creator (for display / reply_to).
     pub user_id: String,
-    /// Task content to execute (e.g. "检查当前目录文件").
+    /// Task content to execute (e.g. "list files in current directory").
     pub target: String,
 }
 
@@ -647,7 +647,7 @@ impl Default for HeartbeatConfig {
 pub struct CronTaskConfig {
     /// Cron expression (e.g. "0 9 * * 1-5").
     pub schedule: String,
-    /// Human-readable description (e.g. "每周一到周五的9:00").
+    /// Human-readable description (e.g. "weekdays at 9:00").
     #[serde(default)]
     pub description: String,
     #[serde(default = "default_true")]
@@ -1378,12 +1378,12 @@ pub fn memory_dir(agent_id: &str) -> PathBuf {
     memory_root().join(id)
 }
 
-/// 固定路径：role 模板目录，onboard 时从 templates/roles 写入此处。
+/// Fixed path: role template directory; onboard writes from templates/roles here.
 pub fn roles_dir() -> PathBuf {
     config_dir().join("roles")
 }
 
-/// 应用可用的 skills 目录：`~/.synbot/skills/`。每个 skill 为子目录且含 SKILL.md。
+/// Application skills directory: `~/.synbot/skills/`. Each skill is a subdirectory containing SKILL.md.
 pub fn skills_dir() -> PathBuf {
     config_dir().join("skills")
 }

@@ -171,7 +171,7 @@ impl ApprovalManager {
         timeout_secs: u64,
         display_message: Option<String>,
     ) -> anyhow::Result<ApprovalOutcome> {
-        // 增加总请求数
+        // Increment total request count
         self.metrics.total_requests.fetch_add(1, Ordering::Relaxed);
         
         let request_start = std::time::Instant::now();
@@ -201,13 +201,13 @@ impl ApprovalManager {
 
         let (tx, mut rx) = mpsc::channel(1);
 
-        // 存储待处理请求
+        // Store pending request
         {
             let mut pending = self.pending.write().await;
             pending.insert(request_id.clone(), (request.clone(), tx));
         }
 
-        // 通过消息总线广播审批请求
+        // Broadcast approval request via message bus
         if let Some(outbound_tx) = &self.outbound_tx {
             let approval_msg = crate::bus::OutboundMessage::approval_request(
                 channel.clone(),
@@ -224,21 +224,21 @@ impl ApprovalManager {
             );
         }
 
-        // 等待响应或超时
+        // Wait for response or timeout
         let timeout = Duration::from_secs(timeout_secs);
         let result = tokio::time::timeout(timeout, rx.recv()).await;
 
-        // 清理待处理请求
+        // Clean up pending request
         {
             let mut pending = self.pending.write().await;
             pending.remove(&request_id);
         }
 
-        // 记录响应时间
+        // Record response time
         let response_time_ms = request_start.elapsed().as_millis() as u64;
         self.metrics.record_response_time(response_time_ms);
 
-        // 记录历史
+        // Record in history
         let status = match result {
             Ok(Some(response)) => {
                 let approved = response.approved;
@@ -253,7 +253,7 @@ impl ApprovalManager {
                     "Approval response received"
                 );
                 
-                // 更新指标
+                // Update metrics
                 if approved {
                     self.metrics.approved_count.fetch_add(1, Ordering::Relaxed);
                 } else {
@@ -339,7 +339,7 @@ mod tests {
     async fn test_approval_request_creation() {
         let manager = ApprovalManager::new();
 
-        // 创建一个审批请求（在后台任务中）
+        // Create an approval request (in a background task)
         let manager_clone = manager.clone_for_test();
         let handle = tokio::spawn(async move {
             manager_clone
@@ -350,25 +350,25 @@ mod tests {
                     "rm -rf /".to_string(),
                     "/home/user".to_string(),
                     "Test context".to_string(),
-                    1, // 1 秒超时
+                    1, // 1 second timeout
                     None,
                 )
                 .await
         });
 
-        // 等待一小段时间确保请求被创建
+        // Wait briefly for the request to be created
         sleep(Duration::from_millis(100)).await;
 
-        // 检查待处理请求
+        // Check pending request
         let pending = manager.pending.read().await;
         assert_eq!(pending.len(), 1);
 
-        // 等待超时
+        // Wait for timeout
         let result = handle.await.unwrap();
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), ApprovalOutcome::Timeout);
 
-        // 检查历史记录
+        // Check history
         let history = manager.get_history().await;
         assert_eq!(history.len(), 1);
         assert!(matches!(history[0].1, ApprovalStatus::Timeout));
@@ -378,7 +378,7 @@ mod tests {
     async fn test_approval_response_approved() {
         let manager = ApprovalManager::new();
 
-        // 创建一个审批请求（在后台任务中）
+        // Create an approval request (in a background task)
         let manager_clone = manager.clone_for_test();
         let handle = tokio::spawn(async move {
             manager_clone
@@ -389,22 +389,22 @@ mod tests {
                     "git push".to_string(),
                     "/home/user".to_string(),
                     "Test context".to_string(),
-                    10, // 10 秒超时
+                    10, // 10 second timeout
                     None,
                 )
                 .await
         });
 
-        // 等待请求被创建
+        // Wait for request to be created
         sleep(Duration::from_millis(100)).await;
 
-        // 获取请求 ID
+        // Get request ID
         let request_id = {
             let pending = manager.pending.read().await;
             pending.keys().next().unwrap().clone()
         };
 
-        // 提交批准响应
+        // Submit approval response
         let response = ApprovalResponse {
             request_id,
             approved: true,
@@ -414,12 +414,12 @@ mod tests {
 
         manager.submit_response(response).await.unwrap();
 
-        // 等待请求完成
+        // Wait for request to complete
         let result = handle.await.unwrap();
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), ApprovalOutcome::Approved);
 
-        // 检查历史记录
+        // Check history
         let history = manager.get_history().await;
         assert_eq!(history.len(), 1);
         assert!(matches!(history[0].1, ApprovalStatus::Approved(_)));
@@ -429,7 +429,7 @@ mod tests {
     async fn test_approval_response_rejected() {
         let manager = ApprovalManager::new();
 
-        // 创建一个审批请求（在后台任务中）
+        // Create an approval request (in a background task)
         let manager_clone = manager.clone_for_test();
         let handle = tokio::spawn(async move {
             manager_clone
@@ -440,22 +440,22 @@ mod tests {
                     "sudo rm -rf /".to_string(),
                     "/home/user".to_string(),
                     "Test context".to_string(),
-                    10, // 10 秒超时
+                    10, // 10 second timeout
                     None,
                 )
                 .await
         });
 
-        // 等待请求被创建
+        // Wait for request to be created
         sleep(Duration::from_millis(100)).await;
 
-        // 获取请求 ID
+        // Get request ID
         let request_id = {
             let pending = manager.pending.read().await;
             pending.keys().next().unwrap().clone()
         };
 
-        // 提交拒绝响应
+        // Submit reject response
         let response = ApprovalResponse {
             request_id,
             approved: false,
@@ -465,12 +465,12 @@ mod tests {
 
         manager.submit_response(response).await.unwrap();
 
-        // 等待请求完成
+        // Wait for request to complete
         let result = handle.await.unwrap();
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), ApprovalOutcome::Rejected);
 
-        // 检查历史记录
+        // Check history
         let history = manager.get_history().await;
         assert_eq!(history.len(), 1);
         assert!(matches!(history[0].1, ApprovalStatus::Rejected(_)));
@@ -480,7 +480,7 @@ mod tests {
     async fn test_timeout_scenario() {
         let manager = ApprovalManager::new();
 
-        // 创建一个审批请求，超时时间很短
+        // Create an approval request with a short timeout
         let result = manager
             .request_approval(
                 "session1".to_string(),
@@ -489,7 +489,7 @@ mod tests {
                 "dangerous command".to_string(),
                 "/home/user".to_string(),
                 "Test timeout".to_string(),
-                1, // 1 秒超时
+                1, // 1 second timeout
                 None,
             )
             .await;
@@ -497,12 +497,12 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), ApprovalOutcome::Timeout);
 
-        // 检查历史记录
+        // Check history
         let history = manager.get_history().await;
         assert_eq!(history.len(), 1);
         assert!(matches!(history[0].1, ApprovalStatus::Timeout));
 
-        // 检查待处理请求已被清理
+        // Check pending request was cleaned up
         let pending = manager.pending.read().await;
         assert_eq!(pending.len(), 0);
     }
@@ -511,7 +511,7 @@ mod tests {
     async fn test_concurrent_approval_requests() {
         let manager = Arc::new(ApprovalManager::new());
 
-        // 创建多个并发审批请求
+        // Create multiple concurrent approval requests
         let mut handles = vec![];
 
         for i in 0..5 {
@@ -525,7 +525,7 @@ mod tests {
                         format!("command{}", i),
                         "/home/user".to_string(),
                         format!("Context {}", i),
-                        1, // 1 秒超时
+                        1, // 1 second timeout
                         None,
                     )
                     .await
@@ -533,17 +533,17 @@ mod tests {
             handles.push(handle);
         }
 
-        // 等待所有请求完成
+        // Wait for all requests to complete
         for handle in handles {
             let result = handle.await.unwrap();
             assert!(result.is_ok());
         }
 
-        // 检查历史记录
+        // Check history
         let history = manager.get_history().await;
         assert_eq!(history.len(), 5);
 
-        // 检查所有待处理请求已被清理
+        // Check all pending requests were cleaned up
         let pending = manager.pending.read().await;
         assert_eq!(pending.len(), 0);
     }
@@ -552,7 +552,7 @@ mod tests {
     async fn test_get_pending_request() {
         let manager = ApprovalManager::new();
 
-        // 创建一个审批请求（在后台任务中）
+        // Create an approval request (in a background task)
         let manager_clone = manager.clone_for_test();
         let handle = tokio::spawn(async move {
             manager_clone
@@ -563,22 +563,22 @@ mod tests {
                     "test command".to_string(),
                     "/home/user".to_string(),
                     "Test context".to_string(),
-                    10, // 10 秒超时
+                    10, // 10 second timeout
                     None,
                 )
                 .await
         });
 
-        // 等待请求被创建
+        // Wait for request to be created
         sleep(Duration::from_millis(100)).await;
 
-        // 获取请求 ID
+        // Get request ID
         let request_id = {
             let pending = manager.pending.read().await;
             pending.keys().next().unwrap().clone()
         };
 
-        // 获取待处理请求
+        // Get pending request
         let request = manager.get_pending_request(&request_id).await;
         assert!(request.is_some());
 
@@ -587,7 +587,7 @@ mod tests {
         assert_eq!(request.command, "test command");
         assert_eq!(request.session_id, "session1");
 
-        // 提交响应以完成请求
+        // Submit response to complete the request
         let response = ApprovalResponse {
             request_id,
             approved: true,
@@ -596,11 +596,11 @@ mod tests {
         };
         manager.submit_response(response).await.unwrap();
 
-        // 等待请求完成
+        // Wait for request to complete
         handle.await.unwrap().unwrap();
     }
 
-    // 测试辅助方法
+    // Test helper
     impl ApprovalManager {
         pub(crate) fn clone_for_test(&self) -> Self {
             Self {
@@ -617,13 +617,13 @@ mod tests {
     async fn test_approval_request_broadcast() {
         use tokio::sync::broadcast;
 
-        // 创建消息总线
+        // Create message bus
         let (outbound_tx, mut outbound_rx) = broadcast::channel(10);
 
-        // 创建带消息总线的审批管理器
+        // Create approval manager with message bus
         let manager = ApprovalManager::with_outbound(outbound_tx);
 
-        // 在后台任务中创建审批请求
+        // Create approval request in background task
         let manager_clone = manager.clone_for_test();
         let handle = tokio::spawn(async move {
             manager_clone
@@ -634,19 +634,19 @@ mod tests {
                     "test command".to_string(),
                     "/home/user".to_string(),
                     "Test broadcast".to_string(),
-                    10, // 10 秒超时
+                    10, // 10 second timeout
                     None,
                 )
                 .await
         });
 
-        // 等待并接收广播的审批请求消息
+        // Wait for and receive the broadcast approval request message
         let msg = tokio::time::timeout(Duration::from_secs(1), outbound_rx.recv())
             .await
             .expect("Should receive message within timeout")
             .expect("Should receive message");
 
-        // 验证消息内容
+        // Verify message content
         assert_eq!(msg.channel, "web");
         assert_eq!(msg.chat_id, "chat1");
 
@@ -658,7 +658,7 @@ mod tests {
                 assert_eq!(request.context, "Test broadcast");
                 assert_eq!(request.timeout_secs, 10);
 
-                // 提交批准响应以完成测试
+                // Submit approval response to complete the test
                 let response = ApprovalResponse {
                     request_id: request.id,
                     approved: true,
@@ -670,7 +670,7 @@ mod tests {
             _ => panic!("Expected ApprovalRequest message type"),
         }
 
-        // 等待请求完成
+        // Wait for request to complete
         let result = handle.await.unwrap();
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), ApprovalOutcome::Approved);
@@ -678,10 +678,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_approval_request_without_broadcast() {
-        // 创建不带消息总线的审批管理器
+        // Create approval manager without message bus
         let manager = ApprovalManager::new();
 
-        // 在后台任务中创建审批请求
+        // Create approval request in background task
         let manager_clone = manager.clone_for_test();
         let handle = tokio::spawn(async move {
             manager_clone
@@ -692,13 +692,13 @@ mod tests {
                     "test command".to_string(),
                     "/home/user".to_string(),
                     "Test without broadcast".to_string(),
-                    1, // 1 秒超时
+                    1, // 1 second timeout
                     None,
                 )
                 .await
         });
 
-        // 等待超时
+        // Wait for timeout
         let result = handle.await.unwrap();
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), ApprovalOutcome::Timeout);
@@ -706,10 +706,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_history_ring_buffer() {
-        // 创建容量为 3 的审批管理器
+        // Create approval manager with capacity 3
         let manager = ApprovalManager::with_capacity(3);
 
-        // 创建 5 个审批请求（超过容量）
+        // Create 5 approval requests (exceeds capacity)
         for i in 0..5 {
             let manager_clone = manager.clone_for_test();
             let result = manager_clone
@@ -720,18 +720,18 @@ mod tests {
                     format!("command{}", i),
                     "/home/user".to_string(),
                     format!("Context {}", i),
-                    1, // 1 秒超时
+                    1, // 1 second timeout
                     None,
                 )
                 .await;
             assert!(result.is_ok());
         }
 
-        // 检查历史记录只保留最新的 3 条
+        // Check that history keeps only the latest 3 entries
         let history = manager.get_history().await;
         assert_eq!(history.len(), 3);
 
-        // 验证保留的是最新的 3 条（command2, command3, command4）
+        // Verify the kept entries are the latest 3 (command2, command3, command4)
         assert_eq!(history[0].0.command, "command2");
         assert_eq!(history[1].0.command, "command3");
         assert_eq!(history[2].0.command, "command4");
@@ -739,15 +739,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_history_stats() {
-        // 创建容量为 5 的审批管理器
+        // Create approval manager with capacity 5
         let manager = ApprovalManager::with_capacity(5);
 
-        // 初始状态
+        // Initial state
         let (size, capacity) = manager.history_stats().await;
         assert_eq!(size, 0);
         assert_eq!(capacity, 5);
 
-        // 添加 3 个请求
+        // Add 3 requests
         for i in 0..3 {
             let manager_clone = manager.clone_for_test();
             manager_clone
@@ -765,12 +765,12 @@ mod tests {
                 .unwrap();
         }
 
-        // 检查统计信息
+        // Check stats
         let (size, capacity) = manager.history_stats().await;
         assert_eq!(size, 3);
         assert_eq!(capacity, 5);
 
-        // 添加更多请求超过容量
+        // Add more requests to exceed capacity
         for i in 3..8 {
             let manager_clone = manager.clone_for_test();
             manager_clone
@@ -788,7 +788,7 @@ mod tests {
                 .unwrap();
         }
 
-        // 检查统计信息 - 应该保持在容量限制
+        // Check stats - should stay at capacity limit
         let (size, capacity) = manager.history_stats().await;
         assert_eq!(size, 5);
         assert_eq!(capacity, 5);
@@ -799,7 +799,7 @@ mod tests {
     async fn test_approval_metrics() {
         let manager = ApprovalManager::new();
 
-        // 创建一个批准的请求
+        // Create an approved request
         let manager_clone = manager.clone_for_test();
         let handle1: tokio::task::JoinHandle<anyhow::Result<ApprovalOutcome>> = tokio::spawn(async move {
             manager_clone
@@ -818,7 +818,7 @@ mod tests {
 
         sleep(Duration::from_millis(100)).await;
 
-        // 批准请求
+        // Approve the request
         let request_id = {
             let pending = manager.pending.read().await;
             pending.keys().next().unwrap().clone()
@@ -833,7 +833,7 @@ mod tests {
         manager.submit_response(response).await.unwrap();
         assert_eq!(handle1.await.unwrap().unwrap(), ApprovalOutcome::Approved);
 
-        // 创建一个拒绝的请求
+        // Create a rejected request
         let manager_clone = manager.clone_for_test();
         let handle2: tokio::task::JoinHandle<anyhow::Result<bool>> = tokio::spawn(async move {
             manager_clone
@@ -866,7 +866,7 @@ mod tests {
         manager.submit_response(response).await.unwrap();
         assert_eq!(handle2.await.unwrap().unwrap(), ApprovalOutcome::Rejected);
 
-        // 创建一个超时的请求
+        // Create a timeout request
         manager
             .request_approval(
                 "session3".to_string(),
@@ -881,17 +881,17 @@ mod tests {
             .await
             .unwrap();
 
-        // 验证指标
+        // Verify metrics
         let metrics = manager.metrics();
         assert_eq!(metrics.total_requests.load(Ordering::Relaxed), 3);
         assert_eq!(metrics.approved_count.load(Ordering::Relaxed), 1);
         assert_eq!(metrics.rejected_count.load(Ordering::Relaxed), 1);
         assert_eq!(metrics.timeout_count.load(Ordering::Relaxed), 1);
         
-        // 验证批准率
+        // Verify approval rate
         assert!((metrics.approval_rate() - 0.333).abs() < 0.01);
         
-        // 验证平均响应时间
+        // Verify average response time
         assert!(metrics.avg_response_time_ms() > 0.0);
     }
 
@@ -899,7 +899,7 @@ mod tests {
     async fn test_metrics_reset() {
         let manager = ApprovalManager::new();
 
-        // 创建一个超时请求
+        // Create a timeout request
         manager
             .request_approval(
                 "session1".to_string(),
@@ -917,7 +917,7 @@ mod tests {
         let metrics = manager.metrics();
         assert_eq!(metrics.total_requests.load(Ordering::Relaxed), 1);
 
-        // 重置指标
+        // Reset metrics
         manager.reset_metrics();
         assert_eq!(metrics.total_requests.load(Ordering::Relaxed), 0);
         assert_eq!(metrics.timeout_count.load(Ordering::Relaxed), 0);

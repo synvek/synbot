@@ -185,14 +185,14 @@ mod tests {
             None,
         );
 
-        // 序列化
+        // Serialize
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains("\"type\":\"chat\""));
         assert!(json.contains("\"content\":\"Hello, world!\""));
         assert!(json.contains("\"channel\":\"web\""));
         assert!(json.contains("\"chat_id\":\"chat123\""));
 
-        // 反序列化
+        // Deserialize
         let deserialized: OutboundMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.channel, "web");
         assert_eq!(deserialized.chat_id, "chat123");
@@ -215,7 +215,7 @@ mod tests {
             Some("msg123".to_string()),
         );
 
-        // 序列化
+        // Serialize
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains("\"type\":\"chat\""));
         assert!(json.contains("\"content\":\"Check this out!\""));
@@ -224,7 +224,7 @@ mod tests {
         assert!(json.contains("image2.jpg"));
         assert!(json.contains("\"reply_to\":\"msg123\""));
 
-        // 反序列化
+        // Deserialize
         let deserialized: OutboundMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.channel, "telegram");
         assert_eq!(deserialized.reply_to, Some("msg123".to_string()));
@@ -261,7 +261,7 @@ mod tests {
             None,
         );
 
-        // 序列化
+        // Serialize
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains("\"type\":\"approval_request\""));
         assert!(json.contains("\"request\""));
@@ -269,7 +269,7 @@ mod tests {
         assert!(json.contains("\"command\":\"rm -rf /tmp/test\""));
         assert!(json.contains("\"session_id\":\"session456\""));
 
-        // 反序列化
+        // Deserialize
         let deserialized: OutboundMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.channel, "web");
         assert_eq!(deserialized.chat_id, "chat789");
@@ -304,13 +304,13 @@ mod tests {
             request: request.clone(),
         };
 
-        // 序列化
+        // Serialize
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains("\"request\""));
         assert!(json.contains("\"id\":\"req456\""));
         assert!(json.contains("\"command\":\"git push origin main\""));
 
-        // 反序列化
+        // Deserialize
         let deserialized: ApprovalRequestMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.request.id, "req456");
         assert_eq!(deserialized.request.command, "git push origin main");
@@ -330,14 +330,14 @@ mod tests {
             response: response.clone(),
         };
 
-        // 序列化
+        // Serialize
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains("\"response\""));
         assert!(json.contains("\"request_id\":\"req789\""));
         assert!(json.contains("\"approved\":true"));
         assert!(json.contains("\"responder\":\"user123\""));
 
-        // 反序列化
+        // Deserialize
         let deserialized: ApprovalResponseMessage = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.response.request_id, "req789");
         assert!(deserialized.response.approved);
@@ -355,18 +355,18 @@ mod tests {
 
         let msg = ApprovalResponseMessage { response };
 
-        // 序列化
+        // Serialize
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains("\"approved\":false"));
 
-        // 反序列化
+        // Deserialize
         let deserialized: ApprovalResponseMessage = serde_json::from_str(&json).unwrap();
         assert!(!deserialized.response.approved);
     }
 
     #[test]
     fn test_outbound_message_type_enum_serialization() {
-        // 测试 Chat 类型
+        // Test Chat type
         let chat_type = OutboundMessageType::Chat {
             content: "Test".to_string(),
             media: vec![],
@@ -375,7 +375,7 @@ mod tests {
         assert!(json.contains("\"type\":\"chat\""));
         assert!(json.contains("\"content\":\"Test\""));
 
-        // 测试 ApprovalRequest 类型
+        // Test ApprovalRequest type
         let request = ApprovalRequest {
             id: "test".to_string(),
             session_id: "session".to_string(),

@@ -25,7 +25,7 @@ impl DirectiveParser {
     /// - Text before the first `@@` goes to Commander (`target: None`).
     /// - Role names must match `[a-zA-Z0-9_]+`.
     ///
-    /// In group chats the channel strips the bot mention (e.g. `@机器人`) and 0+ spaces
+    /// In group chats the channel strips the bot mention (e.g. `@bot`) and 0+ spaces
     /// before passing content here; the remainder may start with `@@dev` or another
     /// `@@role`, and is parsed as above (no special handling needed).
     pub fn parse(input: &str) -> Vec<Directive> {
@@ -234,7 +234,7 @@ mod tests {
         assert!(result[0].content.contains("@@"));
     }
 
-    /// Group: after stripping "@机器人" and 0+ spaces, content may be "@@dev ..." or "  @@dev ...".
+    /// Group: after stripping the bot mention and 0+ spaces, content may be "@@dev ..." or "  @@dev ...".
     #[test]
     fn leading_spaces_before_at_at_role_parsed_as_role() {
         let result = DirectiveParser::parse("  @@dev list files");
@@ -245,7 +245,7 @@ mod tests {
 
     #[test]
     fn at_at_dev_immediately_after_bot_mention_still_parsed() {
-        // Simulates content after stripping "@机器人" (no spaces between @bot and @@dev)
+        // Simulates content after stripping bot mention (no spaces between @bot and @@dev)
         let result = DirectiveParser::parse("@@dev run tests");
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].target, Some("dev".to_string()));

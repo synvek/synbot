@@ -221,7 +221,7 @@ pub type ExecSandboxContext = Option<(Arc<crate::sandbox::SandboxManager>, Strin
 pub struct ExecTool {
     pub workspace: PathBuf,
     pub timeout_secs: u64,
-    /// 审批超时秒数（仅当需要审批时使用）
+    /// Approval timeout in seconds (used only when approval is required).
     pub approval_timeout_secs: u64,
     pub restrict_to_workspace: bool,
     pub policy: CommandPolicy,

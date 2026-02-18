@@ -1,25 +1,27 @@
 //! DNS resolver for Windows AppContainer.
 //!
-//! AppContainer 内系统 DNS 配置不可读（`GetAdaptersAddresses` 返回空 nameserver 列表），
-//! 导致 hickory-dns 报 "no connections available"。
+//! System DNS configuration is unreadable inside AppContainer (`GetAdaptersAddresses` returns
+//! an empty nameserver list), causing hickory-dns to report "no connections available".
 //!
-//! 本模块提供：
-//! - `GoogleDnsResolver`：实现 reqwest 的 `Resolve` trait，直接使用 Google DNS (8.8.8.8)。
-//! - `global_resolver()`：全局单例 `TokioResolver`，供 WebSocket 等非 reqwest 路径使用。
-//! - `build_reqwest_client()`：在 AppContainer 中返回注入了 `GoogleDnsResolver` 的
-//!   `reqwest::Client`，否则返回默认 client。调用方无需关心是否在 AppContainer 中。
+//! This module provides:
+//! - `GoogleDnsResolver`: implements reqwest's `Resolve` trait using Google DNS (8.8.8.8) directly.
+//! - `global_resolver()`: global singleton `TokioResolver` for non-reqwest paths (e.g. WebSocket).
+//! - `build_reqwest_client()`: inside AppContainer returns a `reqwest::Client` with
+//!   `GoogleDnsResolver` injected; otherwise returns the default client. Callers need not
+//!   care whether they are running inside AppContainer.
 //!
-//! 使用方式：
+//! Usage:
 //! ```rust
-//! // HTTP（reqwest）
+//! // HTTP (reqwest)
 //! let client = appcontainer_dns::build_reqwest_client();
 //!
-//! // WebSocket（tokio-tungstenite）
+//! // WebSocket (tokio-tungstenite)
 //! let ip = appcontainer_dns::resolve_host("open.feishu.cn").await?;
 //! ```
 //!
-//! 对于无法注入 reqwest client 的第三方库（如 rig-core），DNS 问题需通过其他途径解决
-//! （例如 vendor 该库并注入 client，或等待上游支持）。
+//! For third-party crates that cannot accept an injected reqwest client (e.g. rig-core),
+//! DNS issues must be addressed by other means (e.g. vendoring the crate and injecting
+//! a client, or waiting for upstream support).
 
 #![cfg(target_os = "windows")]
 
@@ -31,13 +33,13 @@ use hickory_resolver::name_server::TokioConnectionProvider;
 use hickory_resolver::TokioResolver;
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 
-// ── 全局 resolver 单例 ────────────────────────────────────────────────────────
+// ── Global resolver singleton ───────────────────────────────────────────────────
 
 static GLOBAL_RESOLVER: OnceLock<TokioResolver> = OnceLock::new();
 
-/// 获取全局 Google DNS resolver 单例（8.8.8.8）。
+/// Returns the global Google DNS resolver singleton (8.8.8.8).
 ///
-/// 首次调用时初始化，后续调用直接返回已有实例。
+/// Initialized on first call; subsequent calls return the same instance.
 pub fn global_resolver() -> &'static TokioResolver {
     GLOBAL_RESOLVER.get_or_init(|| {
         TokioResolver::builder_with_config(
@@ -48,7 +50,7 @@ pub fn global_resolver() -> &'static TokioResolver {
     })
 }
 
-/// 解析主机名，返回第一个 IP 地址。供 WebSocket 等非 reqwest 路径使用。
+/// Resolves a hostname and returns the first IP address. For non-reqwest paths (e.g. WebSocket).
 pub async fn resolve_host(host: &str) -> Result<IpAddr, String> {
     let lookup = global_resolver()
         .lookup_ip(host)
@@ -62,10 +64,10 @@ pub async fn resolve_host(host: &str) -> Result<IpAddr, String> {
 
 // ── reqwest DNS resolver ──────────────────────────────────────────────────────
 
-/// reqwest `Resolve` 实现，使用全局 Google DNS resolver。
+/// reqwest `Resolve` implementation using the global Google DNS resolver.
 ///
-/// 通过 `reqwest::ClientBuilder::dns_resolver(Arc::new(GoogleDnsResolver))` 注入，
-/// 使该 client 的所有请求都走 Google DNS，绕过 AppContainer 内不可用的系统 DNS。
+/// Injected via `reqwest::ClientBuilder::dns_resolver(Arc::new(GoogleDnsResolver))` so that
+/// all requests from that client use Google DNS, bypassing the unavailable system DNS in AppContainer.
 #[derive(Clone)]
 pub struct GoogleDnsResolver;
 
@@ -87,13 +89,13 @@ impl Resolve for GoogleDnsResolver {
 
 // ── reqwest client builder ────────────────────────────────────────────────────
 
-/// 构建 `reqwest::Client`。
+/// Builds a `reqwest::Client`.
 ///
-/// - 在 AppContainer 中（`SYNBOT_IN_APP_SANDBOX` 已设置）：注入 `GoogleDnsResolver`，
-///   使所有 HTTP 请求走 Google DNS (8.8.8.8)。
-/// - 其他环境：返回默认 client。
+/// - Inside AppContainer (when `SYNBOT_IN_APP_SANDBOX` is set): injects `GoogleDnsResolver`
+///   so all HTTP requests use Google DNS (8.8.8.8).
+/// - Otherwise: returns the default client.
 ///
-/// 调用方无需条件编译，直接使用此函数即可。
+/// Callers can use this function directly without conditional compilation.
 pub fn build_reqwest_client() -> reqwest::Client {
     if std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some() {
         reqwest::Client::builder()
@@ -105,7 +107,7 @@ pub fn build_reqwest_client() -> reqwest::Client {
     }
 }
 
-/// 构建带超时的 `reqwest::Client`（AppContainer 中同样注入 Google DNS）。
+/// Builds a `reqwest::Client` with a timeout (Google DNS is also injected in AppContainer).
 pub fn build_reqwest_client_with_timeout(timeout: std::time::Duration) -> reqwest::Client {
     if std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some() {
         reqwest::Client::builder()

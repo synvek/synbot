@@ -110,7 +110,7 @@ pub fn init_logging(cfg: &Config, buffer_tx: LogBufferTx) -> Result<()> {
             EnvFilter::new(filter_str)
         });
     
-    // File name: synbot.yyyy-MM-dd.log 或 synbot.yyyy-MM-dd.json（日期在中间，后缀在最后）
+    // File name: synbot.yyyy-MM-dd.log or synbot.yyyy-MM-dd.json (date in the middle, suffix at the end)
     let log_file_suffix = match cfg.log.format.to_lowercase().as_str() {
         "json" => "json",
         _ => "log", // text, compact, pretty

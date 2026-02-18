@@ -29,7 +29,7 @@ pub struct TelegramChannel {
     client: reqwest::Client,
     running: bool,
     approval_manager: Option<Arc<ApprovalManager>>,
-    /// 用户待处理审批请求映射：user_id -> (request_id, chat_id)
+    /// Map of user's pending approval requests: user_id -> (request_id, chat_id)
     pending_approvals: Arc<RwLock<HashMap<String, (String, String)>>>,
 }
 
@@ -97,25 +97,25 @@ impl TelegramChannel {
         }
     }
 
-    /// 设置审批管理器
+    /// Set the approval manager.
     pub fn with_approval_manager(mut self, manager: Arc<ApprovalManager>) -> Self {
         self.approval_manager = Some(manager);
         self
     }
 
-    /// 记录用户的待处理审批请求
+    /// Register a user's pending approval request.
     async fn register_pending_approval(&self, user_id: String, request_id: String, chat_id: String) {
         let mut pending = self.pending_approvals.write().await;
         pending.insert(user_id, (request_id, chat_id));
     }
 
-    /// 获取并移除用户的待处理审批请求
+    /// Get and remove the user's pending approval request.
     async fn take_pending_approval(&self, user_id: &str) -> Option<(String, String)> {
         let mut pending = self.pending_approvals.write().await;
         pending.remove(user_id)
     }
 
-    /// 检查用户是否有待处理的审批请求
+    /// Check whether the user has a pending approval request.
     async fn has_pending_approval(&self, user_id: &str) -> bool {
         let pending = self.pending_approvals.read().await;
         pending.contains_key(user_id)
@@ -285,14 +285,14 @@ impl Channel for TelegramChannel {
                             }
                         }
                         crate::bus::OutboundMessageType::ApprovalRequest { request } => {
-                            // 注册待处理的审批请求
-                            // 从 session_id 中提取 user_id (格式: agent:role:channel:type:user_id)
+                            // Register the pending approval request
+                            // Extract user_id from session_id (format: agent:role:channel:type:user_id)
                             let user_id = request.session_id.split(':').last().unwrap_or("").to_string();
                             if !user_id.is_empty() {
                                 let mut pending = pending_approvals.write().await;
                                 pending.insert(user_id, (request.id.clone(), msg.chat_id.clone()));
                             }
-                            // 优先使用 Agent 按用户语言生成的展示文案
+                            // Prefer Agent-generated display message for the user's language
                             request
                                 .display_message
                                 .as_deref()
