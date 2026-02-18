@@ -126,6 +126,9 @@ futures-util = "0.3"
 name = "sandbox_benchmarks"
 harness = false
 
+[patch.crates-io]
+open-lark = { path = "vendor/open-lark" }
+
 # Examples
 [[example]]
 name = "basic_sandbox"

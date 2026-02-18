@@ -1,0 +1,101 @@
+name: Coverage
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_TOOLCHAIN: stable
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
+  MIN_COVERAGE: "54.0"
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.CARGO_TOOLCHAIN }}
+          components: llvm-tools-preview
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Show cargo-llvm-cov version
+        run: cargo llvm-cov --version
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          version: 23.4
+          include-pre-releases: false
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run coverage tests
+        run: |
+          set -euo pipefail
+          cargo llvm-cov clean --workspace
+          mkdir -p target/llvm-cov
+          cargo llvm-cov --workspace --all-features --lib \
+            --lcov --output-path target/llvm-cov/lcov.info
+          cargo llvm-cov --workspace --all-features --lib \
+            --html --output-dir target/llvm-cov/html
+
+      - name: Collect coverage summary
+        id: coverage
+        run: |
+          set -euo pipefail
+          echo "## Coverage Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          summary=$(cargo llvm-cov report --summary-only)
+          echo "$summary" >> $GITHUB_STEP_SUMMARY
+
+          cov=$(echo "$summary" | awk '/TOTAL/ {for (i=1;i<=NF;i++) if ($i ~ /%$/) { gsub(/%/, "", $i); print $i; exit }}')
+
+          if [ -z "$cov" ]; then
+            echo "Failed to parse coverage result" >&2
+            exit 1
+          fi
+
+          printf 'Coverage: %s%%\n' "$cov"
+          echo "value=$cov" >> $GITHUB_OUTPUT
+
+      - name: Upload coverage to Codecov (optional)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: codecov/codecov-action@v4
+        with:
+          file: target/llvm-cov/lcov.info
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+
+      - name: Upload HTML coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: target/llvm-cov/html/
+          retention-days: 30
+
+      - name: Enforce coverage threshold on main
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          cov=${{ steps.coverage.outputs.value }}
+          awk -v cov="$cov" -v min="$MIN_COVERAGE" 'BEGIN { if (cov+0 < min+0) { printf("Coverage %.2f%% < threshold %.2f%%\n", cov, min); exit 1 } else { printf("Coverage %.2f%% >= threshold %.2f%%\n", cov, min); } }'
+
+      - name: Report coverage threshold (PR)
+        if: github.event_name == 'pull_request'
+        run: |
+          cov=${{ steps.coverage.outputs.value }}
+          printf 'Pull request coverage: %s%% (threshold %s%%, informational only)\n' "$cov" "$MIN_COVERAGE"

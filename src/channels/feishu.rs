@@ -163,10 +163,23 @@ impl FeishuChannel {
 
     /// Build a LarkClient for API calls (bot info, send messages).
     fn build_lark_client(&self) -> LarkClient {
-        LarkClient::builder(&self.config.app_id, &self.config.app_secret)
+        let builder = LarkClient::builder(&self.config.app_id, &self.config.app_secret)
             .with_app_type(AppType::SelfBuild)
-            .with_enable_token_cache(true)
-            .build()
+            .with_enable_token_cache(true);
+
+        #[cfg(target_os = "windows")]
+        if std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some() {
+            if let Ok(client) = reqwest::Client::builder()
+                .dns_resolver(std::sync::Arc::new(
+                    crate::appcontainer_dns::GoogleDnsResolver::new(),
+                ))
+                .build()
+            {
+                return builder.with_http_client(client).build();
+            }
+        }
+
+        builder.build()
     }
 
     /// Send a text message to a chat via the IM v1 API.
@@ -362,10 +375,27 @@ impl FeishuChannel {
                                     let app_id_clone = app_id.clone();
                                     let app_secret_clone = app_secret.clone();
                                     tokio::task::spawn_local(async move {
-                                        let client = LarkClient::builder(&app_id_clone, &app_secret_clone)
-                                            .with_app_type(AppType::SelfBuild)
-                                            .with_enable_token_cache(true)
-                                            .build();
+                                        let client = {
+                                            let builder = LarkClient::builder(&app_id_clone, &app_secret_clone)
+                                                .with_app_type(AppType::SelfBuild)
+                                                .with_enable_token_cache(true);
+                                            #[cfg(target_os = "windows")]
+                                            let builder = if std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some() {
+                                                if let Ok(c) = reqwest::Client::builder()
+                                                    .dns_resolver(std::sync::Arc::new(
+                                                        crate::appcontainer_dns::GoogleDnsResolver::new(),
+                                                    ))
+                                                    .build()
+                                                {
+                                                    builder.with_http_client(c)
+                                                } else {
+                                                    builder
+                                                }
+                                            } else {
+                                                builder
+                                            };
+                                            builder.build()
+                                        };
                                         let _ = Self::send_text_static(&client, &chat_id, "未配置聊天许可，请配置。").await;
                                         let inbound = InboundMessage {
                                             channel: channel_name_clone,
@@ -536,6 +566,16 @@ impl FeishuChannel {
                         .app_id(&app_id_for_config)
                         .app_secret(&app_secret_for_config)
                         .req_timeout(std::time::Duration::from_secs(30))
+                        .http_client({
+                            let mut cb = reqwest::Client::builder();
+                            #[cfg(target_os = "windows")]
+                            if std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some() {
+                                cb = cb.dns_resolver(std::sync::Arc::new(
+                                    crate::appcontainer_dns::GoogleDnsResolver::new(),
+                                ));
+                            }
+                            cb.build().unwrap_or_default()
+                        })
                         .build(),
                 );
 

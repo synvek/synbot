@@ -2188,14 +2188,13 @@ checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 [[package]]
 name = "open-lark"
 version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89a179a0581d657f938596a415431c9ac101d3949267a1b9bb66a7523b47f9fd"
 dependencies = [
  "anyhow",
  "async-trait",
  "base64",
  "chrono",
  "futures-util",
+ "hickory-resolver",
  "hmac",
  "lark-websocket-protobuf",
  "log",
