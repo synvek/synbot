@@ -14,6 +14,8 @@ mod sandbox;
 
 mod url_utils;
 
+#[cfg(target_os = "windows")]
+mod appcontainer_dns;
 
 #[tokio::main]
 async fn main() -> Result<()> {

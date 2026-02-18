@@ -442,6 +442,7 @@ mod wsl2_sandbox_tests {
                 allow_fork: false,
                 max_processes: 10,
             },
+            child_work_dir: None,
             monitoring: MonitoringConfig::default(),
         }
     }

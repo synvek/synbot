@@ -15,6 +15,9 @@ pub struct SandboxConfig {
     pub resources: ResourceConfig,
     pub process: ProcessConfig,
     pub monitoring: MonitoringConfig,
+    /// Optional working directory for the child process (app sandbox only). When set, used as cwd so config_dir() resolves correctly.
+    #[serde(default)]
+    pub child_work_dir: Option<String>,
 }
 
 /// Filesystem configuration

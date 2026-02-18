@@ -779,6 +779,10 @@ pub struct AppSandboxConfig {
     pub resources: Option<SandboxResourceConfig>,
     #[serde(default)]
     pub process: Option<SandboxProcessConfig>,
+    /// Working directory for the child process in app sandbox. Defaults to `"~"` (home).
+    /// config_dir() uses home.join(".synbot") or, if home fails, ".".join(".synbot"); so cwd must be home, not ~/.synbot.
+    #[serde(default)]
+    pub work_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -945,6 +949,9 @@ pub fn build_app_sandbox_config(
         .transpose()?
         .unwrap_or(10 * 1024 * 1024 * 1024);
     let process = cfg.process.as_ref();
+    // Default workDir to "~" so child cwd is home and config_dir() resolves to ~/.synbot (see comment in sandbox spawn).
+    let work_dir_raw = cfg.work_dir.as_deref().unwrap_or("~");
+    let child_work_dir = expand_sandbox_paths(&[work_dir_raw.to_string()]).into_iter().next();
     Ok(crate::sandbox::types::SandboxConfig {
         sandbox_id: "synbot-app".to_string(),
         platform,
@@ -967,6 +974,7 @@ pub fn build_app_sandbox_config(
             allow_fork: process.and_then(|p| p.allow_fork).unwrap_or(false),
             max_processes: process.and_then(|p| p.max_processes).unwrap_or(10),
         },
+        child_work_dir,
         monitoring: build_sandbox_monitoring(monitoring),
     })
 }
@@ -1022,6 +1030,7 @@ pub fn build_tool_sandbox_config(
             allow_fork: process.and_then(|p| p.allow_fork).unwrap_or(false),
             max_processes: process.and_then(|p| p.max_processes).unwrap_or(5),
         },
+        child_work_dir: None,
         monitoring: build_sandbox_monitoring(monitoring),
     })
 }

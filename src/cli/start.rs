@@ -1,6 +1,7 @@
 //! Start command - Start the full daemon (channels + heartbeat + cron).
 
 use anyhow::Result;
+use std::io::Write;
 use tracing::{info, warn};
 use crate::config;
 use crate::logging;
@@ -8,6 +9,16 @@ use crate::channels::Channel;
 use super::helpers::{resolve_provider, detect_rig_provider, build_default_tools};
 
 pub async fn cmd_start() -> Result<()> {
+    // Immediate stderr so sandbox parent sees child has started (before any logging init)
+    let _ = writeln!(std::io::stderr(), "[synbot] daemon starting...");
+    let _ = std::io::stderr().flush();
+
+    // When running inside Windows AppContainer (child of `synbot sandbox`), log token diagnostic for WFP troubleshooting.
+    #[cfg(target_os = "windows")]
+    if std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some() {
+        crate::sandbox::windows_appcontainer::log_process_token_appcontainer_diagnostic();
+    }
+
     let cfg = config::load_config(None)?;
     let shared_config = std::sync::Arc::new(tokio::sync::RwLock::new(cfg.clone()));
 
@@ -24,7 +35,45 @@ pub async fn cmd_start() -> Result<()> {
     
     // Initialize logging with config (and feed events to log buffer for web UI)
     logging::init_logging(&cfg, Some(std::sync::Arc::new(log_tx)))?;
-    
+
+    // When running inside Windows AppContainer: one-shot outbound HTTPS diagnostic to capture
+    // underlying error. Use explicit DNS nameserver (8.8.8.8) so we don't rely on system config
+    // (which is unreadable in AppContainer → "no connections available").
+    #[cfg(target_os = "windows")]
+    if std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some() {
+        let client_builder = {
+            use std::sync::Arc;
+            let resolver = crate::appcontainer_dns::GoogleDnsResolver::new();
+            reqwest::Client::builder().dns_resolver(Arc::new(resolver))
+        };
+        if let Ok(client) = client_builder.build() {
+            let result = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                client.get("https://www.microsoft.com").send(),
+            )
+            .await;
+            match result {
+                Ok(Ok(resp)) => {
+                    info!("AppContainer network diagnostic: GET https://www.microsoft.com -> {}", resp.status());
+                }
+                Ok(Err(e)) => {
+                    let ae = anyhow::Error::from(e);
+                    if let Some(io) = ae.downcast_ref::<std::io::Error>() {
+                        warn!(
+                            "AppContainer network diagnostic: request failed io_error kind={:?} raw_os_error={:?} (see docs/getting-started/appcontainer-network-troubleshooting.md)",
+                            io.kind(),
+                            io.raw_os_error()
+                        );
+                    }
+                    warn!("AppContainer network diagnostic: request failed: {:#}", ae);
+                }
+                Err(_) => {
+                    warn!("AppContainer network diagnostic: request timed out after 5s");
+                }
+            }
+        }
+    }
+
     let ws = config::workspace_path(&cfg);
 
     let (api_key, api_base) = resolve_provider(&cfg);
@@ -246,10 +295,12 @@ pub async fn cmd_start() -> Result<()> {
 /// If app_sandbox or tool_sandbox is configured, create SandboxManager, create/start sandboxes.
 /// Returns (manager, Some(tool_sandbox_id)) when tool sandbox is running (exec uses it),
 /// or (manager, None) when only app sandbox is running (keeps manager alive so app sandbox is not stopped).
+/// When we are already inside the app sandbox (child of `synbot sandbox`), we skip creating/starting app sandbox.
 async fn init_sandbox_if_configured(
     cfg: &config::Config,
 ) -> Option<(std::sync::Arc<crate::sandbox::SandboxManager>, Option<String>)> {
-    let has_app = cfg.app_sandbox.is_some();
+    let in_app_sandbox = std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some();
+    let has_app = cfg.app_sandbox.is_some() && !in_app_sandbox;
     let has_tool = cfg.tool_sandbox.is_some();
     if !has_app && !has_tool {
         return None;
@@ -260,22 +311,25 @@ async fn init_sandbox_if_configured(
     let mut app_started = false;
 
     if let Some(ref app_cfg) = cfg.app_sandbox {
-        match config::build_app_sandbox_config(app_cfg, monitoring) {
-            Ok(sandbox_config) => {
-                match manager.create_app_sandbox(sandbox_config).await {
-                    Ok(id) => {
-                        if let Err(e) = manager.start_sandbox(&id).await {
-                            warn!(sandbox_id = %id, error = %e, "App sandbox start failed");
-                        } else {
-                            app_started = true;
-                            info!(sandbox_id = %id, "App sandbox started");
+        if !in_app_sandbox {
+            match config::build_app_sandbox_config(app_cfg, monitoring) {
+                Ok(sandbox_config) => {
+                    match manager.create_app_sandbox(sandbox_config).await {
+                        Ok(id) => {
+                            if let Err(e) = manager.start_sandbox(&id).await {
+                                warn!(sandbox_id = %id, error = %e, "App sandbox start failed");
+                            } else {
+                                app_started = true;
+                                info!(sandbox_id = %id, "App sandbox started");
+                            }
                         }
+                        Err(e) => warn!(error = %e, "App sandbox creation failed (daemon runs without app sandbox)"),
                     }
-                    Err(e) => warn!(error = %e, "App sandbox creation failed (daemon runs without app sandbox)"),
                 }
+                Err(e) => warn!(error = %e, "App sandbox config invalid"),
             }
-            Err(e) => warn!(error = %e, "App sandbox config invalid"),
         }
+        // When in_app_sandbox we skip creating/starting app sandbox (we are already inside it).
     }
 
     let tool_sandbox_id = "synbot-tool".to_string();
