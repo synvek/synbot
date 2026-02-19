@@ -251,12 +251,17 @@ impl SecurityValidator {
             return Ok(());
         }
         
-        // Validate allowed hosts
+        // Validate allowed hosts (outbound allowlist; binding address 0.0.0.0 is not a valid host here)
         for host in &config.network.allowed_hosts {
             // Check for wildcard abuse
             if host == "*" || host == "0.0.0.0" || host == "::" {
                 return Err(SandboxError::SecurityViolation(
-                    format!("Overly permissive network host pattern: {}", host)
+                    format!(
+                        "Overly permissive network host pattern: \"{}\". \
+                        allowed_hosts is for outbound connections; use specific hostnames (e.g. api.example.com) or leave empty. \
+                        Do not use 0.0.0.0 or *.",
+                        host
+                    )
                 ));
             }
             

@@ -314,26 +314,16 @@ async fn init_sandbox_if_configured(
     let monitoring = &cfg.sandbox_monitoring;
     let mut app_started = false;
 
-    if let Some(ref app_cfg) = cfg.app_sandbox {
+    if let Some(_) = cfg.app_sandbox {
         if !in_app_sandbox {
-            match config::build_app_sandbox_config(app_cfg, monitoring) {
-                Ok(sandbox_config) => {
-                    match manager.create_app_sandbox(sandbox_config).await {
-                        Ok(id) => {
-                            if let Err(e) = manager.start_sandbox(&id).await {
-                                warn!(sandbox_id = %id, error = %e, "App sandbox start failed");
-                            } else {
-                                app_started = true;
-                                info!(sandbox_id = %id, "App sandbox started");
-                            }
-                        }
-                        Err(e) => warn!(error = %e, "App sandbox creation failed (daemon runs without app sandbox)"),
-                    }
-                }
-                Err(e) => warn!(error = %e, "App sandbox config invalid"),
-            }
+            // App sandbox is meant to be used via `synbot sandbox start`; plain `synbot start` does not
+            // create/start the app sandbox. Prompt the user and continue without app sandbox.
+            info!(
+                "app_sandbox is configured; to run inside the app sandbox use `synbot sandbox start`. \
+                Continuing without app sandbox."
+            );
         }
-        // When in_app_sandbox we skip creating/starting app sandbox (we are already inside it).
+        // When in_app_sandbox we are already inside the sandbox (started via `synbot sandbox start`).
     }
 
     let tool_sandbox_id = "synbot-tool".to_string();
