@@ -1129,9 +1129,11 @@ impl Sandbox for WindowsAppContainerSandbox {
         }
 
         // Allow outbound network: firewall rule + WFP permit (high-priority, CLEAR_ACTION_RIGHT) so AppContainer can reach internet.
+        // Rules are persistent (not removed on stop); add is idempotent (remove-then-add for firewall when we have admin).
         if self.config.network.enabled {
             if let Some(sid_str) = unsafe { sid_to_string(self.container_sid.unwrap()) } {
                 let rule_name = format!("SynBot Sandbox - {}", self.config.sandbox_id);
+                let _ = remove_firewall_rule_by_name(&rule_name); // idempotent: remove existing so Add succeeds when we have admin
                 match add_firewall_outbound_rule_for_appcontainer(&sid_str, &rule_name) {
                     Ok(()) => {
                         self.firewall_rule_name = Some(rule_name);
@@ -1139,7 +1141,7 @@ impl Sandbox for WindowsAppContainerSandbox {
                         let _ = std::io::stderr().flush();
                     }
                     Err(e) => {
-                        log::warn!("Firewall outbound rule: {} (WFP permit may still allow network)", e);
+                        log::warn!("Firewall outbound rule: {} (rules persist; if already added by Administrator, network may work)", e);
                     }
                 }
             }
@@ -1177,6 +1179,7 @@ impl Sandbox for WindowsAppContainerSandbox {
             // Inbound firewall rule: allow LAN clients to reach the web server port.
             for port in &self.config.network.allowed_ports {
                 let inbound_rule_name = format!("SynBot Sandbox Inbound - {} port {}", self.config.sandbox_id, port);
+                let _ = remove_firewall_rule_by_name(&inbound_rule_name); // idempotent: remove existing so Add succeeds when we have admin
                 match add_firewall_inbound_rule_for_port(&inbound_rule_name, *port) {
                     Ok(()) => {
                         let _ = writeln!(std::io::stderr(), "[synbot sandbox] Firewall inbound rule added for port {}", port);
@@ -1207,21 +1210,11 @@ impl Sandbox for WindowsAppContainerSandbox {
     fn stop(&mut self) -> Result<()> {
         self.status.state = SandboxState::Stopping;
 
-        if self.config.network.enabled {
-            remove_wfp_permit_filters();
-        }
-        if let Some(rule_name) = self.firewall_rule_name.take() {
-            if let Err(e) = remove_firewall_rule_by_name(&rule_name) {
-                log::warn!("Failed to remove firewall rule {}: {}", rule_name, e);
-            }
-        }
-        // Remove inbound rules added in start()
-        if self.config.network.enabled {
-            for port in &self.config.network.allowed_ports {
-                let inbound_rule_name = format!("SynBot Sandbox Inbound - {} port {}", self.config.sandbox_id, port);
-                let _ = remove_firewall_rule_by_name(&inbound_rule_name);
-            }
-        }
+        // Firewall and WFP rules are left in place (persistent) so that after one admin run,
+        // normal users can start the sandbox without needing Administrator again. Rules
+        // are keyed by sandbox_id/AppContainer SID; start() is idempotent when they already exist.
+        // To remove rules manually: delete firewall rules named "SynBot Sandbox - *" and
+        // "SynBot Sandbox Inbound - *", and remove WFP provider/sublayer by key (see remove_wfp_permit_filters).
 
         if let Some(sid) = self.container_sid.take() {
             let name_wide = to_wide_null(&self.profile_name);

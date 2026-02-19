@@ -2,6 +2,14 @@
 
 If the daemon runs inside the Windows AppContainer sandbox with network enabled but outbound HTTPS fails (e.g. Feishu/OpenAI "error sending request for url"), use the steps below to find which Windows Filtering Platform (WFP) filter is blocking the connection.
 
+## First run (or after reboot): use Administrator once
+
+Adding the firewall outbound rule and WFP permit for the AppContainer requires **Administrator** rights. The rules are **persistent**: they are **not** removed when the sandbox stops. So:
+
+- **First run after install or after a reboot:** run `synbot sandbox` (or whatever starts the AppContainer daemon) **once as Administrator** (e.g. right-click → Run as administrator). The program will add the firewall and WFP rules; they remain in place after the sandbox stops.
+- **Later runs:** any user (including normal user) can start the sandbox; the existing rules allow the AppContainer’s outbound network, so no Administrator is needed.
+- **After a reboot:** WFP filters are cleared by Windows; firewall rules may remain. Run once as Administrator to re-add WFP (and any missing firewall rules), then normal user can run again. If rules were removed manually or by policy, run once as Administrator to re-add them.
+
 ## Turn off WFP packet-drop auditing (restore)
 
 After troubleshooting, **disable** the WFP packet-drop audit to reduce Security log volume. Run PowerShell or CMD as **Administrator**:
