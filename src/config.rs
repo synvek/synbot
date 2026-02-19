@@ -298,6 +298,10 @@ fn default_timeout() -> u64 {
     60
 }
 
+fn default_search_count() -> u32 {
+    5
+}
+
 fn default_deny_patterns() -> Vec<String> {
     vec![
         "rm -rf /".to_string(),
@@ -327,11 +331,37 @@ impl Default for ExecToolConfig {
 // Web tool config
 // ---------------------------------------------------------------------------
 
+/// Which search backend to use for web_search.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum WebSearchBackend {
+    /// DuckDuckGo HTML scraping — no API key required (default).
+    #[default]
+    DuckDuckGo,
+    /// SearxNG self-hosted instance — requires `searxng_url`.
+    SearxNG,
+    /// Brave Search API — requires `brave_api_key`.
+    Brave,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct WebToolConfig {
+    /// Legacy Brave API key (kept for backwards compatibility; sets backend=brave when non-empty).
     #[serde(default)]
     pub brave_api_key: String,
+
+    /// Active search backend. Defaults to duckDuckGo when not set.
+    #[serde(default)]
+    pub search_backend: WebSearchBackend,
+
+    /// SearxNG instance base URL, e.g. "https://searx.example.com".
+    #[serde(default)]
+    pub searxng_url: String,
+
+    /// Maximum results to return (default 5).
+    #[serde(default = "default_search_count")]
+    pub search_count: u32,
 }
 
 // ---------------------------------------------------------------------------

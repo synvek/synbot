@@ -111,11 +111,8 @@ pub fn build_default_tools(
         chat_id: None,
         sandbox_context: sandbox_context.as_ref().and_then(|(m, id)| id.as_ref().map(|sid| (m.clone(), sid.clone()))),
     })).expect("register ExecTool");
-    if !cfg.tools.web.brave_api_key.is_empty() {
-        reg.register(std::sync::Arc::new(web::WebSearchTool {
-            api_key: cfg.tools.web.brave_api_key.clone(),
-        })).expect("register WebSearchTool");
-    }
+    reg.register(std::sync::Arc::new(web::WebSearchTool::from_config(&cfg.tools.web)))
+        .expect("register WebSearchTool");
     reg.register(std::sync::Arc::new(web::WebFetchTool)).expect("register WebFetchTool");
     reg.register(std::sync::Arc::new(spawn::SpawnTool {
         manager: subagent_mgr,
