@@ -114,6 +114,10 @@ pub fn build_default_tools(
     reg.register(std::sync::Arc::new(web::WebSearchTool::from_config(&cfg.tools.web)))
         .expect("register WebSearchTool");
     reg.register(std::sync::Arc::new(web::WebFetchTool)).expect("register WebFetchTool");
+    if cfg.tools.browser.enabled {
+        reg.register(std::sync::Arc::new(browser::BrowserTool::from_config(&cfg.tools.browser)))
+            .expect("register BrowserTool");
+    }
     reg.register(std::sync::Arc::new(spawn::SpawnTool {
         manager: subagent_mgr,
     })).expect("register SpawnTool");

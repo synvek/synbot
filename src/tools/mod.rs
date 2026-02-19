@@ -1,6 +1,7 @@
 pub mod approval;
 pub mod approval_store;
 pub mod approval_tool;
+pub mod browser;
 pub mod context;
 pub mod filesystem;
 pub mod heartbeat_cron;

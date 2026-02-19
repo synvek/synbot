@@ -610,6 +610,42 @@ impl Default for MemoryConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Browser tool config
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserToolConfig {
+    /// Enable the browser tool (default false; requires agent-browser to be installed).
+    #[serde(default)]
+    pub enabled: bool,
+    /// Path or name of the agent-browser executable (default "agent-browser").
+    #[serde(default = "default_browser_executable")]
+    pub executable: String,
+    /// Per-command timeout in seconds (default 30).
+    #[serde(default = "default_browser_timeout")]
+    pub timeout_secs: u64,
+}
+
+fn default_browser_executable() -> String {
+    "agent-browser".to_string()
+}
+
+fn default_browser_timeout() -> u64 {
+    30
+}
+
+impl Default for BrowserToolConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            executable: default_browser_executable(),
+            timeout_secs: default_browser_timeout(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tools config
 // ---------------------------------------------------------------------------
 
@@ -620,6 +656,8 @@ pub struct ToolsConfig {
     pub exec: ExecToolConfig,
     #[serde(default)]
     pub web: WebToolConfig,
+    #[serde(default)]
+    pub browser: BrowserToolConfig,
 }
 
 // ---------------------------------------------------------------------------
