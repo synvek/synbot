@@ -1,17 +1,77 @@
-// nono.sh sandbox implementation for Linux/macOS
+// nono sandbox implementation for Linux/macOS
 //
-// This module provides sandbox isolation using nono.sh, which leverages
-// Linux namespaces and cgroups for process isolation and resource control.
+// Uses the nono crate (Landlock/Seatbelt) when available for `synbot sandbox`;
+// falls back to the nono CLI binary for NonoSandbox::execute and spawn_child_in_sandbox
+// when the crate is used only in the fork+apply+exec launcher path.
 
 use super::error::{Result, SandboxError};
 use super::sandbox_trait::Sandbox;
 use super::types::*;
 use chrono::Utc;
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-use nix::unistd::{Pid, Uid, Gid};
+use nix::unistd::Pid;
+
+/// Build a nono crate `CapabilitySet` from our sandbox config for use with `Sandbox::apply`.
+/// Adds the executable's parent directory (so exec can open the binary), minimal system paths,
+/// then config readonly/writable paths and network blocking.
+/// `exe` must be the path to the binary that will be exec'd in the child (e.g. current_exe()).
+#[cfg(unix)]
+pub fn build_nono_capability_set(
+    config: &SandboxConfig,
+    exe: &Path,
+) -> std::result::Result<nono::CapabilitySet, SandboxError> {
+    use nono::{AccessMode, CapabilitySet};
+
+    let mut caps = CapabilitySet::new();
+
+    // Allow the directory containing the executable so exec() can open the binary (required for Landlock/Seatbelt)
+    let exe_abs = exe
+        .canonicalize()
+        .unwrap_or_else(|_| exe.to_path_buf());
+    if let Some(parent) = exe_abs.parent() {
+        if !parent.as_os_str().is_empty() {
+            caps = caps
+                .allow_path(parent, AccessMode::Read)
+                .map_err(|e| SandboxError::CreationFailed(format!("nono allow_path exe dir {}: {}", parent.display(), e)))?;
+        }
+    }
+
+    // Minimal system paths: binary/libs; /etc, /run, /mnt/wsl for DNS (resolv.conf may be
+    // a symlink: systemd -> /run/systemd/resolve/..., WSL -> /mnt/wsl/resolv.conf)
+    let system_read_only: &[&str] = if cfg!(target_os = "linux") {
+        &["/usr", "/lib", "/lib64", "/bin", "/etc", "/run", "/mnt/wsl"]
+    } else {
+        &["/usr", "/lib", "/bin", "/etc", "/run"]
+    };
+    for p in system_read_only {
+        if Path::new(p).exists() {
+            caps = caps
+                .allow_path(p, AccessMode::Read)
+                .map_err(|e| SandboxError::CreationFailed(format!("nono allow_path {}: {}", p, e)))?;
+        }
+    }
+
+    for p in &config.filesystem.readonly_paths {
+        caps = caps
+            .allow_path(p.as_str(), AccessMode::Read)
+            .map_err(|e| SandboxError::CreationFailed(format!("nono allow_path read {}: {}", p, e)))?;
+    }
+    for p in &config.filesystem.writable_paths {
+        caps = caps
+            .allow_path(p.as_str(), AccessMode::ReadWrite)
+            .map_err(|e| SandboxError::CreationFailed(format!("nono allow_path readwrite {}: {}", p, e)))?;
+    }
+
+    if !config.network.enabled {
+        caps = caps.block_network();
+    }
+
+    Ok(caps)
+}
 
 /// nono.sh sandbox configuration
 #[derive(Debug, Clone)]
@@ -305,6 +365,33 @@ impl NonoSandbox {
         args.push(format!("nono-{}", self.config.sandbox_id));
         
         args
+    }
+
+    /// Spawn a long-running child process inside the nono sandbox.
+    ///
+    /// Runs `nono <args> -- <exe> <args>` with `SYNBOT_IN_APP_SANDBOX=1` in the child environment.
+    /// The caller must wait on the returned `Child` and should forward signals (SIGINT, SIGTERM)
+    /// to the child's PID for graceful shutdown.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the `nono` binary is not found or the process fails to spawn.
+    pub fn spawn_child_in_sandbox(&self, exe: &Path, args: &[String]) -> Result<Child> {
+        let mut nono_args = self.build_nono_args();
+        nono_args.push("--".to_string());
+        nono_args.push(exe.to_string_lossy().into_owned());
+        nono_args.extend_from_slice(args);
+
+        let child = Command::new("nono")
+            .args(&nono_args)
+            .env("SYNBOT_IN_APP_SANDBOX", "1")
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .map_err(|e| SandboxError::CreationFailed(format!("Failed to spawn child in nono sandbox: {}", e)))?;
+
+        Ok(child)
     }
 }
 
