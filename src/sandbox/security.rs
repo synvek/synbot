@@ -566,7 +566,7 @@ impl ResourceExhaustionPrevention {
     }
     
     /// Check current memory usage against limit
-    fn check_memory_usage(_max_memory: u64) -> Result<()> {
+    fn check_memory_usage(max_memory: u64) -> Result<()> {
         #[cfg(target_os = "linux")]
         {
             use std::fs;
@@ -587,7 +587,7 @@ impl ResourceExhaustionPrevention {
     }
     
     /// Check current process count against limit
-    fn check_process_count(_max_processes: u32) -> Result<()> {
+    fn check_process_count(max_processes: u32) -> Result<()> {
         #[cfg(target_os = "linux")]
         {
             use std::fs;
