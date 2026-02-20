@@ -218,8 +218,9 @@ impl FallbackManager {
         
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
+            use crate::sandbox::plain_docker::PlainDockerSandbox;
             use crate::sandbox::GVisorDockerSandbox;
-            
+
             // Try primary implementation: gVisor Docker
             match GVisorDockerSandbox::new(config.clone()) {
                 Ok(sandbox) => {
@@ -230,33 +231,42 @@ impl FallbackManager {
                     if !self.config.enable_fallback {
                         return Err(e);
                     }
-                    
+
                     if self.config.log_fallback_warnings {
                         log::warn!(
-                            "gVisor Docker creation failed for {}: {}. Attempting fallback to standard Docker...",
+                            "gVisor Docker creation failed for {}: {}. Attempting fallback to plain Docker...",
                             config.sandbox_id,
                             e
                         );
                     }
-                    
-                    // Try fallback: Standard Docker (less secure)
+
+                    // Try fallback: Plain Docker (default runc, no gVisor)
                     if !self.config.allow_insecure_fallback {
                         return Err(SandboxError::CreationFailed(
                             format!("gVisor not available and insecure fallback is disabled: {}", e)
                         ));
                     }
-                    
+
                     self.record_fallback_event(
                         &config.sandbox_id,
                         "gVisor Docker",
-                        "Standard Docker",
+                        "Plain Docker",
                         &format!("gVisor failed: {}", e),
-                    ).await;
-                    
-                    // Create standard Docker sandbox (implementation would go here)
-                    return Err(SandboxError::CreationFailed(
-                        format!("Standard Docker fallback not yet implemented: {}", e)
-                    ));
+                    )
+                    .await;
+
+                    match PlainDockerSandbox::new(config) {
+                        Ok(sandbox) => {
+                            log::info!("Using plain Docker sandbox (fallback) for: {}", sandbox.get_info().sandbox_id);
+                            return Ok((Box::new(sandbox), FallbackResult::Fallback("plain-docker".to_string())));
+                        }
+                        Err(e2) => {
+                            return Err(SandboxError::CreationFailed(format!(
+                                "gVisor failed: {}; plain Docker fallback also failed: {}",
+                                e, e2
+                            )));
+                        }
+                    }
                 }
             }
         }

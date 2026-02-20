@@ -442,6 +442,89 @@ curl -X POST http://localhost:18888/api/tools/execute \
 - **网络访问**：仅限于特定域
 - **系统操作**：需要明确审批
 
+### 如何验证 exec 在 tool sandbox 内运行
+
+当配置了 `tool_sandbox` 时，exec 工具会在隔离容器（Linux 下为 gVisor 或普通 Docker）中执行命令。可通过以下方式确认 exec 是否在 tool sandbox 中运行。
+
+#### 1. 启动日志
+
+在 `synbot start` 之后，确认 tool sandbox 已创建并启动：
+
+```bash
+grep -E "Tool sandbox started|exec runs in sandbox" ~/.synbot/logs/synbot.log
+```
+
+应看到类似：
+
+```
+Tool sandbox started (exec runs in sandbox) sandbox_id=synbot-tool
+```
+
+若看到：
+
+```
+Tool sandbox start failed (exec will run on host)
+```
+或
+```
+Tool sandbox creation failed (exec will run on host)
+```
+
+表示 exec **未**使用 tool sandbox（可能未安装或未启动 Docker/gVisor）。
+
+#### 2. 单次命令日志
+
+当助手通过 exec 执行命令时，可查看该次是否在沙箱内执行：
+
+```bash
+grep -E "Command executed successfully \(sandbox\)|Command execution failed \(sandbox\)" ~/.synbot/logs/synbot.log
+```
+
+若 exec 在 tool sandbox 中运行，日志中会有 `sandbox=true`。若某次命令没有对应带 `(sandbox)` 的日志，则该次是在主机（或仅 app sandbox）上执行。
+
+#### 3. 运行时验证（在容器内）
+
+让助手执行一个在容器内与在主机上表现不同的命令，再在主机上执行同一命令对比。
+
+**方式 A：cgroup（Linux）**  
+在 tool sandbox（Docker 容器）内，进程会处于 Docker 的 cgroup 下：
+
+```bash
+# 让助手执行：cat /proc/self/cgroup
+# 若 exec 在 tool sandbox 中，输出会包含类似：
+# .../docker/<容器id>
+# 或 .../gvisor/...
+```
+
+在主机终端执行同一命令，不应出现 `docker/` 或 `gvisor/` 路径。
+
+**方式 B：主机名**  
+tool sandbox 容器有独立主机名（如容器 id）。让助手执行：
+
+```bash
+hostname
+```
+
+再在主机上执行 `hostname`。若结果不同，说明命令在容器内执行。
+
+**方式 C：查看 Docker 容器**  
+在启用 tool sandbox 且 synbot 运行期间执行：
+
+```bash
+docker ps --filter name=synbot-tool
+```
+
+应能看到名为 `synbot-tool` 的容器在运行，exec 即在该容器内执行。
+
+#### 4. 对照表
+
+| 检查项 | exec 在 tool sandbox 中 | exec 在主机上 |
+|--------|-------------------------|----------------|
+| 启动日志 | `Tool sandbox started (exec runs in sandbox)` | `Tool sandbox ... failed (exec will run on host)` 或无相关日志 |
+| 单次 exec 日志 | `Command executed successfully (sandbox)` 且 `sandbox=true` | 无 `(sandbox)` / 无 `sandbox=true` |
+| `docker ps` | 存在并运行中的 `synbot-tool` 容器 | 无该容器（或未用于 exec） |
+| 通过 exec 执行 `cat /proc/self/cgroup` | 含 `docker/` 或 `gvisor/` | 主机 cgroup 路径 |
+
 ## 自定义工具
 
 ### 创建自定义工具

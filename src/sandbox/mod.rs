@@ -10,6 +10,8 @@ pub mod monitoring;
 pub mod sandbox_trait;
 pub mod manager;
 pub mod gvisor_docker;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub mod plain_docker;
 pub mod isolation;
 pub mod recovery;
 pub mod fallback;

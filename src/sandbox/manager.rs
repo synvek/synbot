@@ -178,20 +178,42 @@ impl SandboxManager {
         
         // Verify minimal privileges before creating sandbox
         PrivilegeEscalationPrevention::verify_minimal_privileges()?;
-        
-        // Use SandboxFactory for platform-appropriate sandbox creation
-        let sandbox = super::platform::SandboxFactory::create_tool_sandbox(config.clone())?;
+
         let sandbox_id = config.sandbox_id.clone();
-        
+
+        // Use SandboxFactory first; on Linux/macOS fall back to plain Docker if gVisor fails
+        let sandbox = match super::platform::SandboxFactory::create_tool_sandbox(config.clone()) {
+            Ok(s) => s,
+            Err(e) => {
+                #[cfg(any(target_os = "linux", target_os = "macos"))]
+                {
+                    let fallback_config = super::fallback::FallbackConfig {
+                        enable_fallback: true,
+                        log_fallback_warnings: true,
+                        allow_insecure_fallback: true,
+                    };
+                    let fallback_mgr = super::fallback::FallbackManager::with_config(fallback_config);
+                    match fallback_mgr.create_tool_sandbox_with_fallback(config).await {
+                        Ok((s, _)) => s,
+                        Err(_) => return Err(e),
+                    }
+                }
+                #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+                {
+                    return Err(e);
+                }
+            }
+        };
+
         // Store sandbox instance
         {
             let mut sandboxes = self.sandboxes.write().await;
             sandboxes.insert(sandbox_id.clone(), sandbox);
         }
-        
+
         // Log sandbox creation
         self.monitoring.log_sandbox_created(&sandbox_id, "tool");
-        
+
         Ok(sandbox_id)
     }
     
