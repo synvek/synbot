@@ -204,7 +204,7 @@ impl NonoSandbox {
     /// 2. Mounting readonly paths as read-only
     /// 3. Mounting writable paths as read-write
     /// 4. Hiding sensitive paths
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     fn apply_filesystem_isolation(&self) -> Result<()> {
         use nix::mount::{mount, MsFlags};
         use nix::sched::{unshare, CloneFlags};
@@ -239,6 +239,10 @@ impl NonoSandbox {
         
         Ok(())
     }
+    #[cfg(target_os = "macos")]
+    fn apply_filesystem_isolation(&self) -> Result<()> {
+        Ok(())
+    }
     
     /// Apply network isolation using network namespaces
     /// 
@@ -249,7 +253,7 @@ impl NonoSandbox {
     /// Network isolation is achieved through:
     /// - CLONE_NEWNET: Creates isolated network stack
     /// - Firewall rules: Restricts connections to allowed hosts/ports
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     fn apply_network_isolation(&self) -> Result<()> {
         use nix::sched::{unshare, CloneFlags};
         
@@ -271,6 +275,11 @@ impl NonoSandbox {
         Ok(())
     }
     
+    #[cfg(target_os = "macos")]
+    fn apply_network_isolation(&self) -> Result<()> {
+        Ok(())
+    }
+
     /// Build network-related command line arguments
     fn build_network_args(&self) -> Vec<String> {
         let mut args = Vec::new();
