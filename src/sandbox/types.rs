@@ -18,14 +18,20 @@ pub struct SandboxConfig {
     /// Optional working directory for the child process (app sandbox only). When set, used as cwd so config_dir() resolves correctly.
     #[serde(default)]
     pub child_work_dir: Option<String>,
+    /// When true (tool sandbox only), remove existing container and create fresh on start. When false, reuse existing container if found.
+    #[serde(default)]
+    pub delete_on_start: bool,
 }
 
 /// Filesystem configuration
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct FilesystemConfig {
     pub readonly_paths: Vec<String>,
     pub writable_paths: Vec<String>,
     pub hidden_paths: Vec<String>,
+    /// When set, bind-mount host path at container path (host, container). Used by tool sandbox to mount workspace at /workspace. Not from config; set at build time.
+    #[serde(skip, default)]
+    pub workspace_mount: Option<(String, String)>,
 }
 
 /// Network configuration

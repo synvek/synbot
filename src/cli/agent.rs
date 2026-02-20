@@ -79,7 +79,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
         crate::agent::session_manager::SessionManager::new(),
     ));
 
-    // Agent loop
+    // Agent loop (CLI agent has no tool sandbox)
     let mut agent_loop = crate::agent::r#loop::AgentLoop::new(
         completion_model,
         ws,
@@ -89,6 +89,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
         bus.outbound_tx_clone(),
         &cfg,
         session_manager,
+        false,
     )
     .await;
 

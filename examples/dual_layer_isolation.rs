@@ -26,6 +26,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             readonly_paths: vec!["/usr".to_string(), "/lib".to_string()],
             writable_paths: vec!["/tmp".to_string(), "/app/data".to_string()],
             hidden_paths: vec!["/etc/shadow".to_string()],
+            ..Default::default()
         },
         network: NetworkConfig {
             enabled: true,
@@ -42,6 +43,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             max_processes: 10,
         },
         monitoring: MonitoringConfig::default(),
+        delete_on_start: false,
     };
 
     let app_sandbox_id = manager.create_app_sandbox(app_config).await?;
@@ -57,6 +59,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             readonly_paths: vec![],
             writable_paths: vec!["/workspace".to_string()],
             hidden_paths: vec![],
+            ..Default::default()
         },
         network: NetworkConfig {
             enabled: false, // More restrictive than app sandbox
@@ -73,6 +76,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             max_processes: 5,
         },
         monitoring: MonitoringConfig::default(),
+        delete_on_start: false,
     };
 
     let tool_sandbox_id = manager.create_tool_sandbox(tool_config).await?;

@@ -367,6 +367,7 @@ mod tests {
                 readonly_paths: vec![],
                 writable_paths: vec![],
                 hidden_paths: vec![],
+                ..Default::default()
             },
             network: NetworkConfig {
                 enabled: false,
@@ -384,6 +385,7 @@ mod tests {
             },
             child_work_dir: None,
             monitoring: MonitoringConfig::default(),
+            delete_on_start: false,
         }
     }
     

@@ -323,6 +323,7 @@ mod tests {
             _command: &str,
             _args: &[String],
             _timeout: Duration,
+            _working_dir: Option<&str>,
         ) -> Result<ExecutionResult> {
             unimplemented!()
         }

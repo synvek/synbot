@@ -169,6 +169,7 @@ async fn test_cross_component_error_handling() {
             readonly_paths: vec![],
             writable_paths: vec![],
             hidden_paths: vec![],
+            ..Default::default()
         },
         network: NetworkConfig {
             enabled: false,
@@ -185,6 +186,7 @@ async fn test_cross_component_error_handling() {
             max_processes: 0, // Invalid: too small
         },
         monitoring: create_test_monitoring_config(),
+        delete_on_start: false,
     };
     
     let result = manager.create_app_sandbox(invalid_config).await;
@@ -310,6 +312,7 @@ fn create_test_app_sandbox_config(sandbox_id: &str) -> SandboxConfig {
             readonly_paths: vec!["/usr".to_string(), "/lib".to_string()],
             writable_paths: vec!["/tmp".to_string()],
             hidden_paths: vec!["/etc/shadow".to_string()],
+            ..Default::default()
         },
         network: NetworkConfig {
             enabled: true,
@@ -326,6 +329,7 @@ fn create_test_app_sandbox_config(sandbox_id: &str) -> SandboxConfig {
             max_processes: 10,
         },
         monitoring: create_test_monitoring_config(),
+        delete_on_start: false,
     }
 }
 
@@ -337,6 +341,7 @@ fn create_test_tool_sandbox_config(sandbox_id: &str) -> SandboxConfig {
             readonly_paths: vec![],
             writable_paths: vec!["/workspace".to_string()],
             hidden_paths: vec![],
+            ..Default::default()
         },
         network: NetworkConfig {
             enabled: false,
@@ -353,6 +358,7 @@ fn create_test_tool_sandbox_config(sandbox_id: &str) -> SandboxConfig {
             max_processes: 5,
         },
         monitoring: create_test_monitoring_config(),
+        delete_on_start: false,
     }
 }
 

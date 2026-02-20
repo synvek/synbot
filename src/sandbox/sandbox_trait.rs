@@ -52,6 +52,7 @@ pub trait Sandbox: Send + Sync {
     /// * `command` - The command to execute
     /// * `args` - Command arguments
     /// * `timeout` - Maximum execution time
+    /// * `working_dir` - Optional working directory inside the sandbox (e.g. `/workspace` for tool sandbox)
     /// 
     /// # Returns
     /// 
@@ -68,7 +69,13 @@ pub trait Sandbox: Send + Sync {
     /// - The command cannot be executed
     /// - The execution times out
     /// - A security violation occurs
-    fn execute(&self, command: &str, args: &[String], timeout: Duration) -> Result<ExecutionResult>;
+    fn execute(
+        &self,
+        command: &str,
+        args: &[String],
+        timeout: Duration,
+        working_dir: Option<&str>,
+    ) -> Result<ExecutionResult>;
     
     /// Get the current status of the sandbox
     /// 

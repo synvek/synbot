@@ -1232,7 +1232,13 @@ impl Sandbox for WindowsAppContainerSandbox {
         Ok(())
     }
     
-    fn execute(&self, command: &str, args: &[String], timeout: Duration) -> Result<ExecutionResult> {
+    fn execute(
+        &self,
+        command: &str,
+        args: &[String],
+        timeout: Duration,
+        _working_dir: Option<&str>,
+    ) -> Result<ExecutionResult> {
         use std::process::Command;
         use std::time::Instant;
         
@@ -1330,6 +1336,7 @@ mod tests {
                 readonly_paths: vec!["C:\\Windows\\System32".to_string()],
                 writable_paths: vec!["C:\\Temp".to_string()],
                 hidden_paths: vec!["C:\\Windows\\System32\\config".to_string()],
+                ..Default::default()
             },
             network: NetworkConfig {
                 enabled: true,
@@ -1347,6 +1354,7 @@ mod tests {
             },
             child_work_dir: None,
             monitoring: MonitoringConfig::default(),
+            delete_on_start: false,
         }
     }
     

@@ -394,8 +394,14 @@ impl super::Sandbox for Wsl2GVisorSandbox {
         self.inner.stop()
     }
     
-    fn execute(&self, command: &str, args: &[String], timeout: std::time::Duration) -> Result<super::ExecutionResult> {
-        self.inner.execute(command, args, timeout)
+    fn execute(
+        &self,
+        command: &str,
+        args: &[String],
+        timeout: std::time::Duration,
+        working_dir: Option<&str>,
+    ) -> Result<super::ExecutionResult> {
+        self.inner.execute(command, args, timeout, working_dir)
     }
     
     fn get_status(&self) -> super::SandboxStatus {
@@ -427,6 +433,7 @@ mod wsl2_sandbox_tests {
                 readonly_paths: vec![],
                 writable_paths: vec!["/tmp".to_string()],
                 hidden_paths: vec![],
+                ..Default::default()
             },
             network: NetworkConfig {
                 enabled: false,
@@ -444,6 +451,7 @@ mod wsl2_sandbox_tests {
             },
             child_work_dir: None,
             monitoring: MonitoringConfig::default(),
+            delete_on_start: false,
         }
     }
     

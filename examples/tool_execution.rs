@@ -27,6 +27,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             readonly_paths: vec![],
             writable_paths: vec!["/workspace".to_string()],
             hidden_paths: vec![],
+            ..Default::default()
         },
         network: NetworkConfig {
             enabled: false, // Tools typically don't need network
@@ -43,6 +44,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             max_processes: 5,
         },
         monitoring: MonitoringConfig::default(),
+        delete_on_start: false,
     };
 
     let sandbox_id = manager.create_tool_sandbox(tool_config).await?;

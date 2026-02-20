@@ -87,11 +87,18 @@ pub fn build_default_tools(
     let restrict = cfg.tools.exec.restrict_to_workspace;
     let ws = ws.to_path_buf();
 
+    let tool_sandbox_enabled = sandbox_context
+        .as_ref()
+        .and_then(|(_, id)| id.as_ref())
+        .is_some();
+
     let mut reg = ToolRegistry::new();
-    reg.register(std::sync::Arc::new(filesystem::ReadFileTool { workspace: ws.clone(), restrict })).expect("register ReadFileTool");
-    reg.register(std::sync::Arc::new(filesystem::WriteFileTool { workspace: ws.clone(), restrict })).expect("register WriteFileTool");
-    reg.register(std::sync::Arc::new(filesystem::EditFileTool { workspace: ws.clone(), restrict })).expect("register EditFileTool");
-    reg.register(std::sync::Arc::new(filesystem::ListDirTool { workspace: ws.clone(), restrict })).expect("register ListDirTool");
+    if !tool_sandbox_enabled {
+        reg.register(std::sync::Arc::new(filesystem::ReadFileTool { workspace: ws.clone(), restrict })).expect("register ReadFileTool");
+        reg.register(std::sync::Arc::new(filesystem::WriteFileTool { workspace: ws.clone(), restrict })).expect("register WriteFileTool");
+        reg.register(std::sync::Arc::new(filesystem::EditFileTool { workspace: ws.clone(), restrict })).expect("register EditFileTool");
+        reg.register(std::sync::Arc::new(filesystem::ListDirTool { workspace: ws.clone(), restrict })).expect("register ListDirTool");
+    }
     reg.register(std::sync::Arc::new(approval_tool::SubmitApprovalResponseTool {
         approval_manager: approval_manager.clone(),
     })).expect("register SubmitApprovalResponseTool");

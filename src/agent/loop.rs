@@ -35,6 +35,8 @@ pub struct AgentLoop {
     role_registry: Arc<RoleRegistry>,
     session_manager: Arc<RwLock<SessionManager>>,
     subagent_manager: Arc<Mutex<SubagentManager>>,
+    /// When true, exec runs in tool sandbox; passed to ContextBuilder for identity_section.
+    tool_sandbox_enabled: bool,
 }
 
 impl AgentLoop {
@@ -47,6 +49,7 @@ impl AgentLoop {
         outbound_tx: broadcast::Sender<OutboundMessage>,
         config: &Config,
         session_manager: Arc<RwLock<SessionManager>>,
+        tool_sandbox_enabled: bool,
     ) -> Self {
         let session_store = SessionStore::new(crate::config::sessions_root().as_path());
         let mut role_registry = RoleRegistry::new();
@@ -109,6 +112,7 @@ impl AgentLoop {
             role_registry: Arc::new(role_registry),
             session_manager,
             subagent_manager: Arc::new(Mutex::new(subagent_manager)),
+            tool_sandbox_enabled,
         }
     }
 
@@ -236,7 +240,12 @@ impl AgentLoop {
             let session_key = session_id.format();
 
             let (system_prompt, model_max_iterations) = if agent_id == "main" {
-                let context = ContextBuilder::new(&self.workspace, "main", config::skills_dir().as_path());
+                let context = ContextBuilder::new(
+                    &self.workspace,
+                    "main",
+                    config::skills_dir().as_path(),
+                    self.tool_sandbox_enabled,
+                );
                 (context.build_system_prompt(), self.max_iterations)
             } else {
                 let role = self.role_registry.get(&agent_id).unwrap();
@@ -386,7 +395,12 @@ impl AgentLoop {
             let session_key = session_id.format();
 
             let (system_prompt, model_max_iterations) = if agent_id == "main" {
-                let context = ContextBuilder::new(&self.workspace, "main", config::skills_dir().as_path());
+                let context = ContextBuilder::new(
+                    &self.workspace,
+                    "main",
+                    config::skills_dir().as_path(),
+                    self.tool_sandbox_enabled,
+                );
                 (context.build_system_prompt(), self.max_iterations)
             } else {
                 let role = self.role_registry.get(&agent_id).unwrap();

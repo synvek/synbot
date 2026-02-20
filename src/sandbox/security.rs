@@ -667,6 +667,7 @@ mod tests {
                 readonly_paths: vec!["/usr".to_string()],
                 writable_paths: vec!["/tmp".to_string()],
                 hidden_paths: vec!["/etc/shadow".to_string(), "/root".to_string()],
+                ..Default::default()
             },
             network: NetworkConfig {
                 enabled: true,
@@ -684,6 +685,7 @@ mod tests {
             },
             child_work_dir: None,
             monitoring: MonitoringConfig::default(),
+            delete_on_start: false,
         }
     }
     

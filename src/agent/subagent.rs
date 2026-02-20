@@ -209,7 +209,12 @@ async fn run_subagent_task(
     };
 
     scope(tool_ctx, async move {
-        let context = ContextBuilder::new(&workspace, &agent_id, config::skills_dir().as_path());
+        let context = ContextBuilder::new(
+            &workspace,
+            &agent_id,
+            config::skills_dir().as_path(),
+            false,
+        );
         let system_prompt = context.build_system_prompt();
         let tool_defs = tools.rig_definitions();
 

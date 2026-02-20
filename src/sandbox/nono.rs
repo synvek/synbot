@@ -432,7 +432,13 @@ impl Sandbox for NonoSandbox {
         Ok(())
     }
     
-    fn execute(&self, command: &str, args: &[String], timeout: Duration) -> Result<ExecutionResult> {
+    fn execute(
+        &self,
+        command: &str,
+        args: &[String],
+        timeout: Duration,
+        _working_dir: Option<&str>,
+    ) -> Result<ExecutionResult> {
         if self.status.state != SandboxState::Running {
             return Err(SandboxError::NotStarted);
         }
@@ -527,6 +533,7 @@ mod tests {
                 readonly_paths: vec!["/usr".to_string(), "/lib".to_string()],
                 writable_paths: vec!["/tmp".to_string()],
                 hidden_paths: vec!["/etc/shadow".to_string()],
+                ..Default::default()
             },
             network: NetworkConfig {
                 enabled: false,
@@ -544,6 +551,7 @@ mod tests {
             },
             child_work_dir: None,
             monitoring: MonitoringConfig::default(),
+            delete_on_start: false,
         }
     }
     

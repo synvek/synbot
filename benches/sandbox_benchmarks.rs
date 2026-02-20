@@ -31,6 +31,7 @@ fn create_benchmark_config(sandbox_id: &str, platform: &str) -> SandboxConfig {
             readonly_paths: vec!["/usr".to_string(), "/lib".to_string()],
             writable_paths: vec!["/tmp".to_string()],
             hidden_paths: vec![],
+            ..Default::default()
         },
         network: NetworkConfig {
             enabled: false,
@@ -47,6 +48,7 @@ fn create_benchmark_config(sandbox_id: &str, platform: &str) -> SandboxConfig {
             max_processes: 10,
         },
         monitoring: MonitoringConfig::default(),
+        delete_on_start: false,
     }
 }
 

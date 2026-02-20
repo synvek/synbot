@@ -84,6 +84,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             "/home".to_string(),
             "/proc/kcore".to_string(),
         ],
+        ..Default::default()
     };
     
     println!("   Readonly paths: {}", fs_config.readonly_paths.len());
@@ -138,6 +139,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         resources: resource_config,
         process: process_config,
         monitoring: MonitoringConfig::default(),
+        delete_on_start: false,
     };
 
     let sandbox_id = manager.create_app_sandbox(sandbox_config).await?;

@@ -14,6 +14,7 @@ fn test_sandbox_config_serialization() {
             readonly_paths: vec!["/usr".to_string()],
             writable_paths: vec!["/tmp".to_string()],
             hidden_paths: vec![],
+            ..Default::default()
         },
         network: NetworkConfig {
             enabled: false,
@@ -30,6 +31,7 @@ fn test_sandbox_config_serialization() {
             max_processes: 10,
         },
         monitoring: MonitoringConfig::default(),
+        delete_on_start: false,
     };
     
     // Serialize to JSON

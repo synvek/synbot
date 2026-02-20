@@ -30,6 +30,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             readonly_paths: vec!["/usr".to_string()],
             writable_paths: vec!["/tmp".to_string()],
             hidden_paths: vec![],
+            ..Default::default()
         },
         network: NetworkConfig {
             enabled: true,
@@ -46,6 +47,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             max_processes: 10,
         },
         monitoring: MonitoringConfig::default(),
+        delete_on_start: false,
     };
 
     let sandbox_id = manager.create_app_sandbox(app_config).await?;

@@ -76,14 +76,19 @@ impl GVisorDockerSandbox {
         }
     }
     
-    /// Get volume bindings from configuration
+    /// Get volume bindings from configuration (writable_paths as host:host, plus workspace at /workspace if set)
     fn get_volumes(&self) -> Vec<String> {
-        self.config
+        let mut binds: Vec<String> = self
+            .config
             .filesystem
             .writable_paths
             .iter()
             .map(|p| format!("{}:{}", p, p))
-            .collect()
+            .collect();
+        if let Some((ref host, ref guest)) = self.config.filesystem.workspace_mount {
+            binds.push(format!("{}:{}", host, guest));
+        }
+        binds
     }
     
     /// Get required capabilities (minimal set for security)
@@ -105,14 +110,54 @@ impl Sandbox for GVisorDockerSandbox {
                 .map_err(|e| SandboxError::CreationFailed(format!("Failed to create runtime: {}", e)))?;
 
             runtime.block_on(async {
+            if self.config.delete_on_start {
+                // Remove any existing container and create fresh
+                let _ = self
+                    .docker
+                    .remove_container(
+                        &self.config.sandbox_id,
+                        Some(RemoveContainerOptions {
+                            force: true,
+                            ..Default::default()
+                        }),
+                    )
+                    .await;
+            } else {
+                // Try to reuse existing container by name
+                if let Ok(existing) = self
+                    .docker
+                    .inspect_container(&self.config.sandbox_id, None)
+                    .await
+                {
+                    let id = existing
+                        .id
+                        .as_deref()
+                        .unwrap_or(self.config.sandbox_id.as_str());
+                    let running = existing
+                        .state
+                        .as_ref()
+                        .and_then(|s| s.running)
+                        .unwrap_or(false);
+                    if !running {
+                        self.docker
+                            .start_container(id, None::<StartContainerOptions<String>>)
+                            .await
+                            .map_err(|e| SandboxError::CreationFailed(format!("Failed to start existing container: {}", e)))?;
+                    }
+                    self.container_id = Some(id.to_string());
+                    self.status.state = SandboxState::Running;
+                    self.status.started_at = Some(Utc::now());
+                    return Ok(());
+                }
+            }
+
             let options = CreateContainerOptions {
                 name: self.config.sandbox_id.clone(),
                 platform: None,
             };
             
-            // Configure host settings with gVisor runtime
             let host_config = HostConfig {
-                runtime: Some("runsc".to_string()), // Use gVisor runtime
+                runtime: Some("runsc".to_string()),
                 network_mode: Some(self.get_network_mode()),
                 binds: Some(self.get_volumes()),
                 memory: Some(self.config.resources.max_memory as i64),
@@ -123,18 +168,14 @@ impl Sandbox for GVisorDockerSandbox {
                 ..Default::default()
             };
             
-            // Use ubuntu:22.04 as default image if not specified
             let image = "ubuntu:22.04".to_string();
-            
             let config = Config {
                 image: Some(image),
                 host_config: Some(host_config),
-                // Keep container running with a sleep command
                 cmd: Some(vec!["sleep".to_string(), "infinity".to_string()]),
                 ..Default::default()
             };
             
-            // Create the container
             let container = self.docker
                 .create_container(Some(options), config)
                 .await
@@ -142,7 +183,6 @@ impl Sandbox for GVisorDockerSandbox {
             
             self.container_id = Some(container.id.clone());
             
-            // Start the container
             self.docker
                 .start_container(&container.id, None::<StartContainerOptions<String>>)
                 .await
@@ -196,7 +236,13 @@ impl Sandbox for GVisorDockerSandbox {
         })
     }
     
-    fn execute(&self, command: &str, args: &[String], timeout: Duration) -> Result<ExecutionResult> {
+    fn execute(
+        &self,
+        command: &str,
+        args: &[String],
+        timeout: Duration,
+        working_dir: Option<&str>,
+    ) -> Result<ExecutionResult> {
         let container_id = self.container_id
             .as_ref()
             .ok_or(SandboxError::NotStarted)?;
@@ -214,6 +260,7 @@ impl Sandbox for GVisorDockerSandbox {
                 cmd: Some(cmd),
                 attach_stdout: Some(true),
                 attach_stderr: Some(true),
+                working_dir,
                 ..Default::default()
             };
             

@@ -159,6 +159,11 @@ pub async fn cmd_start() -> Result<()> {
         crate::cron::service::CronService::new(cron_store_path),
     ));
 
+    let tool_sandbox_enabled = sandbox_context
+        .as_ref()
+        .and_then(|(_, id)| id.as_ref())
+        .is_some();
+
     // Start agent loop
     let mut agent_loop = crate::agent::r#loop::AgentLoop::new(
         std::sync::Arc::clone(&completion_model),
@@ -169,6 +174,7 @@ pub async fn cmd_start() -> Result<()> {
         bus.outbound_tx_clone(),
         &cfg,
         std::sync::Arc::clone(&session_manager),
+        tool_sandbox_enabled,
     )
     .await;
     tokio::spawn(async move {
@@ -326,9 +332,9 @@ async fn init_sandbox_if_configured(
         // When in_app_sandbox we are already inside the sandbox (started via `synbot sandbox start`).
     }
 
-    let tool_sandbox_id = "synbot-tool".to_string();
+    let workspace_path = config::workspace_path(cfg);
     if let Some(ref tool_cfg) = cfg.tool_sandbox {
-        match config::build_tool_sandbox_config(tool_cfg, monitoring) {
+        match config::build_tool_sandbox_config(tool_cfg, monitoring, &workspace_path) {
             Ok(sandbox_config) => {
                 match manager.create_tool_sandbox(sandbox_config).await {
                     Ok(id) => {
@@ -336,7 +342,7 @@ async fn init_sandbox_if_configured(
                             warn!(sandbox_id = %id, error = %e, "Tool sandbox start failed (exec will run on host)");
                         } else {
                             info!(sandbox_id = %id, "Tool sandbox started (exec runs in sandbox)");
-                            return Some((manager, Some(tool_sandbox_id)));
+                            return Some((manager, Some(id)));
                         }
                     }
                     Err(e) => warn!(error = %e, "Tool sandbox creation failed (exec will run on host)"),

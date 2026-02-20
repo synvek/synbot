@@ -856,6 +856,12 @@ pub struct AppSandboxConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolSandboxConfig {
+    /// Container name for the tool sandbox. Default "synbot-tool".
+    #[serde(default)]
+    pub sandbox_name: Option<String>,
+    /// When true, remove existing container with the same name and create fresh on each start. When false (default), reuse existing container if found (start it if stopped).
+    #[serde(default)]
+    pub delete_on_start: Option<bool>,
     #[serde(default)]
     pub image: Option<String>,
     #[serde(default)]
@@ -1027,6 +1033,7 @@ pub fn build_app_sandbox_config(
             readonly_paths: expand_sandbox_paths(&fs.readonly_paths),
             writable_paths: expand_sandbox_paths(&fs.writable_paths),
             hidden_paths: expand_sandbox_paths(&fs.hidden_paths),
+            ..Default::default()
         },
         network: crate::sandbox::types::NetworkConfig {
             enabled: net.enabled,
@@ -1044,13 +1051,16 @@ pub fn build_app_sandbox_config(
         },
         child_work_dir,
         monitoring: build_sandbox_monitoring(monitoring),
+        delete_on_start: false,
     })
 }
 
 /// Build SandboxConfig for tool sandbox from Config.
+/// When `workspace_path` is provided, it is mounted in the container at `/workspace` (tool sandbox exec cwd).
 pub fn build_tool_sandbox_config(
     cfg: &ToolSandboxConfig,
     monitoring: &Option<SandboxMonitoringConfig>,
+    workspace_path: &std::path::Path,
 ) -> anyhow::Result<crate::sandbox::types::SandboxConfig> {
     let platform = "auto".to_string();
     let fs = cfg.filesystem.as_ref().map(|f| SandboxFilesystemConfig {
@@ -1076,13 +1086,22 @@ pub fn build_tool_sandbox_config(
         .transpose()?
         .unwrap_or(5 * 1024 * 1024 * 1024);
     let process = cfg.process.as_ref();
+    let sandbox_id = cfg
+        .sandbox_name
+        .as_deref()
+        .unwrap_or("synbot-tool")
+        .to_string();
     Ok(crate::sandbox::types::SandboxConfig {
-        sandbox_id: "synbot-tool".to_string(),
+        sandbox_id,
         platform,
         filesystem: crate::sandbox::types::FilesystemConfig {
             readonly_paths: expand_sandbox_paths(&fs.readonly_paths),
             writable_paths: expand_sandbox_paths(&fs.writable_paths),
             hidden_paths: expand_sandbox_paths(&fs.hidden_paths),
+            workspace_mount: Some((
+                workspace_path.to_string_lossy().to_string(),
+                "/workspace".to_string(),
+            )),
         },
         network: crate::sandbox::types::NetworkConfig {
             enabled: net.enabled,
@@ -1100,6 +1119,7 @@ pub fn build_tool_sandbox_config(
         },
         child_work_dir: None,
         monitoring: build_sandbox_monitoring(monitoring),
+        delete_on_start: cfg.delete_on_start.unwrap_or(false),
     })
 }
 

@@ -340,6 +340,7 @@ impl SandboxManager {
     /// * `command` - The command to run (e.g. "sh" or "cmd")
     /// * `args` - Command arguments (e.g. ["-c", "echo hello"])
     /// * `timeout` - Maximum execution time
+    /// * `working_dir` - Optional working directory inside the sandbox (e.g. `/workspace`)
     /// 
     /// # Errors
     /// 
@@ -350,12 +351,13 @@ impl SandboxManager {
         command: &str,
         args: &[String],
         timeout: Duration,
+        working_dir: Option<&str>,
     ) -> Result<ExecutionResult> {
         let sandboxes = self.sandboxes.read().await;
         let sandbox = sandboxes
             .get(sandbox_id)
             .ok_or(SandboxError::NotFound)?;
-        sandbox.execute(command, args, timeout)
+        sandbox.execute(command, args, timeout, working_dir)
     }
     
     /// Get reference to the monitoring module
@@ -532,6 +534,7 @@ mod tests {
                 readonly_paths: vec!["/usr".to_string()],
                 writable_paths: vec!["/tmp".to_string()],
                 hidden_paths: vec![],
+                ..Default::default()
             },
             network: NetworkConfig {
                 enabled: false,
@@ -549,6 +552,7 @@ mod tests {
             },
             child_work_dir: None,
             monitoring: MonitoringConfig::default(),
+            delete_on_start: false,
         }
     }
     

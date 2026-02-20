@@ -59,12 +59,17 @@ impl PlainDockerSandbox {
     }
 
     fn get_volumes(&self) -> Vec<String> {
-        self.config
+        let mut binds: Vec<String> = self
+            .config
             .filesystem
             .writable_paths
             .iter()
             .map(|p| format!("{}:{}", p, p))
-            .collect()
+            .collect();
+        if let Some((ref host, ref guest)) = self.config.filesystem.workspace_mount {
+            binds.push(format!("{}:{}", host, guest));
+        }
+        binds
     }
 }
 
@@ -77,13 +82,52 @@ impl Sandbox for PlainDockerSandbox {
                 .map_err(|e| SandboxError::CreationFailed(format!("Failed to create runtime: {}", e)))?;
 
             runtime.block_on(async {
+                if self.config.delete_on_start {
+                    let _ = self
+                        .docker
+                        .remove_container(
+                            &self.config.sandbox_id,
+                            Some(RemoveContainerOptions {
+                                force: true,
+                                ..Default::default()
+                            }),
+                        )
+                        .await;
+                } else {
+                    if let Ok(existing) = self
+                        .docker
+                        .inspect_container(&self.config.sandbox_id, None)
+                        .await
+                    {
+                        let id = existing
+                            .id
+                            .as_deref()
+                            .unwrap_or(self.config.sandbox_id.as_str());
+                        let running = existing
+                            .state
+                            .as_ref()
+                            .and_then(|s| s.running)
+                            .unwrap_or(false);
+                        if !running {
+                            self.docker
+                                .start_container(id, None::<StartContainerOptions<String>>)
+                                .await
+                                .map_err(|e| SandboxError::CreationFailed(format!("Failed to start existing container: {}", e)))?;
+                        }
+                        self.container_id = Some(id.to_string());
+                        self.status.state = SandboxState::Running;
+                        self.status.started_at = Some(Utc::now());
+                        return Ok(());
+                    }
+                }
+
                 let options = CreateContainerOptions {
                     name: self.config.sandbox_id.clone(),
                     platform: None,
                 };
 
                 let host_config = HostConfig {
-                    runtime: None, // default runc
+                    runtime: None,
                     network_mode: Some(self.get_network_mode()),
                     binds: Some(self.get_volumes()),
                     memory: Some(self.config.resources.max_memory as i64),
@@ -156,7 +200,13 @@ impl Sandbox for PlainDockerSandbox {
         })
     }
 
-    fn execute(&self, command: &str, args: &[String], timeout: Duration) -> Result<ExecutionResult> {
+    fn execute(
+        &self,
+        command: &str,
+        args: &[String],
+        timeout: Duration,
+        working_dir: Option<&str>,
+    ) -> Result<ExecutionResult> {
         let container_id = self
             .container_id
             .as_ref()
@@ -174,6 +224,7 @@ impl Sandbox for PlainDockerSandbox {
                     cmd: Some(cmd),
                     attach_stdout: Some(true),
                     attach_stderr: Some(true),
+                    working_dir,
                     ..Default::default()
                 };
 

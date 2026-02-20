@@ -360,7 +360,7 @@ impl DynTool for ExecTool {
         let start = Instant::now();
         let working_dir = cwd.display().to_string();
 
-        // Run inside tool sandbox when configured
+        // Run inside tool sandbox when configured (cwd is /workspace in container)
         if let Some((ref manager, ref sandbox_id)) = self.sandbox_context {
             let timeout = Duration::from_secs(self.timeout_secs);
             let (command, args) = if cfg!(windows) {
@@ -368,7 +368,8 @@ impl DynTool for ExecTool {
             } else {
                 ("sh".to_string(), vec!["-c".to_string(), cmd_str.to_string()])
             };
-            match manager.execute_in_sandbox(sandbox_id, &command, &args, timeout).await {
+            let sandbox_cwd = Some("/workspace");
+            match manager.execute_in_sandbox(sandbox_id, &command, &args, timeout, sandbox_cwd).await {
                 Ok(exec_result) => {
                     let stdout = decode_output_bytes(&exec_result.stdout);
                     let stderr = decode_output_bytes(&exec_result.stderr);
@@ -381,12 +382,13 @@ impl DynTool for ExecTool {
                     } else {
                         (stdout, stderr, None)
                     };
+                    let working_dir_display = "/workspace".to_string();
                     let exec_result_display = ExecResult {
                         exit_code: exec_result.exit_code,
                         stdout: truncated_stdout.clone(),
                         stderr: truncated_stderr.clone(),
                         duration_ms,
-                        working_dir: working_dir.clone(),
+                        working_dir: working_dir_display.clone(),
                         truncated: needs_truncation,
                         original_size,
                     };
@@ -395,7 +397,7 @@ impl DynTool for ExecTool {
                             command = %cmd_str,
                             exit_code = exec_result_display.exit_code,
                             duration_ms = exec_result_display.duration_ms,
-                            working_dir = %working_dir,
+                            working_dir = %working_dir_display,
                             sandbox = true,
                             "Command executed successfully (sandbox)"
                         );
@@ -404,7 +406,7 @@ impl DynTool for ExecTool {
                             command = %cmd_str,
                             exit_code = exec_result_display.exit_code,
                             duration_ms = exec_result_display.duration_ms,
-                            working_dir = %working_dir,
+                            working_dir = %working_dir_display,
                             sandbox = true,
                             "Command execution failed (sandbox)"
                         );
