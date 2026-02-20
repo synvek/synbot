@@ -289,9 +289,15 @@ impl DynTool for ExecTool {
                     if let (Some(approval_manager), Some(session_id), Some(channel), Some(chat_id)) =
                         (&self.approval_manager, session_id, channel, chat_id)
                     {
-                        let cwd = args["working_dir"]
-                            .as_str()
-                            .unwrap_or_else(|| self.workspace.to_str().unwrap_or("."));
+                        // When exec runs in tool sandbox, show container path in approval so UI matches execution context
+                        let cwd = if self.sandbox_context.is_some() {
+                            "/workspace".to_string()
+                        } else {
+                            args["working_dir"]
+                                .as_str()
+                                .unwrap_or_else(|| self.workspace.to_str().unwrap_or("."))
+                                .to_string()
+                        };
                         
                         let context = format!(
                             "session: {} channel: {}",
@@ -309,7 +315,7 @@ impl DynTool for ExecTool {
                                 channel.clone(),
                                 chat_id.clone(),
                                 cmd_str.to_string(),
-                                cwd.to_string(),
+                                cwd,
                                 context,
                                 self.approval_timeout_secs,
                                 approval_message,
@@ -360,14 +366,11 @@ impl DynTool for ExecTool {
         let start = Instant::now();
         let working_dir = cwd.display().to_string();
 
-        // Run inside tool sandbox when configured (cwd is /workspace in container)
+        // Run inside tool sandbox when configured (cwd is /workspace in container).
+        // Tool sandbox is always a Linux container (plain-docker / gvisor-docker / wsl2-gvisor), so use sh -c.
         if let Some((ref manager, ref sandbox_id)) = self.sandbox_context {
             let timeout = Duration::from_secs(self.timeout_secs);
-            let (command, args) = if cfg!(windows) {
-                ("cmd".to_string(), vec!["/C".to_string(), cmd_str.to_string()])
-            } else {
-                ("sh".to_string(), vec!["-c".to_string(), cmd_str.to_string()])
-            };
+            let (command, args) = ("sh".to_string(), vec!["-c".to_string(), cmd_str.to_string()]);
             let sandbox_cwd = Some("/workspace");
             match manager.execute_in_sandbox(sandbox_id, &command, &args, timeout, sandbox_cwd).await {
                 Ok(exec_result) => {

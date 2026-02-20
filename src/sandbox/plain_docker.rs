@@ -12,7 +12,7 @@ use bollard::container::{
 };
 use bollard::exec::{CreateExecOptions, StartExecResults};
 use bollard::models::HostConfig;
-use bollard::Docker;
+use bollard::{API_DEFAULT_VERSION, Docker};
 use chrono::Utc;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -27,11 +27,49 @@ pub struct PlainDockerSandbox {
     status: SandboxStatus,
 }
 
+/// Connect to the local Docker daemon. On Windows, tries named pipe first, then
+/// DOCKER_HOST (connect_with_defaults), then tcp://localhost:2375 as fallback
+/// when the named pipe fails (e.g. "hyper legacy client: client error (Connect)").
+fn connect_docker() -> Result<Docker> {
+    #[cfg(not(target_os = "windows"))]
+    {
+        Docker::connect_with_local_defaults()
+            .map_err(|e| SandboxError::CreationFailed(format!("Failed to connect to Docker: {}", e)))
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let mut last_err = None;
+
+        // 1. Named pipe (default for Docker Desktop)
+        match Docker::connect_with_local_defaults() {
+            Ok(d) => return Ok(d),
+            Err(e) => last_err = Some(e.to_string()),
+        }
+
+        // 2. DOCKER_HOST (e.g. tcp://localhost:2375 if user exposed daemon)
+        if let Ok(d) = Docker::connect_with_defaults() {
+            return Ok(d);
+        }
+
+        // 3. Explicit TCP fallback (Docker Desktop: General -> "Expose daemon on tcp://localhost:2375")
+        if let Ok(d) = Docker::connect_with_http("http://localhost:2375", 120, API_DEFAULT_VERSION) {
+            return Ok(d);
+        }
+
+        Err(SandboxError::CreationFailed(format!(
+            "Failed to connect to Docker on Windows. {} \
+             Ensure Docker Desktop is running. If the named pipe fails, either set DOCKER_HOST=tcp://localhost:2375 \
+             or in Docker Desktop enable General -> 'Expose daemon on tcp://localhost:2375 without TLS', then restart.",
+            last_err.as_deref().unwrap_or("")
+        )))
+    }
+}
+
 impl PlainDockerSandbox {
     /// Create a new plain Docker sandbox instance.
     pub fn new(config: SandboxConfig) -> Result<Self> {
-        let docker = Docker::connect_with_local_defaults()
-            .map_err(|e| SandboxError::CreationFailed(format!("Failed to connect to Docker: {}", e)))?;
+        let docker = connect_docker()?;
 
         let status = SandboxStatus {
             sandbox_id: config.sandbox_id.clone(),
