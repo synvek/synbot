@@ -244,12 +244,14 @@ impl SandboxFactory {
 
         #[cfg(target_os = "windows")]
         {
+            use crate::sandbox::plain_docker::PlainDockerSandbox;
             use crate::sandbox::{GVisorDockerSandbox, Wsl2GVisorSandbox};
             match requested {
                 "wsl2-gvisor" => Ok(Box::new(Wsl2GVisorSandbox::new(config)?)),
                 "gvisor-docker" => Ok(Box::new(GVisorDockerSandbox::new(config)?)),
+                "plain-docker" => Ok(Box::new(PlainDockerSandbox::new(config)?)),
                 _ => Err(SandboxError::CreationFailed(format!(
-                    "Unsupported tool sandbox type '{}' on Windows. Use 'wsl2-gvisor' or 'gvisor-docker'.",
+                    "Unsupported tool sandbox type '{}' on Windows. Use 'wsl2-gvisor', 'gvisor-docker', or 'plain-docker'.",
                     requested
                 ))),
             }
