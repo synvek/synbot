@@ -32,6 +32,7 @@ fn test_sandbox_config_serialization() {
         },
         monitoring: MonitoringConfig::default(),
         delete_on_start: false,
+        requested_tool_sandbox_type: None,
     };
     
     // Serialize to JSON

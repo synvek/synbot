@@ -187,6 +187,7 @@ async fn test_cross_component_error_handling() {
         },
         monitoring: create_test_monitoring_config(),
         delete_on_start: false,
+        requested_tool_sandbox_type: None,
     };
     
     let result = manager.create_app_sandbox(invalid_config).await;
@@ -330,6 +331,7 @@ fn create_test_app_sandbox_config(sandbox_id: &str) -> SandboxConfig {
         },
         monitoring: create_test_monitoring_config(),
         delete_on_start: false,
+        requested_tool_sandbox_type: None,
     }
 }
 
@@ -359,6 +361,7 @@ fn create_test_tool_sandbox_config(sandbox_id: &str) -> SandboxConfig {
         },
         monitoring: create_test_monitoring_config(),
         delete_on_start: false,
+        requested_tool_sandbox_type: None,
     }
 }
 

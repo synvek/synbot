@@ -49,6 +49,7 @@ fn create_benchmark_config(sandbox_id: &str, platform: &str) -> SandboxConfig {
         },
         monitoring: MonitoringConfig::default(),
         delete_on_start: false,
+        requested_tool_sandbox_type: None,
     }
 }
 

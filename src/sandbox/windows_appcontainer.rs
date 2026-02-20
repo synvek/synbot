@@ -1355,6 +1355,7 @@ mod tests {
             child_work_dir: None,
             monitoring: MonitoringConfig::default(),
             delete_on_start: false,
+            requested_tool_sandbox_type: None,
         }
     }
     

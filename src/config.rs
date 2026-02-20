@@ -862,6 +862,9 @@ pub struct ToolSandboxConfig {
     /// When true, remove existing container with the same name and create fresh on each start. When false (default), reuse existing container if found (start it if stopped).
     #[serde(default)]
     pub delete_on_start: Option<bool>,
+    /// Tool sandbox backend: "gvisor-docker" (default), "plain-docker". On Windows also "wsl2-gvisor". If the environment does not match (e.g. gVisor not installed), tool sandbox will fail; change this to an available type (e.g. "plain-docker") to run.
+    #[serde(default)]
+    pub sandbox_type: Option<String>,
     #[serde(default)]
     pub image: Option<String>,
     #[serde(default)]
@@ -1052,6 +1055,7 @@ pub fn build_app_sandbox_config(
         child_work_dir,
         monitoring: build_sandbox_monitoring(monitoring),
         delete_on_start: false,
+        requested_tool_sandbox_type: None,
     })
 }
 
@@ -1120,6 +1124,12 @@ pub fn build_tool_sandbox_config(
         child_work_dir: None,
         monitoring: build_sandbox_monitoring(monitoring),
         delete_on_start: cfg.delete_on_start.unwrap_or(false),
+        requested_tool_sandbox_type: Some(
+            cfg.sandbox_type
+                .as_deref()
+                .unwrap_or("gvisor-docker")
+                .to_string(),
+        ),
     })
 }
 

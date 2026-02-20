@@ -345,7 +345,16 @@ async fn init_sandbox_if_configured(
                             return Some((manager, Some(id)));
                         }
                     }
-                    Err(e) => warn!(error = %e, "Tool sandbox creation failed (exec will run on host)"),
+                    Err(e) => {
+                        let requested = tool_cfg.sandbox_type.as_deref().unwrap_or("gvisor-docker");
+                        warn!(
+                            error = %e,
+                            requested_type = %requested,
+                            "Tool sandbox creation failed (exec will run on host). \
+                             If you accept a less isolated backend, set toolSandbox.sandboxType in config \
+                             (e.g. \"plain-docker\" when gVisor is not available) and restart."
+                        );
+                    }
                 }
             }
             Err(e) => warn!(error = %e, "Tool sandbox config invalid"),

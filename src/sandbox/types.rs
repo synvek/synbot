@@ -21,6 +21,9 @@ pub struct SandboxConfig {
     /// When true (tool sandbox only), remove existing container and create fresh on start. When false, reuse existing container if found.
     #[serde(default)]
     pub delete_on_start: bool,
+    /// Requested tool sandbox backend: "gvisor-docker", "plain-docker", or on Windows "wsl2-gvisor". Set at build from config; no fallback when this is set.
+    #[serde(skip, default)]
+    pub requested_tool_sandbox_type: Option<String>,
 }
 
 /// Filesystem configuration

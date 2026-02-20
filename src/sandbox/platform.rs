@@ -228,42 +228,51 @@ impl SandboxFactory {
     /// - Docker is not available
     /// - gVisor runtime is not installed
     /// - On Windows: WSL2 is not available
+    /// Create a tool sandbox of the requested type only. No fallback; if the type is not available, returns an error (caller should prompt user to change config).
     pub fn create_tool_sandbox(mut config: SandboxConfig) -> Result<Box<dyn Sandbox>> {
-        // Auto-detect platform if needed
         if config.platform == "auto" {
             config.platform = PlatformDetector::current_platform();
         }
-        
-        // Validate platform support
         if !PlatformDetector::is_supported() {
             return Err(SandboxError::UnsupportedPlatform);
         }
-        
-        // Create platform-specific tool sandbox
+
+        let requested = config
+            .requested_tool_sandbox_type
+            .as_deref()
+            .unwrap_or("gvisor-docker");
+
         #[cfg(target_os = "windows")]
         {
             use crate::sandbox::{GVisorDockerSandbox, Wsl2GVisorSandbox};
-            match Wsl2GVisorSandbox::new(config.clone()) {
-                Ok(sb) => Ok(Box::new(sb)),
-                Err(e) => {
-                    let msg = e.to_string();
-                    if msg.contains("WSL2") || msg.contains("Docker is not accessible") {
-                        GVisorDockerSandbox::new(config).map(|sb| Box::new(sb) as Box<dyn Sandbox>)
-                    } else {
-                        Err(e)
-                    }
-                }
+            match requested {
+                "wsl2-gvisor" => Ok(Box::new(Wsl2GVisorSandbox::new(config)?)),
+                "gvisor-docker" => Ok(Box::new(GVisorDockerSandbox::new(config)?)),
+                _ => Err(SandboxError::CreationFailed(format!(
+                    "Unsupported tool sandbox type '{}' on Windows. Use 'wsl2-gvisor' or 'gvisor-docker'.",
+                    requested
+                ))),
             }
         }
-        
+
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
+            use crate::sandbox::plain_docker::PlainDockerSandbox;
             use crate::sandbox::GVisorDockerSandbox;
-            Ok(Box::new(GVisorDockerSandbox::new(config)?))
+            match requested {
+                "gvisor-docker" => Ok(Box::new(GVisorDockerSandbox::new(config)?)),
+                "plain-docker" => Ok(Box::new(PlainDockerSandbox::new(config)?)),
+                _ => Err(SandboxError::CreationFailed(format!(
+                    "Unsupported tool sandbox type '{}'. Use 'gvisor-docker' or 'plain-docker'. \
+                     If gVisor is not installed, set toolSandbox.sandboxType to \"plain-docker\" in config.",
+                    requested
+                ))),
+            }
         }
-        
+
         #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
         {
+            let _ = requested;
             Err(SandboxError::UnsupportedPlatform)
         }
     }

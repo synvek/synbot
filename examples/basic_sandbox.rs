@@ -48,6 +48,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         },
         monitoring: MonitoringConfig::default(),
         delete_on_start: false,
+        requested_tool_sandbox_type: None,
     };
 
     let sandbox_id = manager.create_app_sandbox(app_config).await?;

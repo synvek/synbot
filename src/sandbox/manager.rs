@@ -181,29 +181,8 @@ impl SandboxManager {
 
         let sandbox_id = config.sandbox_id.clone();
 
-        // Use SandboxFactory first; on Linux/macOS fall back to plain Docker if gVisor fails
-        let sandbox = match super::platform::SandboxFactory::create_tool_sandbox(config.clone()) {
-            Ok(s) => s,
-            Err(e) => {
-                #[cfg(any(target_os = "linux", target_os = "macos"))]
-                {
-                    let fallback_config = super::fallback::FallbackConfig {
-                        enable_fallback: true,
-                        log_fallback_warnings: true,
-                        allow_insecure_fallback: true,
-                    };
-                    let fallback_mgr = super::fallback::FallbackManager::with_config(fallback_config);
-                    match fallback_mgr.create_tool_sandbox_with_fallback(config).await {
-                        Ok((s, _)) => s,
-                        Err(_) => return Err(e),
-                    }
-                }
-                #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-                {
-                    return Err(e);
-                }
-            }
-        };
+        // Create only the requested sandbox type (no fallback); if environment doesn't match, fail and user can change config.
+        let sandbox = super::platform::SandboxFactory::create_tool_sandbox(config)?;
 
         // Store sandbox instance
         {
@@ -553,6 +532,7 @@ mod tests {
             child_work_dir: None,
             monitoring: MonitoringConfig::default(),
             delete_on_start: false,
+            requested_tool_sandbox_type: None,
         }
     }
     
