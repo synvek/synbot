@@ -42,13 +42,9 @@ pub fn build_completion_model(
     api_key: &str,
     api_base: Option<&str>,
 ) -> Result<Arc<dyn SynbotCompletionModel>> {
-    // In AppContainer, inject Google DNS resolver; otherwise use default reqwest client.
-    // This is the single injection point for all rig providers — no per-provider patching needed.
-    // reqwest::Client is cheap to clone (Arc-backed), so we clone once per provider branch.
-    #[cfg(target_os = "windows")]
+    // In app sandbox (Windows AppContainer or macOS nono), use client with Google DNS and
+    // (on macOS) rustls+webpki only; otherwise use default reqwest client.
     let mk_http = || crate::appcontainer_dns::build_reqwest_client();
-    #[cfg(not(target_os = "windows"))]
-    let mk_http = || reqwest::Client::new();
 
     let lower = provider_name.to_lowercase();
     // Turbofish `<reqwest::Client>` pins H so the compiler knows the initial http client type

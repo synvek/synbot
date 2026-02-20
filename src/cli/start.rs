@@ -36,34 +36,58 @@ pub async fn cmd_start() -> Result<()> {
     // Initialize logging with config (and feed events to log buffer for web UI)
     logging::init_logging(&cfg, Some(std::sync::Arc::new(log_tx)))?;
 
-    // When running inside Windows AppContainer: one-shot outbound HTTPS diagnostic to capture
-    // underlying error. Use explicit DNS nameserver (8.8.8.8) so we don't rely on system config
-    // (which is unreadable in AppContainer → "no connections available").
-    #[cfg(target_os = "windows")]
+    // When running inside app sandbox (Windows AppContainer or macOS nono): one-shot network
+    // diagnostic to capture underlying error (DNS, TLS, or connect).
     if std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some() {
         let client = crate::appcontainer_dns::build_reqwest_client();
+        let url = if cfg!(target_os = "windows") {
+            "https://www.microsoft.com"
+        } else {
+            "https://open.feishu.cn"
+        };
+        // Optional: log DNS resolution when on macOS to see if 8.8.8.8 is reachable
+        #[cfg(target_os = "macos")]
+        {
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(3),
+                crate::appcontainer_dns::global_resolver().lookup_ip("open.feishu.cn"),
+            )
+            .await
+            {
+                Ok(Ok(lookup)) => {
+                    let addrs: Vec<_> = lookup.iter().take(3).collect();
+                    info!("App sandbox (macOS) DNS diagnostic: open.feishu.cn -> {:?}", addrs);
+                }
+                Ok(Err(e)) => {
+                    warn!("App sandbox (macOS) DNS diagnostic: open.feishu.cn resolve failed: {}", e);
+                }
+                Err(_) => {
+                    warn!("App sandbox (macOS) DNS diagnostic: open.feishu.cn resolve timed out (3s)");
+                }
+            }
+        }
         let result = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            client.get("https://www.microsoft.com").send(),
+            std::time::Duration::from_secs(10),
+            client.get(url).send(),
         )
         .await;
         match result {
             Ok(Ok(resp)) => {
-                info!("AppContainer network diagnostic: GET https://www.microsoft.com -> {}", resp.status());
+                info!("App sandbox network diagnostic: GET {} -> {}", url, resp.status());
             }
             Ok(Err(e)) => {
                 let ae = anyhow::Error::from(e);
                 if let Some(io) = ae.downcast_ref::<std::io::Error>() {
                     warn!(
-                        "AppContainer network diagnostic: request failed io_error kind={:?} raw_os_error={:?} (see docs/getting-started/appcontainer-network-troubleshooting.md)",
+                        "App sandbox network diagnostic: request failed io_error kind={:?} raw_os_error={:?}",
                         io.kind(),
                         io.raw_os_error()
                     );
                 }
-                warn!("AppContainer network diagnostic: request failed: {:#}", ae);
+                warn!("App sandbox network diagnostic: request failed: {:#}", ae);
             }
             Err(_) => {
-                warn!("AppContainer network diagnostic: request timed out after 5s");
+                warn!("App sandbox network diagnostic: request timed out after 10s");
             }
         }
     }

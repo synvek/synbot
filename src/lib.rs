@@ -104,7 +104,6 @@
 //! - Resource usage metrics
 
 pub mod agent;
-#[cfg(target_os = "windows")]
 pub mod appcontainer_dns;
 pub mod bus;
 pub mod channels;

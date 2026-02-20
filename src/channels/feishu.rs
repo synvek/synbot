@@ -167,8 +167,11 @@ impl FeishuChannel {
             .with_app_type(AppType::SelfBuild)
             .with_enable_token_cache(true);
 
-        #[cfg(target_os = "windows")]
-        let builder = builder.with_http_client(crate::appcontainer_dns::build_reqwest_client());
+        let builder = if std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some() {
+            builder.with_http_client(crate::appcontainer_dns::build_reqwest_client())
+        } else {
+            builder
+        };
 
         builder.build()
     }
@@ -370,8 +373,11 @@ impl FeishuChannel {
                                             let builder = LarkClient::builder(&app_id_clone, &app_secret_clone)
                                                 .with_app_type(AppType::SelfBuild)
                                                 .with_enable_token_cache(true);
-                                            #[cfg(target_os = "windows")]
-                                            let builder = builder.with_http_client(crate::appcontainer_dns::build_reqwest_client());
+                                            let builder = if std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some() {
+                                                builder.with_http_client(crate::appcontainer_dns::build_reqwest_client())
+                                            } else {
+                                                builder
+                                            };
                                             builder.build()
                                         };
                                         let _ = Self::send_text_static(&client, &chat_id, "未配置聊天许可，请配置。").await;
@@ -544,11 +550,10 @@ impl FeishuChannel {
                         .app_id(&app_id_for_config)
                         .app_secret(&app_secret_for_config)
                         .req_timeout(std::time::Duration::from_secs(30))
-                        .http_client({
-                            #[cfg(target_os = "windows")]
-                            { crate::appcontainer_dns::build_reqwest_client() }
-                            #[cfg(not(target_os = "windows"))]
-                            { reqwest::Client::new() }
+                        .http_client(if std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some() {
+                            crate::appcontainer_dns::build_reqwest_client()
+                        } else {
+                            reqwest::Client::new()
                         })
                         .build(),
                 );

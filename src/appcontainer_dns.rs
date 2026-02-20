@@ -1,29 +1,27 @@
-//! DNS resolver for Windows AppContainer.
+//! DNS resolver for app sandbox (Windows AppContainer and macOS nono/Seatbelt).
 //!
-//! System DNS configuration is unreadable inside AppContainer (`GetAdaptersAddresses` returns
-//! an empty nameserver list), causing hickory-dns to report "no connections available".
+//! In restricted sandboxes, system DNS may be unavailable or blocked:
+//! - Windows AppContainer: `GetAdaptersAddresses` returns an empty nameserver list.
+//! - macOS Seatbelt: system resolver (e.g. mDNSResponder) may be denied.
 //!
 //! This module provides:
 //! - `GoogleDnsResolver`: implements reqwest's `Resolve` trait using Google DNS (8.8.8.8) directly.
 //! - `global_resolver()`: global singleton `TokioResolver` for non-reqwest paths (e.g. WebSocket).
-//! - `build_reqwest_client()`: inside AppContainer returns a `reqwest::Client` with
-//!   `GoogleDnsResolver` injected; otherwise returns the default client. Callers need not
-//!   care whether they are running inside AppContainer.
+//! - `build_reqwest_client()`: when `SYNBOT_IN_APP_SANDBOX` is set, returns a `reqwest::Client`
+//!   with `GoogleDnsResolver` injected; otherwise returns the default client.
 //!
 //! Usage:
 //! ```rust
 //! // HTTP (reqwest)
 //! let client = appcontainer_dns::build_reqwest_client();
 //!
-//! // WebSocket (tokio-tungstenite)
+//! // WebSocket (tokio-tungstenite) – open-lark uses this when SYNBOT_IN_APP_SANDBOX is set.
 //! let ip = appcontainer_dns::resolve_host("open.feishu.cn").await?;
 //! ```
 //!
 //! For third-party crates that cannot accept an injected reqwest client (e.g. rig-core),
 //! DNS issues must be addressed by other means (e.g. vendoring the crate and injecting
 //! a client, or waiting for upstream support).
-
-#![cfg(target_os = "windows")]
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, OnceLock};
@@ -91,30 +89,42 @@ impl Resolve for GoogleDnsResolver {
 
 /// Builds a `reqwest::Client`.
 ///
-/// - Inside AppContainer (when `SYNBOT_IN_APP_SANDBOX` is set): injects `GoogleDnsResolver`
-///   so all HTTP requests use Google DNS (8.8.8.8).
+/// - Inside app sandbox (when `SYNBOT_IN_APP_SANDBOX` is set): injects `GoogleDnsResolver`
+///   and on macOS uses rustls with webpki-roots only (no system certs) to avoid Security
+///   framework / OSStatus -9808 in Seatbelt.
 /// - Otherwise: returns the default client.
 ///
 /// Callers can use this function directly without conditional compilation.
 pub fn build_reqwest_client() -> reqwest::Client {
     if std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some() {
-        reqwest::Client::builder()
-            .dns_resolver(Arc::new(GoogleDnsResolver))
-            .build()
-            .unwrap_or_default()
+        let mut b = reqwest::Client::builder().dns_resolver(Arc::new(GoogleDnsResolver));
+        #[cfg(target_os = "macos")]
+        {
+            b = b
+                .use_rustls_tls()
+                .tls_built_in_root_certs(false)
+                .tls_built_in_webpki_certs(true);
+        }
+        b.build().unwrap_or_default()
     } else {
         reqwest::Client::new()
     }
 }
 
-/// Builds a `reqwest::Client` with a timeout (Google DNS is also injected in AppContainer).
+/// Builds a `reqwest::Client` with a timeout (Google DNS and macOS rustls/webpki same as above).
 pub fn build_reqwest_client_with_timeout(timeout: std::time::Duration) -> reqwest::Client {
     if std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some() {
-        reqwest::Client::builder()
+        let mut b = reqwest::Client::builder()
             .dns_resolver(Arc::new(GoogleDnsResolver))
-            .timeout(timeout)
-            .build()
-            .unwrap_or_default()
+            .timeout(timeout);
+        #[cfg(target_os = "macos")]
+        {
+            b = b
+                .use_rustls_tls()
+                .tls_built_in_root_certs(false)
+                .tls_built_in_webpki_certs(true);
+        }
+        b.build().unwrap_or_default()
     } else {
         reqwest::Client::builder()
             .timeout(timeout)

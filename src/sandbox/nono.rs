@@ -70,6 +70,42 @@ pub fn build_nono_capability_set(
         caps = caps.block_network();
     }
 
+    // On macOS with network enabled: allow TLS to verify server certs (fix OSStatus -9808).
+    // - Allow read to system and user Keychains dirs so Security framework can use root CAs.
+    // - Opt in to login keychain file so nono may skip its SecurityServer/securityd deny.
+    // - Add explicit mach-lookup allow rules so they override nono's deny (last-match).
+    #[cfg(target_os = "macos")]
+    if config.network.enabled {
+        let keychains_dirs: &[&str] = &["/Library/Keychains", "/System/Library/Keychains"];
+        for d in keychains_dirs {
+            if Path::new(d).exists() {
+                caps = caps
+                    .allow_path(*d, AccessMode::Read)
+                    .map_err(|e| SandboxError::CreationFailed(format!("nono allow_path keychains {}: {}", d, e)))?;
+            }
+        }
+        if let Ok(home) = std::env::var("HOME") {
+            let user_keychain = Path::new(&home).join("Library/Keychains/login.keychain-db");
+            if user_keychain.exists() {
+                caps = caps
+                    .allow_file(&user_keychain, AccessMode::Read)
+                    .map_err(|e| SandboxError::CreationFailed(format!("nono allow_file user keychain: {}", e)))?;
+            }
+        }
+        let system_keychain = Path::new("/Library/Keychains/login.keychain-db");
+        if system_keychain.exists() {
+            caps = caps
+                .allow_file(system_keychain, AccessMode::Read)
+                .map_err(|e| SandboxError::CreationFailed(format!("nono allow_file system keychain: {}", e)))?;
+        }
+        caps = caps
+            .platform_rule("(allow mach-lookup (global-name \"com.apple.SecurityServer\"))")
+            .map_err(|e| SandboxError::CreationFailed(format!("nono platform_rule SecurityServer: {}", e)))?;
+        caps = caps
+            .platform_rule("(allow mach-lookup (global-name \"com.apple.securityd\"))")
+            .map_err(|e| SandboxError::CreationFailed(format!("nono platform_rule securityd: {}", e)))?;
+    }
+
     Ok(caps)
 }
 

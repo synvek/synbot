@@ -550,16 +550,16 @@ pub struct WsCloseReason {
 
 /// Connect to a WebSocket URL.
 ///
-/// When `SYNBOT_IN_APP_SANDBOX` is set (Windows AppContainer), system DNS is
-/// unavailable. In that case we delegate to `appcontainer::ws_connect_appcontainer`
-/// which resolves the hostname via Google DNS (8.8.8.8) before connecting.
+/// When `SYNBOT_IN_APP_SANDBOX` is set (Windows AppContainer or macOS nono sandbox),
+/// system DNS may be unavailable or restricted. We then delegate to
+/// `appcontainer::ws_connect_appcontainer`, which resolves the hostname via Google DNS
+/// (8.8.8.8) before connecting, so TLS and WebSocket work without system resolver.
 ///
 /// In all other environments this is a thin wrapper around `connect_async`.
 async fn ws_connect(
     url: String,
 ) -> WsClientResult<(WebSocketStream<MaybeTlsStream<TcpStream>>, tungstenite::handshake::client::Response)>
 {
-    #[cfg(target_os = "windows")]
     if std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some() {
         return super::appcontainer::ws_connect_appcontainer(url).await;
     }

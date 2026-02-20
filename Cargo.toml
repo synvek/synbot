@@ -29,7 +29,8 @@ serde_json = "1"
 toml = "0.8"
 
 # HTTP client (hickory-dns: use network DNS instead of system getaddrinfo; fixes WSAHOST_NOT_FOUND 11001 in AppContainer)
-reqwest = { version = "0.12", features = ["json", "hickory-dns"] }
+# rustls-tls: on macOS app sandbox we force rustls + webpki-roots only to avoid Security framework (OSStatus -9808)
+reqwest = { version = "0.12", features = ["json", "hickory-dns", "rustls-tls"] }
 # Explicit nameserver (8.8.8.8) when in AppContainer (see appcontainer_dns module)
 hickory-resolver = "0.25"
 
@@ -55,8 +56,8 @@ chrono = { version = "0.4", features = ["serde"] }
 # Async trait
 async-trait = "0.1"
 
-# WebSocket (Discord Gateway)
-tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
+# WebSocket (use rustls + webpki-roots so macOS app sandbox works without Security framework / -9808)
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
 url = "2"
 idna = "0.2"

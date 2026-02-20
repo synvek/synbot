@@ -697,10 +697,10 @@ features = [
 
 [dependencies.tokio-tungstenite]
 version = "0.23"
-features = ["rustls-tls-native-roots"]
+features = ["rustls-tls-webpki-roots"]
 optional = true
 
-[target.'cfg(windows)'.dependencies.hickory-resolver]
+[dependencies.hickory-resolver]
 version = "0.25"
 
 [dependencies.tracing]
