@@ -59,7 +59,11 @@ pub fn build_completion_model(
         let m = client.completion_model(model_name.to_string());
         Arc::new(AnthropicModel(client, m)) as Arc<dyn SynbotCompletionModel>
     } else if lower.contains("deepseek") {
-        let m = DeepSeekDirectModel::new(mk_http(), api_key.to_string(), model_name.to_string());
+        let base = api_base
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|| DEEPSEEK_API_BASE.to_string());
+        let m = DeepSeekDirectModel::new(mk_http(), api_key.to_string(), model_name.to_string(), base);
         Arc::new(m) as Arc<dyn SynbotCompletionModel>
     } else if lower.contains("moonshot") {
         let client = rig::providers::moonshot::Client::<RC>::builder()
@@ -156,11 +160,15 @@ struct DeepSeekDirectModel {
 }
 
 impl DeepSeekDirectModel {
-    fn new(http: reqwest::Client, api_key: String, model: String) -> Self {
+    fn new(http: reqwest::Client, api_key: String, model: String, api_base: String) -> Self {
         Self {
             http,
             api_key,
-            api_base: DEEPSEEK_API_BASE.to_string(),
+            api_base: if api_base.trim().is_empty() {
+                DEEPSEEK_API_BASE.to_string()
+            } else {
+                api_base.trim().to_string()
+            },
             model,
         }
     }
