@@ -111,6 +111,28 @@ pub fn build_reqwest_client() -> reqwest::Client {
     }
 }
 
+/// Builds a `reqwest::Client` with a custom default User-Agent (same DNS/TLS behavior as `build_reqwest_client`).
+pub fn build_reqwest_client_with_user_agent(user_agent: &str) -> reqwest::Client {
+    if std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some() {
+        let mut b = reqwest::Client::builder()
+            .dns_resolver(Arc::new(GoogleDnsResolver))
+            .user_agent(user_agent);
+        #[cfg(target_os = "macos")]
+        {
+            b = b
+                .use_rustls_tls()
+                .tls_built_in_root_certs(false)
+                .tls_built_in_webpki_certs(true);
+        }
+        b.build().unwrap_or_default()
+    } else {
+        reqwest::Client::builder()
+            .user_agent(user_agent)
+            .build()
+            .unwrap_or_default()
+    }
+}
+
 /// Builds a `reqwest::Client` with a timeout (Google DNS and macOS rustls/webpki same as above).
 pub fn build_reqwest_client_with_timeout(timeout: std::time::Duration) -> reqwest::Client {
     if std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some() {

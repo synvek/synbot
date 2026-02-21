@@ -34,6 +34,8 @@ pub fn resolve_provider(cfg: &config::Config, provider_name: &str) -> (String, O
         (cfg.providers.deepseek.api_key.clone(), &cfg.providers.deepseek.api_base)
     } else if name.contains("moonshot") {
         (cfg.providers.moonshot.api_key.clone(), &cfg.providers.moonshot.api_base)
+    } else if name.contains("kimi") {
+        (cfg.providers.kimi_code.api_key.clone(), &cfg.providers.kimi_code.api_base)
     } else if name.contains("ollama") {
         (cfg.providers.ollama.api_key.clone(), &cfg.providers.ollama.api_base)
     } else {

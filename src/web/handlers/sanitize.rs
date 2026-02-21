@@ -65,6 +65,7 @@ pub struct SanitizedProvidersConfig {
     pub openai: SanitizedProviderEntry,
     pub openrouter: SanitizedProviderEntry,
     pub deepseek: SanitizedProviderEntry,
+    pub kimi_code: SanitizedProviderEntry,
     pub ollama: SanitizedProviderEntry,
 }
 
@@ -150,6 +151,7 @@ fn sanitize_providers(providers: &ProvidersConfig) -> SanitizedProvidersConfig {
         openai: sanitize_provider_entry(&providers.openai),
         openrouter: sanitize_provider_entry(&providers.openrouter),
         deepseek: sanitize_provider_entry(&providers.deepseek),
+        kimi_code: sanitize_provider_entry(&providers.kimi_code),
         ollama: sanitize_provider_entry(&providers.ollama),
     }
 }
@@ -329,6 +331,10 @@ mod tests {
                     api_key: "".to_string(),
                     api_base: None,
                 },
+                kimi_code: ProviderEntry {
+                    api_key: "".to_string(),
+                    api_base: None,
+                },
                 ollama: ProviderEntry {
                     api_key: "".to_string(),
                     api_base: Some("http://localhost:11434".to_string()),
@@ -364,6 +370,7 @@ mod tests {
         assert_eq!(sanitized.providers.openai.api_key, MASK);
         assert_eq!(sanitized.providers.openrouter.api_key, ""); // empty preserved
         assert_eq!(sanitized.providers.deepseek.api_key, "");
+        assert_eq!(sanitized.providers.kimi_code.api_key, "");
         assert_eq!(sanitized.providers.ollama.api_key, "");
 
         // Check web auth

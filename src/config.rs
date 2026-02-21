@@ -137,6 +137,9 @@ pub struct ProvidersConfig {
     pub deepseek: ProviderEntry,
     #[serde(default)]
     pub moonshot: ProviderEntry,
+    /// Kimi Code (月之暗面 / Moonshot coding API). Uses OpenAI-compatible chat completions; set api_base if using a custom endpoint.
+    #[serde(default)]
+    pub kimi_code: ProviderEntry,
     #[serde(default)]
     pub ollama: ProviderEntry,
 }
