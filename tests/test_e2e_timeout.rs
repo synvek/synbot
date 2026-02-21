@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 use std::time::Duration;
-use synbot::tools::approval::ApprovalManager;
+use synbot::tools::approval::{ApprovalManager, ApprovalOutcome};
 
 #[tokio::test]
 async fn test_e2e_approval_timeout_short() {
@@ -20,11 +20,12 @@ async fn test_e2e_approval_timeout_short() {
             "/tmp".to_string(),
             "test context".to_string(),
             1, // 1秒超时
+            None,
         )
         .await;
     
     assert!(result.is_ok(), "Request should complete");
-    assert!(!result.unwrap(), "Timeout should result in rejection");
+    assert_eq!(result.unwrap(), ApprovalOutcome::Timeout, "Timeout should result in Timeout outcome");
 }
 
 #[tokio::test]
@@ -43,13 +44,14 @@ async fn test_e2e_approval_timeout_medium() {
             "/tmp".to_string(),
             "test context".to_string(),
             5, // 5秒超时
+            None,
         )
         .await;
     
     let elapsed = start.elapsed();
     
     assert!(result.is_ok(), "Request should complete");
-    assert!(!result.unwrap(), "Timeout should result in rejection");
+    assert_eq!(result.unwrap(), ApprovalOutcome::Timeout, "Timeout should result in Timeout outcome");
     assert!(elapsed.as_secs() >= 5, "Should wait for full timeout period");
     assert!(elapsed.as_secs() < 7, "Should not wait significantly longer than timeout");
 }
@@ -71,6 +73,7 @@ async fn test_e2e_approval_timeout_with_late_response() {
                 "/tmp".to_string(),
                 "test context".to_string(),
                 2, // 2秒超时
+                None,
             )
             .await
     });
@@ -91,7 +94,7 @@ async fn test_e2e_approval_timeout_with_late_response() {
     // 验证请求已超时
     let result = request_task.await.unwrap();
     assert!(result.is_ok());
-    assert!(!result.unwrap(), "Request should have timed out");
+    assert_eq!(result.unwrap(), ApprovalOutcome::Timeout, "Request should have timed out");
 }
 
 #[tokio::test]
@@ -108,6 +111,7 @@ async fn test_e2e_approval_timeout_history() {
             "/tmp".to_string(),
             "test context".to_string(),
             1,
+            None,
         )
         .await;
     
@@ -135,6 +139,7 @@ async fn test_e2e_approval_multiple_timeouts() {
                     "/tmp".to_string(),
                     format!("context_{}", i),
                     1,
+                    None,
                 )
                 .await
                 .unwrap()
@@ -144,8 +149,8 @@ async fn test_e2e_approval_multiple_timeouts() {
     
     // 等待所有请求超时
     for handle in handles {
-        let approved = handle.await.unwrap();
-        assert!(!approved, "All requests should timeout");
+        let outcome = handle.await.unwrap();
+        assert_eq!(outcome, ApprovalOutcome::Timeout, "All requests should timeout");
     }
     
     // 验证历史记录
@@ -170,6 +175,7 @@ async fn test_e2e_approval_timeout_vs_approval() {
                 "/tmp".to_string(),
                 "will timeout".to_string(),
                 1,
+                None,
             )
             .await
             .unwrap()
@@ -200,6 +206,7 @@ async fn test_e2e_approval_timeout_vs_approval() {
                 "/tmp".to_string(),
                 "will approve".to_string(),
                 5,
+                None,
             )
             .await
             .unwrap()
@@ -208,8 +215,8 @@ async fn test_e2e_approval_timeout_vs_approval() {
     // 等待两个任务完成
     let (timeout_result, approval_result) = tokio::join!(timeout_task, approval_task);
     
-    assert!(!timeout_result.unwrap(), "First request should timeout");
-    assert!(approval_result.unwrap(), "Second request should be approved");
+    assert_eq!(timeout_result.unwrap(), ApprovalOutcome::Timeout, "First request should timeout");
+    assert_eq!(approval_result.unwrap(), ApprovalOutcome::Approved, "Second request should be approved");
     
     // 验证历史记录
     let history = approval_manager.get_history().await;

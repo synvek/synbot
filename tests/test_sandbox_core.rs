@@ -31,8 +31,10 @@ fn test_sandbox_config_serialization() {
             max_processes: 10,
         },
         monitoring: MonitoringConfig::default(),
+        child_work_dir: None,
         delete_on_start: false,
         requested_tool_sandbox_type: None,
+        image: None,
     };
     
     // Serialize to JSON

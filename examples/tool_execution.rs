@@ -44,8 +44,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             max_processes: 5,
         },
         monitoring: MonitoringConfig::default(),
+        child_work_dir: None,
         delete_on_start: false,
         requested_tool_sandbox_type: None,
+        image: None,
     };
 
     let sandbox_id = manager.create_tool_sandbox(tool_config).await?;

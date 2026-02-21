@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
 use synbot::bus::{InboundMessage, OutboundMessage};
-use synbot::tools::approval::ApprovalManager;
+use synbot::tools::approval::{ApprovalManager, ApprovalOutcome};
 use synbot::tools::permission::{CommandPermissionPolicy, PermissionLevel, PermissionRule};
 use synbot::tools::shell::{ExecTool, CommandPolicy};
 use synbot::tools::DynTool;
@@ -57,6 +57,8 @@ async fn test_e2e_web_approval_allow_direct() {
         session_id: Some("test_session".to_string()),
         channel: Some("web".to_string()),
         chat_id: Some("test_chat".to_string()),
+        approval_timeout_secs: 300,
+        sandbox_context: None,
     };
     
     let args = json!({
@@ -94,6 +96,8 @@ async fn test_e2e_web_approval_deny_direct() {
         session_id: Some("test_session".to_string()),
         channel: Some("web".to_string()),
         chat_id: Some("test_chat".to_string()),
+        approval_timeout_secs: 300,
+        sandbox_context: None,
     };
     
     let args = json!({
@@ -145,6 +149,7 @@ async fn test_e2e_web_approval_manager_basic() {
                 "/tmp".to_string(),
                 "test context".to_string(),
                 5, // 5秒超时
+                None,
             )
             .await
     });
@@ -154,7 +159,7 @@ async fn test_e2e_web_approval_manager_basic() {
     
     assert!(approval_result.is_ok(), "Approval submission should succeed");
     assert!(request_result.is_ok(), "Request should complete");
-    assert!(request_result.unwrap().unwrap(), "Request should be approved");
+    assert_eq!(request_result.unwrap().unwrap(), ApprovalOutcome::Approved, "Request should be approved");
 }
 
 #[tokio::test]
@@ -188,6 +193,7 @@ async fn test_e2e_web_approval_rejection() {
                 "/tmp".to_string(),
                 "test context".to_string(),
                 5,
+                None,
             )
             .await
     });
@@ -196,7 +202,7 @@ async fn test_e2e_web_approval_rejection() {
     
     assert!(approval_result.is_ok(), "Approval submission should succeed");
     assert!(request_result.is_ok(), "Request should complete");
-    assert!(!request_result.unwrap().unwrap(), "Request should be rejected");
+    assert_eq!(request_result.unwrap().unwrap(), ApprovalOutcome::Rejected, "Request should be rejected");
 }
 
 #[tokio::test]
@@ -214,11 +220,12 @@ async fn test_e2e_web_approval_timeout() {
             "/tmp".to_string(),
             "test context".to_string(),
             1, // 1秒超时
+            None,
         )
         .await;
     
     assert!(result.is_ok(), "Request should complete");
-    assert!(!result.unwrap(), "Timeout should result in rejection");
+    assert_eq!(result.unwrap(), ApprovalOutcome::Timeout, "Timeout should result in Timeout outcome");
 }
 
 #[tokio::test]
@@ -253,6 +260,7 @@ async fn test_e2e_web_approval_history() {
                 "/tmp".to_string(),
                 format!("context_{}", i),
                 5,
+                None,
             )
             .await;
         
@@ -303,6 +311,7 @@ async fn test_e2e_web_concurrent_approvals() {
                     "/tmp".to_string(),
                     format!("context_{}", i),
                     5,
+                    None,
                 )
                 .await
                 .unwrap()
@@ -313,11 +322,11 @@ async fn test_e2e_web_concurrent_approvals() {
     
     // 等待所有请求完成
     for (i, handle) in handles.into_iter().enumerate() {
-        let approved = handle.await.unwrap();
+        let outcome = handle.await.unwrap();
         if i % 2 == 0 {
-            assert!(approved, "Even numbered requests should be approved");
+            assert_eq!(outcome, ApprovalOutcome::Approved, "Even numbered requests should be approved");
         } else {
-            assert!(!approved, "Odd numbered requests should be rejected");
+            assert_eq!(outcome, ApprovalOutcome::Rejected, "Odd numbered requests should be rejected");
         }
     }
 }

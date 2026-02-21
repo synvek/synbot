@@ -139,8 +139,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         resources: resource_config,
         process: process_config,
         monitoring: MonitoringConfig::default(),
+        child_work_dir: None,
         delete_on_start: false,
         requested_tool_sandbox_type: None,
+        image: None,
     };
 
     let sandbox_id = manager.create_app_sandbox(sandbox_config).await?;

@@ -186,8 +186,10 @@ async fn test_cross_component_error_handling() {
             max_processes: 0, // Invalid: too small
         },
         monitoring: create_test_monitoring_config(),
+        child_work_dir: None,
         delete_on_start: false,
         requested_tool_sandbox_type: None,
+        image: None,
     };
     
     let result = manager.create_app_sandbox(invalid_config).await;
@@ -330,8 +332,10 @@ fn create_test_app_sandbox_config(sandbox_id: &str) -> SandboxConfig {
             max_processes: 10,
         },
         monitoring: create_test_monitoring_config(),
+        child_work_dir: None,
         delete_on_start: false,
         requested_tool_sandbox_type: None,
+        image: None,
     }
 }
 
@@ -360,8 +364,10 @@ fn create_test_tool_sandbox_config(sandbox_id: &str) -> SandboxConfig {
             max_processes: 5,
         },
         monitoring: create_test_monitoring_config(),
+        child_work_dir: None,
         delete_on_start: false,
         requested_tool_sandbox_type: None,
+        image: None,
     }
 }
 

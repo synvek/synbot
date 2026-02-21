@@ -835,7 +835,7 @@ mod tests {
 
         // Create a rejected request
         let manager_clone = manager.clone_for_test();
-        let handle2: tokio::task::JoinHandle<anyhow::Result<bool>> = tokio::spawn(async move {
+        let handle2: tokio::task::JoinHandle<anyhow::Result<ApprovalOutcome>> = tokio::spawn(async move {
             manager_clone
                 .request_approval(
                     "session2".to_string(),

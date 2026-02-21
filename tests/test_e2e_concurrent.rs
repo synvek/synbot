@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 use std::time::Duration;
-use synbot::tools::approval::ApprovalManager;
+use synbot::tools::approval::{ApprovalManager, ApprovalOutcome};
 
 #[tokio::test]
 async fn test_e2e_concurrent_approvals_basic() {
@@ -45,6 +45,7 @@ async fn test_e2e_concurrent_approvals_basic() {
                     "/tmp".to_string(),
                     format!("context_{}", i),
                     5,
+                    None,
                 )
                 .await
                 .unwrap()
@@ -55,8 +56,8 @@ async fn test_e2e_concurrent_approvals_basic() {
     
     // 等待所有请求完成
     for handle in handles {
-        let approved = handle.await.unwrap();
-        assert!(approved, "All requests should be approved");
+        let outcome = handle.await.unwrap();
+        assert_eq!(outcome, ApprovalOutcome::Approved, "All requests should be approved");
     }
     
     // 验证历史记录
@@ -95,7 +96,7 @@ async fn test_e2e_concurrent_mixed_results() {
             });
             
             // 请求审批
-            let approved = manager_clone
+            let outcome = manager_clone
                 .request_approval(
                     format!("session_{}", i),
                     "web".to_string(),
@@ -104,11 +105,12 @@ async fn test_e2e_concurrent_mixed_results() {
                     "/tmp".to_string(),
                     format!("context_{}", i),
                     5,
+                    None,
                 )
                 .await
                 .unwrap();
             
-            (i, approved)
+            (i, outcome)
         });
         
         handles.push(handle);
@@ -116,11 +118,11 @@ async fn test_e2e_concurrent_mixed_results() {
     
     // 验证结果
     for handle in handles {
-        let (i, approved) = handle.await.unwrap();
+        let (i, outcome) = handle.await.unwrap();
         if i % 2 == 0 {
-            assert!(approved, "Even numbered requests should be approved");
+            assert_eq!(outcome, ApprovalOutcome::Approved, "Even numbered requests should be approved");
         } else {
-            assert!(!approved, "Odd numbered requests should be rejected");
+            assert_eq!(outcome, ApprovalOutcome::Rejected, "Odd numbered requests should be rejected");
         }
     }
     
@@ -139,21 +141,22 @@ async fn test_e2e_concurrent_different_channels() {
     
     for (i, channel) in channels.iter().enumerate() {
         let manager_clone = approval_manager.clone();
-        let channel_str = channel.to_string().as_str();
+        let channel_owned = channel.to_string();
         
         let handle = tokio::spawn(async move {
-            let request_id = format!("channel_{}_{}", channel_str, i);
+            let request_id = format!("channel_{}_{}", channel_owned, i);
             
             // 在后台响应
             let manager_inner = manager_clone.clone();
             let request_id_clone = request_id.clone();
+            let channel_clone = channel_owned.clone();
             tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_millis(50)).await;
                 
                 let response = synbot::tools::approval::ApprovalResponse {
                     request_id: request_id_clone,
                     approved: true,
-                    responder: format!("user_{}_{}", channel_str, i),
+                    responder: format!("user_{}_{}", channel_clone, i),
                     timestamp: chrono::Utc::now(),
                 };
                 
@@ -163,13 +166,14 @@ async fn test_e2e_concurrent_different_channels() {
             // 请求审批
             manager_clone
                 .request_approval(
-                    format!("session_{}_{}", channel_str, i),
-                    channel_str.to_string(),
-                    format!("chat_{}_{}", channel_str, i),
-                    format!("command from {}", channel_str),
+                    format!("session_{}_{}", channel_owned, i),
+                    channel_owned.clone(),
+                    format!("chat_{}_{}", channel_owned, i),
+                    format!("command from {}", channel_owned),
                     "/tmp".to_string(),
-                    format!("context from {}", channel_str),
+                    format!("context from {}", channel_owned),
                     5,
+                    None,
                 )
                 .await
                 .unwrap()
@@ -180,8 +184,8 @@ async fn test_e2e_concurrent_different_channels() {
     
     // 等待所有请求完成
     for handle in handles {
-        let approved = handle.await.unwrap();
-        assert!(approved, "All channel requests should be approved");
+        let outcome = handle.await.unwrap();
+        assert_eq!(outcome, ApprovalOutcome::Approved, "All channel requests should be approved");
     }
     
     // 验证历史记录
@@ -230,6 +234,7 @@ async fn test_e2e_concurrent_high_load() {
                     "/tmp".to_string(),
                     format!("context_{}", i),
                     5,
+                    None,
                 )
                 .await
                 .unwrap()
@@ -241,7 +246,7 @@ async fn test_e2e_concurrent_high_load() {
     // 等待所有请求完成
     let mut success_count = 0;
     for handle in handles {
-        if handle.await.unwrap() {
+        if handle.await.unwrap() == ApprovalOutcome::Approved {
             success_count += 1;
         }
     }
@@ -286,7 +291,7 @@ async fn test_e2e_concurrent_with_timeouts() {
             }
             
             // 请求审批
-            let approved = manager_clone
+            let outcome = manager_clone
                 .request_approval(
                     format!("session_{}", i),
                     "web".to_string(),
@@ -295,11 +300,12 @@ async fn test_e2e_concurrent_with_timeouts() {
                     "/tmp".to_string(),
                     format!("context_{}", i),
                     if will_timeout { 1 } else { 5 }, // 超时的请求设置1秒超时
+                    None,
                 )
                 .await
                 .unwrap();
             
-            (i, approved, will_timeout)
+            (i, outcome, will_timeout)
         });
         
         handles.push(handle);
@@ -310,12 +316,12 @@ async fn test_e2e_concurrent_with_timeouts() {
     let mut approved_count = 0;
     
     for handle in handles {
-        let (i, approved, will_timeout) = handle.await.unwrap();
+        let (i, outcome, will_timeout) = handle.await.unwrap();
         if will_timeout {
-            assert!(!approved, "Request {} should timeout", i);
+            assert_eq!(outcome, ApprovalOutcome::Timeout, "Request {} should timeout", i);
             timeout_count += 1;
         } else {
-            assert!(approved, "Request {} should be approved", i);
+            assert_eq!(outcome, ApprovalOutcome::Approved, "Request {} should be approved", i);
             approved_count += 1;
         }
     }
@@ -369,6 +375,7 @@ async fn test_e2e_concurrent_same_session() {
                     "/tmp".to_string(),
                     format!("context_{}", i),
                     5,
+                    None,
                 )
                 .await
                 .unwrap()
@@ -379,8 +386,8 @@ async fn test_e2e_concurrent_same_session() {
     
     // 等待所有请求完成
     for handle in handles {
-        let approved = handle.await.unwrap();
-        assert!(approved, "All requests from same session should be approved");
+        let outcome = handle.await.unwrap();
+        assert_eq!(outcome, ApprovalOutcome::Approved, "All requests from same session should be approved");
     }
     
     // 验证历史记录

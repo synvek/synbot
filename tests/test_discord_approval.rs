@@ -7,7 +7,7 @@ use tokio::sync::{broadcast, mpsc};
 use synbot::bus::{InboundMessage, OutboundMessage, OutboundMessageType};
 use synbot::channels::discord::DiscordChannel;
 use synbot::config::DiscordConfig;
-use synbot::tools::approval::{ApprovalManager, ApprovalRequest, ApprovalResponse};
+use synbot::tools::approval::{ApprovalManager, ApprovalOutcome, ApprovalRequest, ApprovalResponse};
 
 /// 测试辅助函数：创建测试用的 DiscordChannel
 fn create_test_channel(
@@ -48,6 +48,7 @@ async fn test_approval_manager_integration() {
         context: "Test context".to_string(),
         timestamp: chrono::Utc::now(),
         timeout_secs: 300,
+        display_message: None,
     };
     
     // 在后台任务中模拟审批响应
@@ -65,7 +66,7 @@ async fn test_approval_manager_integration() {
     });
     
     // 请求审批
-    let approved = manager
+    let outcome = manager
         .request_approval(
             request.session_id.clone(),
             request.channel.clone(),
@@ -74,11 +75,12 @@ async fn test_approval_manager_integration() {
             request.working_dir.clone(),
             request.context.clone(),
             request.timeout_secs,
+            None,
         )
         .await
         .unwrap();
     
-    assert!(approved, "Approval should be granted");
+    assert_eq!(outcome, ApprovalOutcome::Approved, "Approval should be granted");
 }
 
 #[tokio::test]
@@ -97,6 +99,7 @@ async fn test_approval_rejection() {
         context: "Test rejection".to_string(),
         timestamp: chrono::Utc::now(),
         timeout_secs: 300,
+        display_message: None,
     };
     
     // 在后台任务中模拟拒绝响应
@@ -114,7 +117,7 @@ async fn test_approval_rejection() {
     });
     
     // 请求审批
-    let approved = manager
+    let outcome = manager
         .request_approval(
             request.session_id.clone(),
             request.channel.clone(),
@@ -123,11 +126,12 @@ async fn test_approval_rejection() {
             request.working_dir.clone(),
             request.context.clone(),
             request.timeout_secs,
+            None,
         )
         .await
         .unwrap();
     
-    assert!(!approved, "Approval should be rejected");
+    assert_eq!(outcome, ApprovalOutcome::Rejected, "Approval should be rejected");
 }
 
 #[tokio::test]
@@ -146,10 +150,11 @@ async fn test_approval_timeout() {
         context: "Test timeout".to_string(),
         timestamp: chrono::Utc::now(),
         timeout_secs: 1, // 1 秒超时
+        display_message: None,
     };
     
     // 不发送响应，让请求超时
-    let approved = manager
+    let outcome = manager
         .request_approval(
             request.session_id.clone(),
             request.channel.clone(),
@@ -158,11 +163,12 @@ async fn test_approval_timeout() {
             request.working_dir.clone(),
             request.context.clone(),
             request.timeout_secs,
+            None,
         )
         .await
         .unwrap();
     
-    assert!(!approved, "Approval should timeout and default to rejected");
+    assert_eq!(outcome, ApprovalOutcome::Timeout, "Approval should timeout");
 }
 
 #[tokio::test]
@@ -188,6 +194,7 @@ async fn test_outbound_approval_request_formatting() {
         context: "Pushing code to remote".to_string(),
         timestamp: chrono::Utc::now(),
         timeout_secs: 300,
+        display_message: None,
     };
     
     let msg = OutboundMessage {
@@ -252,7 +259,7 @@ async fn test_concurrent_approval_requests() {
             });
             
             // 请求审批
-            let approved = manager_clone
+            let outcome = manager_clone
                 .request_approval(
                     format!("agent:main:discord:dm:{}", i),
                     "discord".to_string(),
@@ -261,11 +268,12 @@ async fn test_concurrent_approval_requests() {
                     "/tmp".to_string(),
                     format!("context_{}", i),
                     300,
+                    None,
                 )
                 .await
                 .unwrap();
             
-            (i, approved)
+            (i, outcome)
         });
         handles.push(handle);
     }
@@ -273,11 +281,11 @@ async fn test_concurrent_approval_requests() {
     // 等待所有请求完成
     for handle in handles {
         let result = handle.await;
-        let (i, approved) = result.unwrap();
+        let (i, outcome) = result.unwrap();
         if i % 2 == 0 {
-            assert!(approved, "Even numbered requests should be approved");
+            assert_eq!(outcome, ApprovalOutcome::Approved, "Even numbered requests should be approved");
         } else {
-            assert!(!approved, "Odd numbered requests should be rejected");
+            assert_eq!(outcome, ApprovalOutcome::Rejected, "Odd numbered requests should be rejected");
         }
     }
 }
@@ -312,6 +320,7 @@ async fn test_approval_history() {
                 "/tmp".to_string(),
                 format!("context_{}", i),
                 300,
+                None,
             )
             .await;
     }
@@ -338,6 +347,7 @@ async fn test_discord_message_splitting() {
         context: "Test long message splitting".to_string(),
         timestamp: chrono::Utc::now(),
         timeout_secs: 300,
+        display_message: None,
     };
     
     let formatted = format!(
