@@ -106,6 +106,17 @@ pub fn build_nono_capability_set(
             .map_err(|e| SandboxError::CreationFailed(format!("nono platform_rule securityd: {}", e)))?;
     }
 
+    // On macOS, allow Docker Desktop socket (~/.docker/run) so tool sandbox (plain-docker / gvisor-docker) can connect.
+    #[cfg(target_os = "macos")]
+    if let Ok(home) = std::env::var("HOME") {
+        let docker_run = Path::new(&home).join(".docker/run");
+        if docker_run.exists() {
+            caps = caps
+                .allow_path(docker_run.as_path(), AccessMode::ReadWrite)
+                .map_err(|e| SandboxError::CreationFailed(format!("nono allow_path docker run: {}", e)))?;
+        }
+    }
+
     Ok(caps)
 }
 

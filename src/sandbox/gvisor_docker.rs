@@ -5,6 +5,7 @@ use super::sandbox_trait::Sandbox;
 use super::types::{
     ExecutionResult, HealthStatus, SandboxConfig, SandboxInfo, SandboxState, SandboxStatus,
 };
+use super::plain_docker::connect_docker;
 use bollard::container::{
     Config, CreateContainerOptions, RemoveContainerOptions, StartContainerOptions,
     StopContainerOptions,
@@ -47,8 +48,7 @@ impl GVisorDockerSandbox {
     /// 
     /// Returns an error if Docker connection cannot be established
     pub fn new(config: SandboxConfig) -> Result<Self> {
-        let docker = Docker::connect_with_local_defaults()
-            .map_err(|e| SandboxError::CreationFailed(format!("Failed to connect to Docker: {}", e)))?;
+        let docker = connect_docker()?;
         
         let status = SandboxStatus {
             sandbox_id: config.sandbox_id.clone(),

@@ -27,11 +27,26 @@ pub struct PlainDockerSandbox {
     status: SandboxStatus,
 }
 
-/// Connect to the local Docker daemon. On Windows, tries named pipe first, then
-/// DOCKER_HOST (connect_with_defaults), then tcp://localhost:2375 as fallback
-/// when the named pipe fails (e.g. "hyper legacy client: client error (Connect)").
-fn connect_docker() -> Result<Docker> {
-    #[cfg(not(target_os = "windows"))]
+/// Connect to the local Docker daemon. Used by both PlainDockerSandbox and GVisorDockerSandbox.
+/// - macOS: Docker Desktop uses ~/.docker/run/docker.sock; try that first, then /var/run/docker.sock.
+/// - Linux: uses /var/run/docker.sock (connect_with_local_defaults).
+/// - Windows: named pipe, then DOCKER_HOST, then tcp://localhost:2375.
+pub(crate) fn connect_docker() -> Result<Docker> {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(home) = std::env::var("HOME") {
+            let socket = format!("{}/.docker/run/docker.sock", home);
+            if std::path::Path::new(&socket).exists() {
+                if let Ok(d) = Docker::connect_with_socket(&socket, 120, API_DEFAULT_VERSION) {
+                    return Ok(d);
+                }
+            }
+        }
+        Docker::connect_with_local_defaults()
+            .map_err(|e| SandboxError::CreationFailed(format!("Failed to connect to Docker: {}", e)))
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
     {
         Docker::connect_with_local_defaults()
             .map_err(|e| SandboxError::CreationFailed(format!("Failed to connect to Docker: {}", e)))
