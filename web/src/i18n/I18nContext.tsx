@@ -5,7 +5,7 @@ export type Language = 'en' | 'zh'
 export interface I18nContextType {
   language: Language
   setLanguage: (lang: Language) => void
-  t: (key: string, params?: Record<string, string | number>) => string
+  t: (key: string, paramsOrFallback?: Record<string, string | number> | string) => string
   availableLanguages: { code: Language; name: string }[]
 }
 
@@ -62,24 +62,24 @@ export const I18nProvider: React.FC<I18nProviderProps> = ({ children }) => {
     localStorage.setItem('language', lang)
   }
 
-  const t = (key: string, params?: Record<string, string | number>): string => {
+  const t = (key: string, paramsOrFallback?: Record<string, string | number> | string): string => {
     const keys = key.split('.')
     let value: any = translations
-    
+    const fallback = typeof paramsOrFallback === 'string' ? paramsOrFallback : undefined
+    const params = typeof paramsOrFallback === 'object' && paramsOrFallback != null ? paramsOrFallback : undefined
+
     for (const k of keys) {
       if (value && typeof value === 'object' && k in value) {
         value = value[k]
       } else {
-        // Return the key if translation not found
-        return key
+        return fallback ?? key
       }
     }
 
     if (typeof value !== 'string') {
-      return key
+      return fallback ?? key
     }
 
-    // Replace parameters if provided
     if (params) {
       return Object.entries(params).reduce((result, [paramKey, paramValue]) => {
         return result.replace(`{{${paramKey}}}`, String(paramValue))

@@ -7,6 +7,9 @@ import type { ApprovalRequest as ApprovalRequestType } from '../types/websocket'
 // Mock approval request data
 const mockRequest: ApprovalRequestType = {
   id: 'test-request-123',
+  session_id: 'session-456',
+  channel: 'test-channel',
+  chat_id: 'chat-789',
   command: 'rm -rf /tmp/test',
   working_dir: '/home/user/project',
   context: 'User requested to clean temporary files',
