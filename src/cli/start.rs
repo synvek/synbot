@@ -94,13 +94,16 @@ pub async fn cmd_start() -> Result<()> {
 
     let ws = config::workspace_path(&cfg);
 
-    let (api_key, api_base) = resolve_provider(&cfg);
-    if api_key.is_empty() {
-        anyhow::bail!("No API key configured.");
-    }
-
     let model = cfg.agent.model.clone();
     let provider_name = cfg.agent.provider.clone();
+    let (api_key, api_base) = resolve_provider(&cfg, &provider_name);
+    if api_key.is_empty() {
+        anyhow::bail!(
+            "No API key configured for provider '{}'. Set the corresponding [providers] entry in config.",
+            provider_name,
+        );
+    }
+
     let completion_model = build_rig_completion_model(
         &provider_name,
         &model,

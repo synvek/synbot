@@ -302,6 +302,7 @@ impl SynbotCompletionModel for DeepSeekDirectModel {
     {
         let body = self.build_request_body(&request);
         let url = format!("{}/chat/completions", self.api_base);
+        let model_name = self.model.clone();
         let http = self.http.clone();
         let api_key = self.api_key.clone();
 
@@ -312,23 +313,29 @@ impl SynbotCompletionModel for DeepSeekDirectModel {
                 .json(&body)
                 .send()
                 .await
-                .map_err(|e| CompletionError::HttpError(
-                    rig::http_client::Error::from(Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
-                ))?;
+                .map_err(|e| CompletionError::ProviderError(format!(
+                    "Request failed (url={}, model={}): {}",
+                    url,
+                    model_name,
+                    e
+                )))?;
 
             let status = resp.status();
             let bytes = resp
                 .bytes()
                 .await
-                .map_err(|e| CompletionError::HttpError(
-                    rig::http_client::Error::from(Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
-                ))?;
+                .map_err(|e| CompletionError::ProviderError(format!(
+                    "Reading response failed (url={}, model={}): {}",
+                    url,
+                    model_name,
+                    e
+                )))?;
 
             if !status.is_success() {
                 let msg = String::from_utf8_lossy(&bytes).to_string();
                 return Err(CompletionError::ProviderError(format!(
-                    "Invalid status code {} with message: {}",
-                    status, msg
+                    "Invalid status code {} (url={}, model={}) with message: {}",
+                    status, url, model_name, msg
                 )));
             }
 

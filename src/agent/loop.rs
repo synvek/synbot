@@ -655,7 +655,10 @@ async fn run_completion_loop(
 
         tracing::debug!("Request prompt: {:?}", request);
 
-        let response = model.completion(request).await?;
+        let response = model
+            .completion(request)
+            .await
+            .map_err(|e| anyhow::anyhow!("completion failed (agent_id={}): {}", agent_id, e))?;
 
         let mut has_tool_calls = false;
         let mut text_parts = Vec::new();

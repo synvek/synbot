@@ -14,20 +14,21 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
     
     let ws = config::workspace_path(&cfg);
 
-    // Resolve provider
-    let (api_key, api_base) = resolve_provider(&cfg);
+    let model_name = model.unwrap_or(cfg.agent.model.clone());
+    let provider_name = provider.unwrap_or(cfg.agent.provider.clone());
+    info!(model = %model_name, provider = %provider_name, "Starting agent");
+
+    // Resolve API key for this provider (so model and key stay consistent when multiple providers are configured)
+    let (api_key, api_base) = resolve_provider(&cfg, &provider_name);
     if api_key.is_empty() {
         anyhow::bail!(
-            "No API key configured. Run `synbot onboard` and edit {}",
+            "No API key configured for provider '{}'. Run `synbot onboard` and set [providers.*] in {}",
+            provider_name,
             config::config_path().display()
         );
     }
 
-    let model_name = model.unwrap_or(cfg.agent.model.clone());
-    info!(model = %model_name, "Starting agent");
-
     // Build rig completion model via rig-core (no rig-dyn)
-    let provider_name = provider.unwrap_or(cfg.agent.provider.clone());
     let completion_model = build_rig_completion_model(
         &provider_name,
         &model_name,

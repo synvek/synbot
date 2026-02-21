@@ -3,8 +3,9 @@
 use tracing::warn;
 use crate::config;
 
-/// Resolve provider API key and base URL from config.
-pub fn resolve_provider(cfg: &config::Config) -> (String, Option<String>) {
+/// Resolve API key and base URL for the given provider name.
+/// Returns the credentials for that provider only, so model and key stay consistent when multiple providers are configured.
+pub fn resolve_provider(cfg: &config::Config, provider_name: &str) -> (String, Option<String>) {
     // Helper: trim empty to None, then normalize URL (IDN -> punycode) so reqwest does not fail
     let normalize_base = |base: &Option<String>| -> Option<String> {
         base.as_ref().and_then(|s| {
@@ -22,26 +23,23 @@ pub fn resolve_provider(cfg: &config::Config) -> (String, Option<String>) {
         })
     };
 
-    // Priority: openrouter > anthropic > openai > deepseek > ollama
-    if !cfg.providers.openrouter.api_key.is_empty() {
-        return (cfg.providers.openrouter.api_key.clone(), normalize_base(&cfg.providers.openrouter.api_base));
-    }
-    if !cfg.providers.anthropic.api_key.is_empty() {
-        return (cfg.providers.anthropic.api_key.clone(), normalize_base(&cfg.providers.anthropic.api_base));
-    }
-    if !cfg.providers.openai.api_key.is_empty() {
-        return (cfg.providers.openai.api_key.clone(), normalize_base(&cfg.providers.openai.api_base));
-    }
-    if !cfg.providers.deepseek.api_key.is_empty() {
-        return (cfg.providers.deepseek.api_key.clone(), normalize_base(&cfg.providers.deepseek.api_base));
-    }
-    if !cfg.providers.moonshot.api_key.is_empty() {
-        return (cfg.providers.moonshot.api_key.clone(), normalize_base(&cfg.providers.moonshot.api_base));
-    }
-    if !cfg.providers.ollama.api_key.is_empty() {
-        return (cfg.providers.ollama.api_key.clone(), normalize_base(&cfg.providers.ollama.api_base));
-    }
-    (String::new(), None)
+    let name = provider_name.trim().to_lowercase();
+    let (key, base) = if name.contains("openrouter") {
+        (cfg.providers.openrouter.api_key.clone(), &cfg.providers.openrouter.api_base)
+    } else if name.contains("anthropic") || name.contains("claude") {
+        (cfg.providers.anthropic.api_key.clone(), &cfg.providers.anthropic.api_base)
+    } else if name.contains("openai") {
+        (cfg.providers.openai.api_key.clone(), &cfg.providers.openai.api_base)
+    } else if name.contains("deepseek") {
+        (cfg.providers.deepseek.api_key.clone(), &cfg.providers.deepseek.api_base)
+    } else if name.contains("moonshot") {
+        (cfg.providers.moonshot.api_key.clone(), &cfg.providers.moonshot.api_base)
+    } else if name.contains("ollama") {
+        (cfg.providers.ollama.api_key.clone(), &cfg.providers.ollama.api_base)
+    } else {
+        (String::new(), &None)
+    };
+    (key, normalize_base(base))
 }
 
 /// Build a rig completion model using rig-core (no rig-dyn). Returns Arc<dyn SynbotCompletionModel>.
