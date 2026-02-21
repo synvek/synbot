@@ -1,85 +1,83 @@
-# Build and publish synbot binaries on tag push (e.g. v0.1.0).
-# All builds are native: each job runs on the matching OS + arch runner.
+# Manual release: provide a tag, workflow builds, then creates the tag (if missing) and publishes artifacts to that tag.
+# Trigger: Actions → Release → Run workflow → enter tag (e.g. v0.1.0).
 
 name: Release
 
-#on:
-#  push:
-#    tags:
-#      - 'v*'
 on:
   workflow_dispatch:
-  workflow_call:
-
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.1.0)'
+        required: true
+        type: string
 
 env:
   CARGO_TERM_COLOR: always
   CARGO_REGISTRY_CRATES_IO_PROTOCOL: sparse
 
 jobs:
-  # validate:
-  #   name: validate
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - uses: dtolnay/rust-toolchain@stable
-  #       with:
-  #         components: rustfmt, clippy
-  #     - name: Cache Cargo
-  #       uses: Swatinem/rust-cache@v2
-  #     - name: Check format
-  #       run: cargo fmt --all -- --check
-  #     - name: Clippy
-  #       run: cargo clippy --all-targets --all-features -- -D warnings
-  #     - name: Test
-  #       run: cargo test --all-features
+  validate:
+    name: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "23.4"
+      - name: Install Linux build deps (protobuf, dbus)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev pkg-config
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Check format
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Test
+        run: cargo test --all-features
 
   build:
     name: build-${{ matrix.os }}-${{ matrix.arch }}
-    # needs: validate
+    needs: validate
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Linux (native: x64 / arm64 runners)
           - runner: ubuntu-24.04
             os: linux
             arch: x86_64
             target: x86_64-unknown-linux-gnu
-            artifact_name: synbot-${{ github.ref_name }}-linux-x86_64
             artifact_suffix: .tar.gz
           - runner: ubuntu-24.04-arm
             os: linux
             arch: aarch64
             target: aarch64-unknown-linux-gnu
-            artifact_name: synbot-${{ github.ref_name }}-linux-aarch64
             artifact_suffix: .tar.gz
-          # Windows (native: x64 / arm64 runners)
           - runner: windows-latest
             os: windows
             arch: x86_64
             target: x86_64-pc-windows-msvc
-            artifact_name: synbot-${{ github.ref_name }}-windows-x86_64
             artifact_suffix: .zip
           - runner: windows-11-arm
             os: windows
             arch: aarch64
             target: aarch64-pc-windows-msvc
-            artifact_name: synbot-${{ github.ref_name }}-windows-aarch64
             artifact_suffix: .zip
-          # macOS (native: Intel x64 / Apple Silicon arm64 runners)
           - runner: macos-15-intel
             os: macos
             arch: x86_64
             target: x86_64-apple-darwin
-            artifact_name: synbot-${{ github.ref_name }}-macos-x86_64
             artifact_suffix: .tar.gz
           - runner: macos-14
             os: macos
             arch: aarch64
             target: aarch64-apple-darwin
-            artifact_name: synbot-${{ github.ref_name }}-macos-aarch64
             artifact_suffix: .tar.gz
 
     steps:
@@ -90,6 +88,21 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "23.4"
+
+      - name: Install Linux build deps (dbus)
+        if: matrix.os == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev pkg-config
+
+      - name: Install macOS build deps (dbus)
+        if: matrix.os == 'macos'
+        run: brew install dbus pkg-config
 
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
@@ -110,38 +123,70 @@ jobs:
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }} --locked
         env:
-          # Optional: reduce binary size
           RUSTFLAGS: -C strip=symbols
 
       - name: Prepare artifact (Linux/macOS)
         if: matrix.os != 'windows'
         run: |
+          TAG="${{ github.event.inputs.tag }}"
+          ARTIFACT_NAME="synbot-${TAG}-${{ matrix.os }}-${{ matrix.arch }}"
           mkdir -p staging
           cp target/${{ matrix.target }}/release/synbot staging/
-          tar -czvf "${{ matrix.artifact_name }}${{ matrix.artifact_suffix }}" -C staging .
+          tar -czvf "${ARTIFACT_NAME}${{ matrix.artifact_suffix }}" -C staging .
+          echo "ARTIFACT_NAME=${ARTIFACT_NAME}" >> $GITHUB_ENV
         shell: bash
 
       - name: Prepare artifact (Windows)
         if: matrix.os == 'windows'
         run: |
-          $dir = "staging"
-          New-Item -ItemType Directory -Force -Path $dir
-          Copy-Item "target\${{ matrix.target }}\release\synbot.exe" -Destination $dir
-          Compress-Archive -Path "$dir\*" -DestinationPath "${{ matrix.artifact_name }}${{ matrix.artifact_suffix }}"
+          $tag = "${{ github.event.inputs.tag }}"
+          $artifactName = "synbot-${tag}-${{ matrix.os }}-${{ matrix.arch }}"
+          New-Item -ItemType Directory -Force -Path staging
+          Copy-Item "target\${{ matrix.target }}\release\synbot.exe" -Destination staging
+          Compress-Archive -Path "staging\*" -DestinationPath "${artifactName}${{ matrix.artifact_suffix }}"
+          echo "ARTIFACT_NAME=$artifactName" >> $env:GITHUB_ENV
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.artifact_name }}${{ matrix.artifact_suffix }}
+          name: synbot-${{ github.event.inputs.tag }}-${{ matrix.os }}-${{ matrix.arch }}
+          path: synbot-${{ github.event.inputs.tag }}-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.artifact_suffix }}
 
   release:
-    name: create-release
+    name: create-tag-and-release
     runs-on: ubuntu-latest
     needs: build
     permissions:
       contents: write
     steps:
+      - name: Checkout (full history for tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if tag exists
+        id: tag_check
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          if git rev-parse "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Tag ${TAG} already exists, skipping tag creation"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Tag ${TAG} will be created"
+          fi
+
+      - name: Create and push tag
+        if: steps.tag_check.outputs.exists == 'false'
+        run: |
+          TAG="${{ github.event.inputs.tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$TAG"
+          git push origin "$TAG"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -149,35 +194,37 @@ jobs:
           merge-multiple: false
 
       - name: List artifacts
-        run: |
-          find artifacts -type f
+        run: find artifacts -type f
 
       - name: Extract version from tag
         id: version
         run: |
-          VERSION="${GITHUB_REF#refs/tags/v}"
+          TAG="${{ github.event.inputs.tag }}"
+          VERSION="${TAG#v}"
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "Version: ${VERSION}"
 
       - name: Prepare release notes
         id: notes
         run: |
+          VERSION="${{ steps.version.outputs.version }}"
           if [ -f CHANGELOG.md ]; then
-            awk '/^## \['"${{ steps.version.outputs.version }}"'\]/{flag=1; next} /^## \[/{flag=0} flag' CHANGELOG.md > release_notes.md || true
+            awk '/^## \['"${VERSION}"'\]/{flag=1; next} /^## \[/{flag=0} flag' CHANGELOG.md > release_notes.md || true
           fi
           if [ ! -s release_notes.md ]; then
-            echo "Release **v${{ steps.version.outputs.version }}**" > release_notes.md
+            echo "Release **v${VERSION}**" > release_notes.md
             echo "" >> release_notes.md
             echo "See [CHANGELOG.md](CHANGELOG.md) for details." >> release_notes.md
           fi
           echo "Release notes:" && cat release_notes.md
 
-      - name: Create GitHub Release
+      - name: Create or update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: v${{ steps.version.outputs.version }}
+          tag_name: ${{ github.event.inputs.tag }}
+          name: ${{ github.event.inputs.tag }}
           body_path: release_notes.md
           draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(github.event.inputs.tag, '-') }}
           files: artifacts/*/*
           token: ${{ secrets.GITHUB_TOKEN }}
