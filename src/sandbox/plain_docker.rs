@@ -191,7 +191,12 @@ impl Sandbox for PlainDockerSandbox {
                     ..Default::default()
                 };
 
-                let image = "ubuntu:22.04".to_string();
+                let image = self
+                    .config
+                    .image
+                    .as_deref()
+                    .unwrap_or("ubuntu:22.04")
+                    .to_string();
                 let config = Config {
                     image: Some(image),
                     host_config: Some(host_config),

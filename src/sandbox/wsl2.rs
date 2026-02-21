@@ -453,6 +453,7 @@ mod wsl2_sandbox_tests {
             monitoring: MonitoringConfig::default(),
             delete_on_start: false,
             requested_tool_sandbox_type: None,
+            image: None,
         }
     }
     

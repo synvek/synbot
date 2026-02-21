@@ -24,6 +24,9 @@ pub struct SandboxConfig {
     /// Requested tool sandbox backend: "gvisor-docker", "plain-docker", or on Windows "wsl2-gvisor". Set at build from config; no fallback when this is set.
     #[serde(skip, default)]
     pub requested_tool_sandbox_type: Option<String>,
+    /// Docker image for tool sandbox (e.g. "ubuntu:22.04"). When None, Docker backends use default "ubuntu:22.04". Set at build from config.
+    #[serde(skip, default)]
+    pub image: Option<String>,
 }
 
 /// Filesystem configuration

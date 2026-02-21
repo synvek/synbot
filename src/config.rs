@@ -1059,6 +1059,7 @@ pub fn build_app_sandbox_config(
         monitoring: build_sandbox_monitoring(monitoring),
         delete_on_start: false,
         requested_tool_sandbox_type: None,
+        image: None,
     })
 }
 
@@ -1133,6 +1134,7 @@ pub fn build_tool_sandbox_config(
                 .unwrap_or("gvisor-docker")
                 .to_string(),
         ),
+        image: cfg.image.clone(),
     })
 }
 
