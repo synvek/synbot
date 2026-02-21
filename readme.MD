@@ -11,13 +11,15 @@
 
 ## News
 
+- 2026-02-22 Initial publish. Welcome to try.
+
 ## Features
+
+- Single small protable execution program for deployment
 
 - Support run app and tool in isolated sandbox.   
 
 - No gateway exposed 
-
-- Single protable execution program for deployment
 
 - Support Windows, Macos, Linux with Intel x86 and ARM64 architecture
 
