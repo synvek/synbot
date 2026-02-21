@@ -1,0 +1,1555 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Config",
+  "type": "object",
+  "properties": {
+    "agent": {
+      "default": {
+        "maxConcurrentSubagents": 5,
+        "maxTokens": 8192,
+        "maxToolIterations": 20,
+        "model": "claude-sonnet-4-5",
+        "provider": "claude-sonnet-4-5",
+        "roles": [],
+        "temperature": 0.699999988079071,
+        "workspace": "~/.synbot/workspace"
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/AgentDefaults"
+        }
+      ]
+    },
+    "appSandbox": {
+      "description": "Optional app sandbox (isolates main process; platform-specific).",
+      "default": null,
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AppSandboxConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "channels": {
+      "default": {
+        "discord": [],
+        "feishu": [],
+        "telegram": []
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/ChannelsConfig"
+        }
+      ]
+    },
+    "cron": {
+      "description": "Cron: scheduled tasks from config (schedule, description, enabled, command, channel, userId).",
+      "default": {
+        "tasks": []
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/CronConfig"
+        }
+      ]
+    },
+    "heartbeat": {
+      "description": "Heartbeat: periodic tasks (enabled, interval, tasks with channel/userId/target).",
+      "default": {
+        "enabled": true,
+        "interval": 300,
+        "tasks": []
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/HeartbeatConfig"
+        }
+      ]
+    },
+    "log": {
+      "default": {
+        "customTimestampFormat": null,
+        "dir": "logs",
+        "format": "text",
+        "level": "info",
+        "maxFileSizeMb": 50,
+        "maxFiles": 20,
+        "moduleLevels": {},
+        "showFile": false,
+        "showLevel": true,
+        "showTarget": true,
+        "showThreadIds": false,
+        "showThreadNames": false,
+        "showTimestamp": true,
+        "timestampFormat": "local"
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/LogConfig"
+        }
+      ]
+    },
+    "mainChannel": {
+      "default": "",
+      "type": "string"
+    },
+    "memory": {
+      "default": {
+        "autoIndex": true,
+        "backend": "",
+        "compression": {
+          "enabled": false,
+          "maxConversationTurns": 50,
+          "summaryWriteToMemory": true
+        },
+        "embeddingModel": "local/default",
+        "textWeight": 0.30000001192092896,
+        "vectorWeight": 0.699999988079071
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/MemoryConfig"
+        }
+      ]
+    },
+    "providers": {
+      "default": {
+        "anthropic": {
+          "apiBase": null,
+          "apiKey": ""
+        },
+        "deepseek": {
+          "apiBase": null,
+          "apiKey": ""
+        },
+        "kimiCode": {
+          "apiBase": null,
+          "apiKey": ""
+        },
+        "moonshot": {
+          "apiBase": null,
+          "apiKey": ""
+        },
+        "ollama": {
+          "apiBase": null,
+          "apiKey": ""
+        },
+        "openai": {
+          "apiBase": null,
+          "apiKey": ""
+        },
+        "openrouter": {
+          "apiBase": null,
+          "apiKey": ""
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/ProvidersConfig"
+        }
+      ]
+    },
+    "sandboxMonitoring": {
+      "description": "Optional sandbox monitoring (log_level, log_output for sandbox audit).",
+      "default": null,
+      "anyOf": [
+        {
+          "$ref": "#/definitions/SandboxMonitoringConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "showToolCalls": {
+      "description": "When true (default), all channels may receive tool execution progress; each channel can override via channels.*.showToolCalls.",
+      "default": true,
+      "type": "boolean"
+    },
+    "toolSandbox": {
+      "description": "Optional tool sandbox (exec and other tools run inside this).",
+      "default": null,
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ToolSandboxConfig"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "tools": {
+      "default": {
+        "browser": {
+          "enabled": false,
+          "executable": "agent-browser",
+          "timeoutSecs": 30
+        },
+        "exec": {
+          "allowPatterns": null,
+          "denyPatterns": [
+            "rm -rf /",
+            "mkfs",
+            "dd if=",
+            "format",
+            "shutdown",
+            "reboot",
+            ":(){",
+            "fork bomb"
+          ],
+          "permissions": {
+            "approvalTimeoutSecs": 60,
+            "defaultLevel": "require_approval",
+            "enabled": false,
+            "rules": []
+          },
+          "restrictToWorkspace": false,
+          "timeoutSecs": 60
+        },
+        "web": {
+          "braveApiKey": "",
+          "searchBackend": "duckDuckGo",
+          "searchCount": 0,
+          "searxngUrl": ""
+        }
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/ToolsConfig"
+        }
+      ]
+    },
+    "web": {
+      "default": {
+        "auth": null,
+        "corsOrigins": [],
+        "enabled": false,
+        "host": "127.0.0.1",
+        "port": 18888,
+        "showToolCalls": true
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/WebConfig"
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "AgentDefaults": {
+      "type": "object",
+      "properties": {
+        "maxConcurrentSubagents": {
+          "default": 5,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "maxTokens": {
+          "default": 8192,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "maxToolIterations": {
+          "default": 20,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "model": {
+          "default": "claude-sonnet-4-5",
+          "type": "string"
+        },
+        "provider": {
+          "default": "anthropic",
+          "type": "string"
+        },
+        "roles": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RoleConfig"
+          }
+        },
+        "temperature": {
+          "default": 0.699999988079071,
+          "type": "number",
+          "format": "float"
+        },
+        "workspace": {
+          "default": "~/.synbot/workspace",
+          "type": "string"
+        }
+      }
+    },
+    "AllowlistEntry": {
+      "description": "Single allowlist entry: one chat (DM or group) allowed to talk to the bot.",
+      "type": "object",
+      "required": [
+        "chatAlias",
+        "chatId"
+      ],
+      "properties": {
+        "chatAlias": {
+          "description": "Human-readable alias for this chat (for logs and UI).",
+          "type": "string"
+        },
+        "chatId": {
+          "description": "Chat ID (user id for DM, group/channel id for group).",
+          "type": "string"
+        },
+        "myName": {
+          "description": "Bot's name in the group (optional). When set, only messages starting with @my_name are processed.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "AppSandboxConfig": {
+      "type": "object",
+      "properties": {
+        "filesystem": {
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SandboxFilesystemConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "network": {
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SandboxNetworkConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "platform": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "process": {
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SandboxProcessConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resources": {
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SandboxResourceConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "windows": {
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/WindowsSandboxConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workDir": {
+          "description": "Working directory for the child process in app sandbox. Defaults to `\"~\"` (home). config_dir() uses home.join(\".synbot\") or, if home fails, \".\".join(\".synbot\"); so cwd must be home, not ~/.synbot.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "BrowserToolConfig": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Enable the browser tool (default false; requires agent-browser to be installed).",
+          "default": false,
+          "type": "boolean"
+        },
+        "executable": {
+          "description": "Path or name of the agent-browser executable (default \"agent-browser\").",
+          "default": "agent-browser",
+          "type": "string"
+        },
+        "timeoutSecs": {
+          "description": "Per-command timeout in seconds (default 30).",
+          "default": 30,
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
+    },
+    "ChannelsConfig": {
+      "type": "object",
+      "properties": {
+        "discord": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DiscordConfig"
+          }
+        },
+        "feishu": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/FeishuConfig"
+          }
+        },
+        "telegram": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/TelegramConfig"
+          }
+        }
+      }
+    },
+    "CronConfig": {
+      "description": "Cron config: array of cron tasks (schedule, command, channel, userId).",
+      "type": "object",
+      "properties": {
+        "tasks": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/CronTaskConfig"
+          }
+        }
+      }
+    },
+    "CronTaskConfig": {
+      "description": "A single cron task from config.",
+      "type": "object",
+      "required": [
+        "channel",
+        "schedule",
+        "userId"
+      ],
+      "properties": {
+        "channel": {
+          "description": "Channel name for result (e.g. \"feishu\").",
+          "type": "string"
+        },
+        "chatId": {
+          "description": "Conversation id where to send result (defaults to user_id for DM).",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "command": {
+          "description": "Task content to execute.",
+          "default": "",
+          "type": "string"
+        },
+        "description": {
+          "description": "Human-readable description (e.g. \"weekdays at 9:00\").",
+          "default": "",
+          "type": "string"
+        },
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "schedule": {
+          "description": "Cron expression (e.g. \"0 9 * * 1-5\").",
+          "type": "string"
+        },
+        "userId": {
+          "description": "User id to receive result.",
+          "type": "string"
+        }
+      }
+    },
+    "DiscordConfig": {
+      "type": "object",
+      "properties": {
+        "allowlist": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AllowlistEntry"
+          }
+        },
+        "enableAllowlist": {
+          "description": "When true (default), only chats in allowlist are accepted; when false, allowlist is not checked.",
+          "default": true,
+          "type": "boolean"
+        },
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "groupMyName": {
+          "description": "When enable_allowlist is false, bot name/id used for group @ check (optional).",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "Unique channel name (default \"discord\").",
+          "default": "discord",
+          "type": "string"
+        },
+        "showToolCalls": {
+          "description": "When true (default), push tool execution progress to this channel.",
+          "default": true,
+          "type": "boolean"
+        },
+        "token": {
+          "default": "",
+          "type": "string"
+        }
+      }
+    },
+    "ExecToolConfig": {
+      "type": "object",
+      "properties": {
+        "allowPatterns": {
+          "default": null,
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "denyPatterns": {
+          "default": [
+            "rm -rf /",
+            "mkfs",
+            "dd if=",
+            "format",
+            "shutdown",
+            "reboot",
+            ":(){",
+            "fork bomb"
+          ],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "permissions": {
+          "default": {
+            "approvalTimeoutSecs": 60,
+            "defaultLevel": "require_approval",
+            "enabled": false,
+            "rules": []
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/PermissionConfig"
+            }
+          ]
+        },
+        "restrictToWorkspace": {
+          "default": false,
+          "type": "boolean"
+        },
+        "timeoutSecs": {
+          "default": 60,
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      }
+    },
+    "FeishuConfig": {
+      "type": "object",
+      "properties": {
+        "allowlist": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AllowlistEntry"
+          }
+        },
+        "appId": {
+          "default": "",
+          "type": "string"
+        },
+        "appSecret": {
+          "default": "",
+          "type": "string"
+        },
+        "enableAllowlist": {
+          "description": "When true (default), only chats in allowlist are accepted; when false, allowlist is not checked.",
+          "default": true,
+          "type": "boolean"
+        },
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "groupMyName": {
+          "description": "When enable_allowlist is false, bot name used for group @ check (optional).",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "Unique channel name (default \"feishu\").",
+          "default": "feishu",
+          "type": "string"
+        },
+        "showToolCalls": {
+          "description": "When true (default), push tool execution progress to this channel.",
+          "default": true,
+          "type": "boolean"
+        }
+      }
+    },
+    "HeartbeatConfig": {
+      "description": "Heartbeat: periodic execution of tasks from config, results sent to configured channel/user.",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "type": "boolean"
+        },
+        "interval": {
+          "description": "Interval in seconds (default 300 = 5 minutes).",
+          "default": 300,
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "tasks": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/HeartbeatTask"
+          }
+        }
+      }
+    },
+    "HeartbeatTask": {
+      "description": "A single heartbeat task: run periodically and send result to the given channel/chat.",
+      "type": "object",
+      "required": [
+        "channel",
+        "chatId",
+        "target",
+        "userId"
+      ],
+      "properties": {
+        "channel": {
+          "description": "Channel name (e.g. \"feishu\", \"telegram\").",
+          "type": "string"
+        },
+        "chatId": {
+          "description": "Conversation id (group id or user id for DM) where to send the result.",
+          "type": "string"
+        },
+        "target": {
+          "description": "Task content to execute (e.g. \"list files in current directory\").",
+          "type": "string"
+        },
+        "userId": {
+          "description": "User id of the task creator (for display / reply_to).",
+          "type": "string"
+        }
+      }
+    },
+    "LogConfig": {
+      "type": "object",
+      "properties": {
+        "customTimestampFormat": {
+          "description": "Custom timestamp format string (e.g., \"%Y-%m-%d %H:%M:%S\")",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dir": {
+          "description": "Log directory path",
+          "default": "logs",
+          "type": "string"
+        },
+        "format": {
+          "description": "Log format: json, text, compact, pretty",
+          "default": "text",
+          "type": "string"
+        },
+        "level": {
+          "description": "Log level: trace, debug, info, warn, error",
+          "default": "info",
+          "type": "string"
+        },
+        "maxFileSizeMb": {
+          "description": "Maximum size of each log file in MB",
+          "default": 50,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "maxFiles": {
+          "description": "Maximum number of log files to keep",
+          "default": 20,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "moduleLevels": {
+          "description": "Module-specific log levels (e.g., {\"synbot\": \"debug\", \"open_lark\": \"info\"})",
+          "default": {},
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "showFile": {
+          "description": "Show file and line number in logs",
+          "default": false,
+          "type": "boolean"
+        },
+        "showLevel": {
+          "description": "Show log level in logs",
+          "default": true,
+          "type": "boolean"
+        },
+        "showTarget": {
+          "description": "Show target module in logs",
+          "default": true,
+          "type": "boolean"
+        },
+        "showThreadIds": {
+          "description": "Show thread IDs in logs",
+          "default": false,
+          "type": "boolean"
+        },
+        "showThreadNames": {
+          "description": "Show thread names in logs",
+          "default": false,
+          "type": "boolean"
+        },
+        "showTimestamp": {
+          "description": "Show timestamps in logs",
+          "default": true,
+          "type": "boolean"
+        },
+        "timestampFormat": {
+          "description": "Timestamp format: rfc3339, local, utc, custom",
+          "default": "local",
+          "type": "string"
+        }
+      }
+    },
+    "MemoryCompressionConfig": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "maxConversationTurns": {
+          "default": 50,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "summaryWriteToMemory": {
+          "default": true,
+          "type": "boolean"
+        }
+      }
+    },
+    "MemoryConfig": {
+      "type": "object",
+      "properties": {
+        "autoIndex": {
+          "default": true,
+          "type": "boolean"
+        },
+        "backend": {
+          "default": "",
+          "type": "string"
+        },
+        "compression": {
+          "default": {
+            "enabled": false,
+            "maxConversationTurns": 50,
+            "summaryWriteToMemory": true
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/MemoryCompressionConfig"
+            }
+          ]
+        },
+        "embeddingModel": {
+          "default": "local/default",
+          "type": "string"
+        },
+        "textWeight": {
+          "default": 0.30000001192092896,
+          "type": "number",
+          "format": "float"
+        },
+        "vectorWeight": {
+          "default": 0.699999988079071,
+          "type": "number",
+          "format": "float"
+        }
+      }
+    },
+    "PermissionConfig": {
+      "description": "Permission configuration.",
+      "type": "object",
+      "properties": {
+        "approvalTimeoutSecs": {
+          "description": "Approval request timeout (seconds)",
+          "default": 60,
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "defaultLevel": {
+          "description": "Default permission level when no rule matches.",
+          "default": "require_approval",
+          "allOf": [
+            {
+              "$ref": "#/definitions/PermissionLevel"
+            }
+          ]
+        },
+        "enabled": {
+          "description": "Whether permission control is enabled.",
+          "default": false,
+          "type": "boolean"
+        },
+        "rules": {
+          "description": "List of permission rules (matched in order).",
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PermissionRule"
+          }
+        }
+      }
+    },
+    "PermissionLevel": {
+      "type": "string",
+      "enum": [
+        "allow",
+        "require_approval",
+        "deny"
+      ]
+    },
+    "PermissionRule": {
+      "type": "object",
+      "required": [
+        "level",
+        "pattern"
+      ],
+      "properties": {
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "level": {
+          "$ref": "#/definitions/PermissionLevel"
+        },
+        "pattern": {
+          "type": "string"
+        }
+      }
+    },
+    "ProviderEntry": {
+      "type": "object",
+      "properties": {
+        "apiBase": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "apiKey": {
+          "default": "",
+          "type": "string"
+        }
+      }
+    },
+    "ProvidersConfig": {
+      "type": "object",
+      "properties": {
+        "anthropic": {
+          "default": {
+            "apiBase": null,
+            "apiKey": ""
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProviderEntry"
+            }
+          ]
+        },
+        "deepseek": {
+          "default": {
+            "apiBase": null,
+            "apiKey": ""
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProviderEntry"
+            }
+          ]
+        },
+        "kimiCode": {
+          "description": "Kimi Code (月之暗面 / Moonshot coding API). Uses OpenAI-compatible chat completions; set api_base if using a custom endpoint.",
+          "default": {
+            "apiBase": null,
+            "apiKey": ""
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProviderEntry"
+            }
+          ]
+        },
+        "moonshot": {
+          "default": {
+            "apiBase": null,
+            "apiKey": ""
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProviderEntry"
+            }
+          ]
+        },
+        "ollama": {
+          "default": {
+            "apiBase": null,
+            "apiKey": ""
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProviderEntry"
+            }
+          ]
+        },
+        "openai": {
+          "default": {
+            "apiBase": null,
+            "apiKey": ""
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProviderEntry"
+            }
+          ]
+        },
+        "openrouter": {
+          "default": {
+            "apiBase": null,
+            "apiKey": ""
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProviderEntry"
+            }
+          ]
+        }
+      }
+    },
+    "RoleConfig": {
+      "description": "Configuration for a single role.",
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "maxIterations": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "maxTokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "provider": {
+          "description": "Optional; when unset, values are inherited from AgentDefaults.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reference": {
+          "description": "Subdirectory name under templates/roles; used to build system prompt from AGENTS.md, SOUL.md, TOOLS.md.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "skills": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "systemPrompt": {
+          "description": "Deprecated: use `reference` instead; system prompt is generated from templates/roles/{reference} md files.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "temperature": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        },
+        "tools": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "SandboxFilesystemConfig": {
+      "type": "object",
+      "properties": {
+        "hiddenPaths": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "readonlyPaths": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "writablePaths": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "SandboxLogOutputConfig": {
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "maxSize": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "default": "",
+          "type": "string"
+        },
+        "rotation": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "type": "string"
+        }
+      }
+    },
+    "SandboxMonitoringConfig": {
+      "type": "object",
+      "properties": {
+        "logLevel": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "logOutput": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SandboxLogOutputConfig"
+          }
+        }
+      }
+    },
+    "SandboxNetworkConfig": {
+      "type": "object",
+      "properties": {
+        "allowedHosts": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "allowedPorts": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0.0
+          }
+        },
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        }
+      }
+    },
+    "SandboxProcessConfig": {
+      "type": "object",
+      "properties": {
+        "allowFork": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "maxProcesses": {
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      }
+    },
+    "SandboxResourceConfig": {
+      "description": "Resource limits; max_memory and max_disk can be \"2G\", \"512M\", or bytes number.",
+      "type": "object",
+      "properties": {
+        "maxCpu": {
+          "default": null,
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "maxDisk": {
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SandboxSize"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "maxMemory": {
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SandboxSize"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SandboxSize": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      ]
+    },
+    "TelegramConfig": {
+      "type": "object",
+      "properties": {
+        "allowlist": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AllowlistEntry"
+          }
+        },
+        "enableAllowlist": {
+          "description": "When true (default), only chats in allowlist are accepted; when false, allowlist is not checked.",
+          "default": true,
+          "type": "boolean"
+        },
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "groupMyName": {
+          "description": "When enable_allowlist is false, bot name used for group @ check (optional).",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "Unique channel name (used to associate channel; default \"telegram\").",
+          "default": "telegram",
+          "type": "string"
+        },
+        "proxy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "showToolCalls": {
+          "description": "When true (default), push tool execution progress to this channel.",
+          "default": true,
+          "type": "boolean"
+        },
+        "token": {
+          "default": "",
+          "type": "string"
+        }
+      }
+    },
+    "ToolSandboxConfig": {
+      "type": "object",
+      "properties": {
+        "deleteOnStart": {
+          "description": "When true, remove existing container with the same name and create fresh on each start. When false (default), reuse existing container if found (start it if stopped).",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "filesystem": {
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SandboxFilesystemConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "image": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "network": {
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SandboxNetworkConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "process": {
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SandboxProcessConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resources": {
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SandboxResourceConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sandboxName": {
+          "description": "Container name for the tool sandbox. Default \"synbot-tool\".",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sandboxType": {
+          "description": "Tool sandbox backend: \"gvisor-docker\" (default), \"plain-docker\". On Windows also \"wsl2-gvisor\". If the environment does not match (e.g. gVisor not installed), tool sandbox will fail; change this to an available type (e.g. \"plain-docker\") to run.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ToolsConfig": {
+      "type": "object",
+      "properties": {
+        "browser": {
+          "default": {
+            "enabled": false,
+            "executable": "agent-browser",
+            "timeoutSecs": 30
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/BrowserToolConfig"
+            }
+          ]
+        },
+        "exec": {
+          "default": {
+            "allowPatterns": null,
+            "denyPatterns": [
+              "rm -rf /",
+              "mkfs",
+              "dd if=",
+              "format",
+              "shutdown",
+              "reboot",
+              ":(){",
+              "fork bomb"
+            ],
+            "permissions": {
+              "approvalTimeoutSecs": 60,
+              "defaultLevel": "require_approval",
+              "enabled": false,
+              "rules": []
+            },
+            "restrictToWorkspace": false,
+            "timeoutSecs": 60
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/ExecToolConfig"
+            }
+          ]
+        },
+        "web": {
+          "default": {
+            "braveApiKey": "",
+            "searchBackend": "duckDuckGo",
+            "searchCount": 0,
+            "searxngUrl": ""
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/WebToolConfig"
+            }
+          ]
+        }
+      }
+    },
+    "WebAuthConfig": {
+      "type": "object",
+      "required": [
+        "password",
+        "username"
+      ],
+      "properties": {
+        "password": {
+          "type": "string"
+        },
+        "username": {
+          "type": "string"
+        }
+      }
+    },
+    "WebConfig": {
+      "type": "object",
+      "properties": {
+        "auth": {
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/WebAuthConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "corsOrigins": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "host": {
+          "default": "127.0.0.1",
+          "type": "string"
+        },
+        "port": {
+          "default": 18888,
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "showToolCalls": {
+          "description": "When true (default), push tool execution progress to web clients.",
+          "default": true,
+          "type": "boolean"
+        }
+      }
+    },
+    "WebSearchBackend": {
+      "description": "Which search backend to use for web_search.",
+      "oneOf": [
+        {
+          "description": "DuckDuckGo HTML scraping — no API key required (default).",
+          "type": "string",
+          "enum": [
+            "duckDuckGo"
+          ]
+        },
+        {
+          "description": "SearxNG self-hosted instance — requires `searxng_url`.",
+          "type": "string",
+          "enum": [
+            "searxNG"
+          ]
+        },
+        {
+          "description": "Brave Search API — requires `brave_api_key`.",
+          "type": "string",
+          "enum": [
+            "brave"
+          ]
+        }
+      ]
+    },
+    "WebToolConfig": {
+      "type": "object",
+      "properties": {
+        "braveApiKey": {
+          "description": "Legacy Brave API key (kept for backwards compatibility; sets backend=brave when non-empty).",
+          "default": "",
+          "type": "string"
+        },
+        "searchBackend": {
+          "description": "Active search backend. Defaults to duckDuckGo when not set.",
+          "default": "duckDuckGo",
+          "allOf": [
+            {
+              "$ref": "#/definitions/WebSearchBackend"
+            }
+          ]
+        },
+        "searchCount": {
+          "description": "Maximum results to return (default 5).",
+          "default": 5,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "searxngUrl": {
+          "description": "SearxNG instance base URL, e.g. \"https://searx.example.com\".",
+          "default": "",
+          "type": "string"
+        }
+      }
+    },
+    "WindowsSandboxConfig": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}

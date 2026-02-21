@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 /// Single allowlist entry: one chat (DM or group) allowed to talk to the bot.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AllowlistEntry {
     /// Chat ID (user id for DM, group/channel id for group).
@@ -20,6 +21,7 @@ pub struct AllowlistEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct TelegramConfig {
     /// Unique channel name (used to associate channel; default "telegram").
@@ -44,6 +46,7 @@ pub struct TelegramConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct DiscordConfig {
     /// Unique channel name (default "discord").
@@ -67,6 +70,7 @@ pub struct DiscordConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct FeishuConfig {
     /// Unique channel name (default "feishu").
@@ -102,6 +106,7 @@ fn default_feishu_name() -> String {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ChannelsConfig {
     #[serde(default)]
@@ -117,6 +122,7 @@ pub struct ChannelsConfig {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderEntry {
     #[serde(default)]
@@ -125,6 +131,7 @@ pub struct ProviderEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ProvidersConfig {
     #[serde(default)]
@@ -150,6 +157,7 @@ pub struct ProvidersConfig {
 
 /// Configuration for a single role.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct RoleConfig {
     pub name: String,
@@ -176,6 +184,7 @@ pub struct RoleConfig {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AgentDefaults {
     #[serde(default = "default_workspace")]
@@ -243,6 +252,7 @@ use crate::tools::permission::{PermissionLevel, PermissionRule};
 
 /// Permission configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct PermissionConfig {
     /// Whether permission control is enabled.
@@ -283,6 +293,7 @@ impl Default for PermissionConfig {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ExecToolConfig {
     #[serde(default = "default_timeout")]
@@ -336,6 +347,7 @@ impl Default for ExecToolConfig {
 
 /// Which search backend to use for web_search.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub enum WebSearchBackend {
     /// DuckDuckGo HTML scraping — no API key required (default).
@@ -348,6 +360,7 @@ pub enum WebSearchBackend {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct WebToolConfig {
     /// Legacy Brave API key (kept for backwards compatibility; sets backend=brave when non-empty).
@@ -372,6 +385,7 @@ pub struct WebToolConfig {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct LogConfig {
     /// Log level: trace, debug, info, warn, error
@@ -492,6 +506,7 @@ impl Default for LogConfig {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct WebAuthConfig {
     pub username: String,
@@ -499,6 +514,7 @@ pub struct WebAuthConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct WebConfig {
     #[serde(default)]
@@ -542,6 +558,7 @@ impl Default for WebConfig {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct MemoryCompressionConfig {
     #[serde(default)]
@@ -570,6 +587,7 @@ impl Default for MemoryCompressionConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct MemoryConfig {
     #[serde(default)]
@@ -617,6 +635,7 @@ impl Default for MemoryConfig {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct BrowserToolConfig {
     /// Enable the browser tool (default false; requires agent-browser to be installed).
@@ -653,6 +672,7 @@ impl Default for BrowserToolConfig {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ToolsConfig {
     #[serde(default)]
@@ -669,6 +689,7 @@ pub struct ToolsConfig {
 
 /// A single heartbeat task: run periodically and send result to the given channel/chat.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct HeartbeatTask {
     /// Channel name (e.g. "feishu", "telegram").
@@ -683,6 +704,7 @@ pub struct HeartbeatTask {
 
 /// Heartbeat: periodic execution of tasks from config, results sent to configured channel/user.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct HeartbeatConfig {
     #[serde(default = "default_true")]
@@ -714,6 +736,7 @@ impl Default for HeartbeatConfig {
 
 /// A single cron task from config.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct CronTaskConfig {
     /// Cron expression (e.g. "0 9 * * 1-5").
@@ -737,6 +760,7 @@ pub struct CronTaskConfig {
 
 /// Cron config: array of cron tasks (schedule, command, channel, userId).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct CronConfig {
     #[serde(default)]
@@ -748,6 +772,7 @@ pub struct CronConfig {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct SandboxFilesystemConfig {
     #[serde(default)]
@@ -759,6 +784,7 @@ pub struct SandboxFilesystemConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct SandboxNetworkConfig {
     #[serde(default)]
@@ -771,6 +797,7 @@ pub struct SandboxNetworkConfig {
 
 /// Resource limits; max_memory and max_disk can be "2G", "512M", or bytes number.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct SandboxResourceConfig {
     #[serde(default)]
@@ -782,6 +809,7 @@ pub struct SandboxResourceConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(untagged)]
 pub enum SandboxSize {
     String(String),
@@ -820,6 +848,7 @@ fn parse_size_str(s: &str) -> anyhow::Result<u64> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct SandboxProcessConfig {
     #[serde(default)]
@@ -829,6 +858,7 @@ pub struct SandboxProcessConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct WindowsSandboxConfig {
     #[serde(default)]
@@ -836,6 +866,7 @@ pub struct WindowsSandboxConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AppSandboxConfig {
     #[serde(default)]
@@ -857,6 +888,7 @@ pub struct AppSandboxConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct ToolSandboxConfig {
     /// Container name for the tool sandbox. Default "synbot-tool".
@@ -881,6 +913,7 @@ pub struct ToolSandboxConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct SandboxLogOutputConfig {
     #[serde(rename = "type")]
@@ -894,6 +927,7 @@ pub struct SandboxLogOutputConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct SandboxMonitoringConfig {
     #[serde(default)]
@@ -911,6 +945,7 @@ fn default_true() -> bool {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
     /// When true (default), all channels may receive tool execution progress; each channel can override via channels.*.showToolCalls.
@@ -947,6 +982,12 @@ pub struct Config {
     /// Optional sandbox monitoring (log_level, log_output for sandbox audit).
     #[serde(default)]
     pub sandbox_monitoring: Option<SandboxMonitoringConfig>,
+}
+
+/// Generates the JSON Schema for the root config. Available only when the `schema` feature is enabled.
+#[cfg(feature = "schema")]
+pub fn config_json_schema() -> schemars::schema::RootSchema {
+    schemars::schema_for!(Config)
 }
 
 /// Expand paths that start with "~" to the user's home directory.

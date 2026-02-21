@@ -25,6 +25,20 @@ You can specify a different configuration file using the `--config` flag:
 synbot start --config /path/to/your/config.json
 ```
 
+## Config JSON Schema
+
+A JSON Schema for `config.json` can be generated from the codebase for editor/IDE validation and tooling:
+
+```bash
+# Print schema to stdout
+cargo run --example generate_config_schema --features schema
+
+# Write to a file (e.g. for VS Code / Cursor JSON validation)
+cargo run --example generate_config_schema --features schema -- -o config.schema.json
+```
+
+This requires the optional `schema` feature. The generated schema describes all top-level keys (`channels`, `providers`, `agent`, `memory`, `tools`, `web`, `log`, `heartbeat`, `cron`, `appSandbox`, `toolSandbox`, etc.) and their nested structure.
+
 ## Configuration Structure
 
 The configuration file has the following structure:

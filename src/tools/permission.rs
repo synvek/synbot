@@ -6,6 +6,7 @@ use std::sync::RwLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum PermissionLevel {
     Allow,
@@ -14,6 +15,7 @@ pub enum PermissionLevel {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PermissionRule {
     pub pattern: String,
     pub level: PermissionLevel,

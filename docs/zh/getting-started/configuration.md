@@ -21,6 +21,21 @@ Synbot 使用 JSON 配置文件来控制系统的所有方面。本指南介绍�
 synbot start --config /path/to/your/config.json
 ```
 
+## 配置 JSON Schema
+
+为 `config.json`  从代码生成JSON Schema 用于编辑器或IDE校验:
+
+```bash
+# Print schema to stdout
+cargo run --example generate_config_schema --features schema
+
+# Write to a file (e.g. for VS Code / Cursor JSON validation)
+cargo run --example generate_config_schema --features schema -- -o config.schema.json
+```
+
+This requires the optional `schema` feature. The generated schema describes all top-level keys (`channels`, `providers`, `agent`, `memory`, `tools`, `web`, `log`, `heartbeat`, `cron`, `appSandbox`, `toolSandbox`, etc.) and their nested structure.
+
+
 ## 配置结构
 
 配置文件具有以下结构：
