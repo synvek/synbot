@@ -128,7 +128,7 @@ const BUS_CAPACITY: usize = 256;
 
 #[derive(Debug)]
 pub struct MessageBus {
-    inbound_tx: mpsc::Sender<InboundMessage>,
+    inbound_tx: Option<mpsc::Sender<InboundMessage>>,
     inbound_rx: Option<mpsc::Receiver<InboundMessage>>,
     outbound_tx: broadcast::Sender<OutboundMessage>,
 }
@@ -138,7 +138,7 @@ impl MessageBus {
         let (inbound_tx, inbound_rx) = mpsc::channel(BUS_CAPACITY);
         let (outbound_tx, _) = broadcast::channel(BUS_CAPACITY);
         Self {
-            inbound_tx,
+            inbound_tx: Some(inbound_tx),
             inbound_rx: Some(inbound_rx),
             outbound_tx,
         }
@@ -146,7 +146,13 @@ impl MessageBus {
 
     /// Get a sender handle that channels use to push inbound messages.
     pub fn inbound_sender(&self) -> mpsc::Sender<InboundMessage> {
-        self.inbound_tx.clone()
+        self.inbound_tx.as_ref().expect("inbound channel already closed").clone()
+    }
+
+    /// Take and drop the bus's inbound sender so the channel closes when all other senders are dropped.
+    /// Call this when the agent should stop (e.g. one-shot after sending, or interactive on exit).
+    pub fn close_inbound(&mut self) {
+        let _ = self.inbound_tx.take();
     }
 
     /// Take the inbound receiver (can only be called once — the agent owns it).

@@ -108,10 +108,15 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
             })
             .await;
 
+        // Close the inbound channel so agent_loop.run() exits after processing this one message.
+        // (Bus and our sender must both be dropped for the mpsc to close.)
+        bus.close_inbound();
+        drop(inbound_tx);
+
         // Spawn outbound printer
         let mut rx = bus.subscribe_outbound();
         let printer = tokio::spawn(async move {
-            if let Ok(out) = rx.recv().await {
+            while let Ok(out) = rx.recv().await {
                 match out.message_type {
                     crate::bus::OutboundMessageType::Chat { content, .. } => {
                         println!("{}", content);
@@ -130,8 +135,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
             }
         });
 
-        // Run agent for one turn then exit
-        // We'll use a timeout to avoid hanging
+        // Run agent until the loop finishes (no more inbound messages)
         let _ = tokio::time::timeout(
             std::time::Duration::from_secs(120),
             agent_loop.run(),
@@ -140,6 +144,30 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
 
         printer.abort();
     } else {
+        // Interactive: run agent loop in background and print outbound messages
+        let mut rx = bus.subscribe_outbound();
+        let printer = tokio::spawn(async move {
+            while let Ok(out) = rx.recv().await {
+                match out.message_type {
+                    crate::bus::OutboundMessageType::Chat { content, .. } => {
+                        println!("{}", content);
+                    }
+                    crate::bus::OutboundMessageType::ApprovalRequest { request } => {
+                        println!("Approval request: {}", request.command);
+                    }
+                    crate::bus::OutboundMessageType::ToolProgress {
+                        tool_name,
+                        status,
+                        result_preview,
+                    } => {
+                        println!("[Tool: {}] {} — {}", tool_name, status, result_preview);
+                    }
+                }
+            }
+        });
+
+        let agent_handle = tokio::spawn(async move { agent_loop.run().await });
+
         println!("🐈 synbot interactive mode (type 'exit' to quit)");
         loop {
             print!("> ");
@@ -166,6 +194,12 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
                 })
                 .await;
         }
+
+        // Close channel so agent loop exits, then wait for it
+        bus.close_inbound();
+        drop(inbound_tx);
+        let _ = agent_handle.await;
+        printer.abort();
     }
 
     Ok(())
