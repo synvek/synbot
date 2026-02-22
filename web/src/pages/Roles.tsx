@@ -58,7 +58,7 @@ const Roles: React.FC = () => {
               key={role.name}
               onClick={() => setSelectedRole(role)}
               className={`bg-surface rounded-lg shadow p-4 cursor-pointer transition-all hover:shadow-lg ${
-                selectedRole?.name === role.name ? 'ring-2 ring-blue-500' : ''
+                selectedRole?.name === role.name ? 'ring-2 ring-primary' : ''
               }`}
             >
               <h3 className="text-lg font-semibold text-text">{role.name}</h3>
@@ -79,15 +79,15 @@ const Roles: React.FC = () => {
 
             <div className="space-y-4">
               <div>
-                <h4 className="text-sm font-medium text-gray-700 mb-2">{t('roles.systemPrompt')}</h4>
-                <div className="bg-gray-50 rounded p-3 text-sm text-gray-800 whitespace-pre-wrap max-h-48 overflow-y-auto">
+                <h4 className="text-sm font-medium text-text-secondary mb-2">{t('roles.systemPrompt')}</h4>
+                <div className="bg-background border border-border rounded p-3 text-sm text-text whitespace-pre-wrap max-h-48 overflow-y-auto">
                   {selectedRole.system_prompt}
                 </div>
               </div>
 
               <div>
-                <h4 className="text-sm font-medium text-gray-700 mb-2">{t('roles.modelConfiguration')}</h4>
-                <div className="bg-gray-50 rounded p-3 space-y-1 text-sm">
+                <h4 className="text-sm font-medium text-text-secondary mb-2">{t('roles.modelConfiguration')}</h4>
+                <div className="bg-background border border-border rounded p-3 space-y-1 text-sm text-text">
                   <p><span className="font-medium">{t('roles.provider')}:</span> {selectedRole.provider}</p>
                   <p><span className="font-medium">{t('roles.model')}:</span> {selectedRole.model}</p>
                   <p><span className="font-medium">{t('roles.maxTokens')}:</span> {selectedRole.max_tokens}</p>
@@ -96,42 +96,42 @@ const Roles: React.FC = () => {
               </div>
 
               <div>
-                <h4 className="text-sm font-medium text-gray-700 mb-2">{t('roles.skills')}</h4>
+                <h4 className="text-sm font-medium text-text-secondary mb-2">{t('roles.skills')}</h4>
                 <div className="flex flex-wrap gap-2">
                   {selectedRole.skills.map((skill) => (
                     <span
                       key={skill}
-                      className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm"
+                      className="px-3 py-1 bg-primary-muted text-primary rounded-full text-sm"
                     >
                       {skill}
                     </span>
                   ))}
                   {selectedRole.skills.length === 0 && (
-                    <span className="text-gray-500 text-sm">{t('roles.noSkills')}</span>
+                    <span className="text-text-secondary text-sm">{t('roles.noSkills')}</span>
                   )}
                 </div>
               </div>
 
               <div>
-                <h4 className="text-sm font-medium text-gray-700 mb-2">{t('roles.tools')}</h4>
+                <h4 className="text-sm font-medium text-text-secondary mb-2">{t('roles.tools')}</h4>
                 <div className="flex flex-wrap gap-2">
                   {selectedRole.tools.map((tool) => (
                     <span
                       key={tool}
-                      className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm"
+                      className="px-3 py-1 bg-background border border-border text-text rounded-full text-sm"
                     >
                       {tool}
                     </span>
                   ))}
                   {selectedRole.tools.length === 0 && (
-                    <span className="text-gray-500 text-sm">{t('roles.noTools')}</span>
+                    <span className="text-text-secondary text-sm">{t('roles.noTools')}</span>
                   )}
                 </div>
               </div>
 
               <div>
-                <h4 className="text-sm font-medium text-gray-700 mb-2">{t('roles.workspace')}</h4>
-                <code className="block bg-gray-50 rounded p-3 text-sm text-gray-800">
+                <h4 className="text-sm font-medium text-text-secondary mb-2">{t('roles.workspace')}</h4>
+                <code className="block bg-background border border-border rounded p-3 text-sm text-text font-mono">
                   {selectedRole.workspace_dir}
                 </code>
               </div>
