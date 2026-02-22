@@ -3,7 +3,7 @@
 </p>
 
 <h1 align="center">Synbot </h1>
-<h3 align="center">Small, fast and safe personal AI bot</h1>
+<h3 align="center">Personal AI bot with performance and safety</h1>
 
 **Synbot** is a personal AI assistant in Rust originated from [nanobot](https://github.com/HKUDS/nanobot) (in Python) and inspired by [Openclaw](https://github.com/openclaw/openclaw). 
 
