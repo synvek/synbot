@@ -58,7 +58,14 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
         None
     };
 
-    // Build tools (pass subagent manager, approval manager, and permission policy)
+    // Shared session state for CLI mode (create before tools so list_sessions/reset_session can be registered)
+    let session_store = crate::agent::session::SessionStore::new(crate::config::sessions_root().as_path());
+    let shared_session_state = crate::agent::session_state::SharedSessionState::new(session_store);
+    if let Err(e) = shared_session_state.load_persisted_sessions().await {
+        tracing::warn!(error = %e, "Failed to load persisted sessions");
+    }
+
+    // Build tools (pass subagent manager, approval manager, permission policy, and session state)
     let tools = build_default_tools(
         &cfg,
         &ws,
@@ -67,6 +74,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
         permission_policy,
         None, // no heartbeat/cron tools in CLI agent mode
         &None, // no sandbox in CLI agent mode
+        shared_session_state.clone(),
     );
     let tools = std::sync::Arc::new(tools);
 
@@ -74,11 +82,6 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
     let mut bus = crate::bus::MessageBus::new();
     let inbound_tx = bus.inbound_sender();
     let inbound_rx = bus.take_inbound_receiver().unwrap();
-
-    // Create session_manager for CLI mode
-    let session_manager = std::sync::Arc::new(tokio::sync::RwLock::new(
-        crate::agent::session_manager::SessionManager::new(),
-    ));
 
     // Agent loop (CLI agent has no tool sandbox)
     let mut agent_loop = crate::agent::r#loop::AgentLoop::new(
@@ -89,7 +92,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
         inbound_rx,
         bus.outbound_tx_clone(),
         &cfg,
-        session_manager,
+        shared_session_state,
         false,
     )
     .await;

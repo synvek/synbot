@@ -147,6 +147,12 @@ impl SessionManager {
         entry.1.push(message);
     }
 
+    /// Remove a session by id. Used when resetting a conversation so it appears fresh.
+    /// No-op if the session does not exist.
+    pub fn remove_session(&mut self, id: &SessionId) {
+        self.sessions.remove(id);
+    }
+
     // ── Accessors ───────────────────────────────────────────────────
 
     /// Get a reference to the session metadata, if the session exists.

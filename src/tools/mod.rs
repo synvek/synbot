@@ -8,6 +8,7 @@ pub mod heartbeat_cron;
 pub mod memory_tool;
 pub mod message;
 pub mod permission;
+pub mod session_tools;
 pub mod shell;
 pub mod spawn;
 pub mod truncation;
@@ -148,6 +149,11 @@ impl ToolRegistry {
             if name == "submit_approval_response" {
                 if let Some(obj) = args.as_object_mut() {
                     obj.insert("responder".into(), serde_json::Value::String(user_id.to_string()));
+                }
+            }
+            if name == "reset_session" {
+                if let Some(obj) = args.as_object_mut() {
+                    obj.insert("_session_id".into(), serde_json::Value::String(session_id.to_string()));
                 }
             }
             if name == "exec" {

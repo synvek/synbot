@@ -146,6 +146,13 @@ pub async fn cmd_start() -> Result<()> {
     // Optional sandbox: create and start app/tool sandboxes when configured.
     let sandbox_context = init_sandbox_if_configured(&cfg).await;
 
+    // Shared session state (in-memory + persistence); load before agent loop and tools
+    let session_store = crate::agent::session::SessionStore::new(crate::config::sessions_root().as_path());
+    let shared_session_state = crate::agent::session_state::SharedSessionState::new(session_store);
+    if let Err(e) = shared_session_state.load_persisted_sessions().await {
+        tracing::warn!(error = %e, "Failed to load persisted sessions");
+    }
+
     let tools = std::sync::Arc::new(build_default_tools(
         &cfg,
         &ws,
@@ -154,11 +161,7 @@ pub async fn cmd_start() -> Result<()> {
         permission_policy.clone(),
         heartbeat_cron_ctx,
         &sandbox_context,
-    ));
-
-    // Initialize components for web server
-    let session_manager = std::sync::Arc::new(tokio::sync::RwLock::new(
-        crate::agent::session_manager::SessionManager::new(),
+        shared_session_state.clone(),
     ));
 
     let mut role_registry = crate::agent::role_registry::RoleRegistry::new();
@@ -200,7 +203,7 @@ pub async fn cmd_start() -> Result<()> {
         inbound_rx,
         bus.outbound_tx_clone(),
         &cfg,
-        std::sync::Arc::clone(&session_manager),
+        shared_session_state.clone(),
         tool_sandbox_enabled,
     )
     .await;
@@ -299,7 +302,7 @@ pub async fn cmd_start() -> Result<()> {
         }
         let web_state = crate::web::AppState::new(
             std::sync::Arc::new(cfg.clone()),
-            session_manager,
+            shared_session_state.session_manager.clone(),
             cron_service,
             role_registry,
             skills_loader,

@@ -82,6 +82,7 @@ pub fn build_default_tools(
     permission_policy: Option<std::sync::Arc<crate::tools::permission::CommandPermissionPolicy>>,
     heartbeat_cron: HeartbeatCronContext,
     sandbox_context: &SandboxContext,
+    shared_session_state: crate::agent::session_state::SharedSessionState,
 ) -> crate::tools::ToolRegistry {
     use crate::tools::*;
     let restrict = cfg.tools.exec.restrict_to_workspace;
@@ -130,6 +131,14 @@ pub fn build_default_tools(
     })).expect("register SpawnTool");
     reg.register(std::sync::Arc::new(memory_tool::RememberTool::new("main"))).expect("register RememberTool");
     reg.register(std::sync::Arc::new(memory_tool::ListMemoryTool::new("main"))).expect("register ListMemoryTool");
+    reg.register(std::sync::Arc::new(session_tools::ListSessionsTool::new(
+        shared_session_state.clone(),
+    )))
+    .expect("register ListSessionsTool");
+    reg.register(std::sync::Arc::new(session_tools::ResetSessionTool::new(
+        shared_session_state.clone(),
+    )))
+    .expect("register ResetSessionTool");
 
     if let Some((config, config_path)) = heartbeat_cron {
         let inner = heartbeat_cron::HeartbeatCronTools {

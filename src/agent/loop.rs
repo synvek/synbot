@@ -5,17 +5,15 @@ use rig::completion::CompletionRequest;
 use rig::message::{AssistantContent, Message, ToolResultContent, UserContent};
 use rig::OneOrMany;
 use crate::rig_provider::SynbotCompletionModel;
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{broadcast, mpsc, Mutex, RwLock};
+use tokio::sync::{broadcast, mpsc, Mutex};
 use tracing::{error, info, warn, Instrument};
 
 use crate::agent::context::ContextBuilder;
 use crate::agent::directive::DirectiveParser;
 use crate::agent::role_registry::RoleRegistry;
-use crate::agent::session::SessionStore;
-use crate::agent::session_manager::SessionManager;
+use crate::agent::session_state::SharedSessionState;
 use crate::agent::subagent::SubagentManager;
 use crate::bus::{InboundMessage, OutboundMessage};
 use crate::config::Config;
@@ -24,18 +22,14 @@ use crate::tools::{scope, ToolContext, ToolRegistry};
 
 pub struct AgentLoop {
     model: Arc<dyn SynbotCompletionModel>,
-    /// Main agent workspace (for bootstrap files and session store). Memory for "main" is at ~/.synbot/memory/main.
     workspace: PathBuf,
     tools: Arc<ToolRegistry>,
     max_iterations: u32,
     inbound_rx: mpsc::Receiver<InboundMessage>,
     outbound_tx: broadcast::Sender<OutboundMessage>,
-    sessions: Arc<Mutex<HashMap<String, Vec<Message>>>>,
-    session_store: SessionStore,
+    session_state: SharedSessionState,
     role_registry: Arc<RoleRegistry>,
-    session_manager: Arc<RwLock<SessionManager>>,
     subagent_manager: Arc<Mutex<SubagentManager>>,
-    /// When true, exec runs in tool sandbox; passed to ContextBuilder for identity_section.
     tool_sandbox_enabled: bool,
 }
 
@@ -48,10 +42,9 @@ impl AgentLoop {
         inbound_rx: mpsc::Receiver<InboundMessage>,
         outbound_tx: broadcast::Sender<OutboundMessage>,
         config: &Config,
-        session_manager: Arc<RwLock<SessionManager>>,
+        session_state: SharedSessionState,
         tool_sandbox_enabled: bool,
     ) -> Self {
-        let session_store = SessionStore::new(crate::config::sessions_root().as_path());
         let mut role_registry = RoleRegistry::new();
         let roles_dir = crate::config::roles_dir();
         if let Err(e) = role_registry.load_from_config(
@@ -63,43 +56,6 @@ impl AgentLoop {
             warn!(error = %e, "Failed to load role registry from config");
         }
         let subagent_manager = SubagentManager::new(config.agent.max_concurrent_subagents);
-        let sessions = match session_store.load_all_sessions().await {
-            Ok(s) => {
-                if !s.is_empty() {
-                    info!(count = s.len(), "Restored persisted sessions");
-                }
-                s.into_iter()
-                    .map(|(key, data)| {
-                        let messages = data.messages.iter().map(|m| m.to_message()).collect();
-                        (key, messages)
-                    })
-                    .collect()
-            }
-            Err(e) => {
-                warn!(error = %e, "Failed to load persisted sessions, starting fresh");
-                HashMap::new()
-            }
-        };
-        
-        // Load sessions into the provided session_manager
-        {
-            let mut sm = session_manager.write().await;
-            match session_store.load_all_sessions().await {
-                Ok(session_data) => {
-                    for (key, data) in session_data {
-                        if let Ok(session_id) = crate::agent::session_id::SessionId::parse(&key) {
-                            let history = sm.get_or_create(&session_id);
-                            history.clear();
-                            history.extend(data.messages);
-                        }
-                    }
-                    info!(count = sm.session_count(), "Loaded sessions into session_manager");
-                }
-                Err(e) => {
-                    warn!(error = %e, "Failed to load sessions into session_manager");
-                }
-            }
-        }
         Self {
             workspace,
             model,
@@ -107,10 +63,8 @@ impl AgentLoop {
             max_iterations,
             inbound_rx,
             outbound_tx,
-            sessions: Arc::new(Mutex::new(sessions)),
-            session_store,
+            session_state,
             role_registry: Arc::new(role_registry),
-            session_manager,
             subagent_manager: Arc::new(Mutex::new(subagent_manager)),
             tool_sandbox_enabled,
         }
@@ -164,53 +118,52 @@ impl AgentLoop {
     async fn save_message_only(&mut self, msg: &InboundMessage) -> Result<()> {
         let agent_id = "main";
         let session_id = {
-            let sm = self.session_manager.write().await;
+            let sm = self.session_state.session_manager.write().await;
             sm.resolve_session(agent_id, &msg.channel, &msg.chat_id, &msg.metadata)
         };
         let session_key = session_id.format();
 
         let user_content = msg.content.clone();
+        let session_messages = self.session_state.get_or_create_session_messages(&session_key).await;
         {
-            let mut sessions = self.sessions.lock().await;
-            let history = sessions.entry(session_key.clone()).or_default();
+            let mut history = session_messages.lock().await;
             history.push(Message::user(&user_content));
         }
         {
-            let mut sm = self.session_manager.write().await;
+            let mut sm = self.session_state.session_manager.write().await;
             let user_msg = crate::agent::session::SessionMessage {
                 role: "user".to_string(),
-                content: user_content,
+                content: user_content.clone(),
                 timestamp: chrono::Utc::now(),
             };
             sm.append(&session_id, user_msg);
         }
 
-        let sessions = self.sessions.lock().await;
-        if let Some(messages) = sessions.get(&session_key) {
-            let now = chrono::Utc::now();
-            let meta = crate::agent::session_manager::SessionMeta {
-                id: session_id.clone(),
-                participants: vec![
-                    format!("{}:{}", msg.channel, msg.sender_id),
-                    format!("agent:{}", agent_id),
-                ],
-                created_at: now,
-                updated_at: now,
-            };
-            let mut sm = self.session_manager.write().await;
-            let session_messages: Vec<crate::agent::session::SessionMessage> =
+        let messages = session_messages.lock().await.clone();
+        let now = chrono::Utc::now();
+        let meta = crate::agent::session_manager::SessionMeta {
+            id: session_id.clone(),
+            participants: vec![
+                format!("{}:{}", msg.channel, msg.sender_id),
+                format!("agent:{}", agent_id),
+            ],
+            created_at: now,
+            updated_at: now,
+        };
+        {
+            let mut sm = self.session_state.session_manager.write().await;
+            let session_messages_sm: Vec<crate::agent::session::SessionMessage> =
                 messages.iter().map(crate::agent::session::SessionMessage::from_message).collect();
             let history = sm.get_or_create(&session_id);
             history.clear();
-            history.extend(session_messages);
-            drop(sm);
-            if let Err(e) = self.session_store.save_session(&session_key, messages, Some(&meta)).await {
-                warn!(
-                    session_key = %session_key,
-                    error = %e,
-                    "Failed to persist session (save_message_only)"
-                );
-            }
+            history.extend(session_messages_sm);
+        }
+        if let Err(e) = self.session_state.session_store.save_session(&session_key, &messages, Some(&meta)).await {
+            warn!(
+                session_key = %session_key,
+                error = %e,
+                "Failed to persist session (save_message_only)"
+            );
         }
         Ok(())
     }
@@ -234,7 +187,7 @@ impl AgentLoop {
             };
 
             let session_id = {
-                let sm = self.session_manager.write().await;
+                let sm = self.session_state.session_manager.write().await;
                 sm.resolve_session(&agent_id, &msg.channel, &msg.chat_id, &msg.metadata)
             };
             let session_key = session_id.format();
@@ -286,13 +239,14 @@ impl AgentLoop {
             };
 
             let tool_defs = self.tools.rig_definitions();
-            let mut sessions = self.sessions.lock().await;
-            let history = sessions.entry(session_key.clone()).or_default();
-            history.push(Message::user(&user_content));
-            
+            let session_messages = self.session_state.get_or_create_session_messages(&session_key).await;
+            {
+                let mut history = session_messages.lock().await;
+                history.push(Message::user(&user_content));
+            }
             // Update session_manager with the user message
             {
-                let mut sm = self.session_manager.write().await;
+                let mut sm = self.session_state.session_manager.write().await;
                 let user_msg = crate::agent::session::SessionMessage {
                     role: "user".to_string(),
                     content: user_content.clone(),
@@ -301,14 +255,16 @@ impl AgentLoop {
                 sm.append(&session_id, user_msg);
             }
 
-            tracing::debug!("History check: {:?}", history);
-            let iterations = scope(tool_ctx, async {
+            let mut history_guard = session_messages.lock().await;
+            tracing::debug!("History check: {:?}", *history_guard);
+            self.session_state.set_active(&session_key, "processing").await;
+            let run_result = scope(tool_ctx, async {
                 run_completion_loop(
                     &*self.model,
                     &system_prompt,
                     model_max_iterations,
                     &agent_id,
-                    history,
+                    &mut *history_guard,
                     &tool_defs,
                     &self.tools,
                     &msg.channel,
@@ -319,9 +275,15 @@ impl AgentLoop {
                 )
                 .await
             })
-            .await?;
+            .await;
+            if let Err(ref e) = run_result {
+                self.session_state.clear_active(&session_key).await;
+                return Err(anyhow::anyhow!("{}", e));
+            }
+            let iterations = run_result?;
+            self.session_state.clear_active(&session_key).await;
 
-            drop(sessions);
+            drop(history_guard);
 
             info!(
                 agent_id = %agent_id,
@@ -331,38 +293,31 @@ impl AgentLoop {
             );
 
             // Persist session with metadata and sync to session_manager
-            let sessions = self.sessions.lock().await;
-            if let Some(messages) = sessions.get(&session_key) {
-                let now = chrono::Utc::now();
-                let meta = crate::agent::session_manager::SessionMeta {
-                    id: session_id.clone(),
-                    participants: vec![
-                        format!("{}:{}", msg.channel, msg.sender_id),
-                        format!("agent:{}", agent_id),
-                    ],
-                    created_at: now,
-                    updated_at: now,
-                };
-                
-                // Sync all messages to session_manager
-                {
-                    let mut sm = self.session_manager.write().await;
-                    let session_messages: Vec<crate::agent::session::SessionMessage> = 
-                        messages.iter().map(crate::agent::session::SessionMessage::from_message).collect();
-                    
-                    // Clear and rebuild the session in session_manager
-                    let history = sm.get_or_create(&session_id);
-                    history.clear();
-                    history.extend(session_messages);
-                }
-                
-                if let Err(e) = self.session_store.save_session(&session_key, messages, Some(&meta)).await {
-                    warn!(
-                        session_key = %session_key,
-                        error = %e,
-                        "Failed to persist session, will retry on next message"
-                    );
-                }
+            let messages = session_messages.lock().await.clone();
+            let now = chrono::Utc::now();
+            let meta = crate::agent::session_manager::SessionMeta {
+                id: session_id.clone(),
+                participants: vec![
+                    format!("{}:{}", msg.channel, msg.sender_id),
+                    format!("agent:{}", agent_id),
+                ],
+                created_at: now,
+                updated_at: now,
+            };
+            {
+                let mut sm = self.session_state.session_manager.write().await;
+                let session_messages_sm: Vec<crate::agent::session::SessionMessage> =
+                    messages.iter().map(crate::agent::session::SessionMessage::from_message).collect();
+                let history = sm.get_or_create(&session_id);
+                history.clear();
+                history.extend(session_messages_sm);
+            }
+            if let Err(e) = self.session_state.session_store.save_session(&session_key, &messages, Some(&meta)).await {
+                warn!(
+                    session_key = %session_key,
+                    error = %e,
+                    "Failed to persist session, will retry on next message"
+                );
             }
         }
         Ok(())
@@ -389,7 +344,7 @@ impl AgentLoop {
             };
 
             let session_id = {
-                let sm = self.session_manager.write().await;
+                let sm = self.session_state.session_manager.write().await;
                 sm.resolve_session(&agent_id, &msg.channel, &msg.chat_id, &msg.metadata)
             };
             let session_key = session_id.format();
@@ -424,13 +379,13 @@ impl AgentLoop {
             };
 
             // Push user message into session history before spawning
+            let session_messages = self.session_state.get_or_create_session_messages(&session_key).await;
             {
-                let mut sessions = self.sessions.lock().await;
-                let history = sessions.entry(session_key.clone()).or_default();
+                let mut history = session_messages.lock().await;
                 history.push(Message::user(&user_content));
-                
-                // Update session_manager with the user message
-                let mut sm = self.session_manager.write().await;
+            }
+            {
+                let mut sm = self.session_state.session_manager.write().await;
                 let user_msg = crate::agent::session::SessionMessage {
                     role: "user".to_string(),
                     content: user_content.clone(),
@@ -454,9 +409,7 @@ impl AgentLoop {
 
             let model = Arc::clone(&self.model);
             let tools = Arc::clone(&self.tools);
-            let sessions = Arc::clone(&self.sessions);
-            let session_manager = Arc::clone(&self.session_manager);
-            let session_store_root = self.session_store.sessions_root().to_path_buf();
+            let session_state = self.session_state.clone();
             let outbound_tx = self.outbound_tx.clone();
             let channel = msg.channel.clone();
             let channel_for_meta = channel.clone();
@@ -473,60 +426,63 @@ impl AgentLoop {
                 memory_dir: agent_memory_dir,
             };
 
+            let session_messages_clone = session_messages.clone();
             let task_future = Box::pin(async move {
-                let mut sessions_guard = sessions.lock().await;
-                let history = sessions_guard.entry(sk.clone()).or_default();
+                session_state.set_active(&sk, "processing").await;
+                let mut history_guard = session_messages_clone.lock().await;
                 let session_id_str = sk.clone();
-                let iterations = scope(tool_ctx, async move {
-                    run_completion_loop(
-                    &*model,
-                    &system_prompt,
-                    model_max_iterations,
-                    &aid,
-                    history,
-                    &tool_defs,
-                    &tools,
-                    &channel,
-                    &chat_id,
-                    &sender_id_for_loop,
-                    &session_id_str,
-                    &outbound_tx,
-                ).await
-                }).await?;
+                let run_result = scope(tool_ctx, async move {
+                    let it = run_completion_loop(
+                        &*model,
+                        &system_prompt,
+                        model_max_iterations,
+                        &aid,
+                        &mut *history_guard,
+                        &tool_defs,
+                        &tools,
+                        &channel,
+                        &chat_id,
+                        &sender_id_for_loop,
+                        &session_id_str,
+                        &outbound_tx,
+                    )
+                    .await?;
+                    let messages = history_guard.clone();
+                    Ok::<_, anyhow::Error>((it, messages))
+                })
+                .await;
+                if let Err(ref e) = run_result {
+                    session_state.clear_active(&sk).await;
+                    return Err(anyhow::anyhow!("{}", e));
+                }
+                let (iterations, messages) = run_result?;
 
                 // Persist session with metadata and sync to session_manager
-                let store = SessionStore::new(&session_store_root);
-                if let Some(messages) = sessions_guard.get(&sk) {
-                    let now = chrono::Utc::now();
-                    let meta = crate::agent::session_manager::SessionMeta {
-                        id: sid.clone(),
-                        participants: vec![
-                            format!("{}:{}", channel_for_meta, sender_id),
-                            format!("agent:{}", aid_for_meta),
-                        ],
-                        created_at: now,
-                        updated_at: now,
-                    };
-                    
-                    // Sync all messages to session_manager
-                    {
-                        let mut sm = session_manager.write().await;
-                        let session_messages: Vec<crate::agent::session::SessionMessage> = 
-                            messages.iter().map(crate::agent::session::SessionMessage::from_message).collect();
-                        
-                        // Clear and rebuild the session in session_manager
-                        let history = sm.get_or_create(&sid);
-                        history.clear();
-                        history.extend(session_messages);
-                    }
-                    
-                    if let Err(e) = store.save_session(&sk, messages, Some(&meta)).await {
-                        warn!(
-                            session_key = %sk,
-                            error = %e,
-                            "Failed to persist session, will retry on next message"
-                        );
-                    }
+                session_state.clear_active(&sk).await;
+                let now = chrono::Utc::now();
+                let meta = crate::agent::session_manager::SessionMeta {
+                    id: sid.clone(),
+                    participants: vec![
+                        format!("{}:{}", channel_for_meta, sender_id),
+                        format!("agent:{}", aid_for_meta),
+                    ],
+                    created_at: now,
+                    updated_at: now,
+                };
+                {
+                    let mut sm = session_state.session_manager.write().await;
+                    let session_messages_sm: Vec<crate::agent::session::SessionMessage> =
+                        messages.iter().map(crate::agent::session::SessionMessage::from_message).collect();
+                    let history = sm.get_or_create(&sid);
+                    history.clear();
+                    history.extend(session_messages_sm);
+                }
+                if let Err(e) = session_state.session_store.save_session(&sk, &messages, Some(&meta)).await {
+                    warn!(
+                        session_key = %sk,
+                        error = %e,
+                        "Failed to persist session, will retry on next message"
+                    );
                 }
 
                 Ok(format!("agent={}, iterations={}", aid_for_meta, iterations))

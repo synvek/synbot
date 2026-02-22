@@ -10,5 +10,6 @@ pub mod role_registry;
 pub mod session;
 pub mod session_id;
 pub mod session_manager;
+pub mod session_state;
 pub mod skills;
 pub mod subagent;

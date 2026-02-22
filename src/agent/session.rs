@@ -313,6 +313,19 @@ impl SessionStore {
         Ok(Some(session_data))
     }
 
+    /// Delete a session file from disk. Used when resetting a conversation.
+    /// No-op if the file does not exist. Returns Ok(()) either way.
+    pub async fn delete_session(&self, key: &str) -> Result<()> {
+        let path = self.session_path(key);
+        if path.exists() {
+            fs::remove_file(&path)
+                .await
+                .context("failed to remove session file")?;
+            debug!(session_key = %key, "session file deleted");
+        }
+        Ok(())
+    }
+
     /// Parse a JSON string into `SessionData`, supporting both the new format
     /// (object with `meta` + `messages`) and the legacy format (plain array of
     /// messages).
