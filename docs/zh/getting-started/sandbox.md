@@ -63,7 +63,11 @@ synbot sandbox start
 
 ### 平台差异
 
-- **Windows**：使用 **AppContainer**。启用网络时，首次需以管理员身份运行以添加防火墙/WFP 规则；参见 [AppContainer 网络故障排除](/zh/getting-started/appcontainer-network-troubleshooting)。
+- **Windows**：使用 **AppContainer**。启用网络时，请在**安装后**以**管理员身份**运行**一次**以下命令以添加防火墙与 WFP 规则（WFP 为持久筛选器，重启后由 BFE 自动恢复，通常无需重复执行）：
+  ```bash
+  synbot sandbox setup
+  ```
+  之后即可用普通用户启动沙箱，无需以管理员身份运行完整守护进程。参见 [AppContainer 网络故障排除](/zh/getting-started/appcontainer-network-troubleshooting)。
 - **Linux**：使用 **nono** + Landlock 做能力隔离。
 - **macOS**：使用 **nono** + Seatbelt 做能力隔离。
 

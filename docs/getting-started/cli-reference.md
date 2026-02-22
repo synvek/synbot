@@ -62,14 +62,22 @@ synbot start
 synbot start --config /path/to/config.json --log-level debug
 ```
 
-### `synbot sandbox` \<child_args...\>
+### `synbot sandbox` \<subcommand or child_args...\>
 
-Start the **app sandbox**, then run `synbot <child_args>` inside it. Requires `appSandbox` to be configured. If `child_args` is empty, runs `synbot start` inside the sandbox.
+Start the **app sandbox**, then run `synbot <args...>` inside it. Requires `appSandbox` to be configured. If no args are given, runs `synbot start` inside the sandbox.
+
+**Subcommands:**
+
+| Subcommand | Description |
+|------------|-------------|
+| `start` | Start the sandbox and run `synbot start` inside it (default). |
+| `setup` | **Windows only:** Run once as Administrator to add firewall and WFP rules (WFP filters are persistent across reboot); then you can run `synbot sandbox start` as a normal user. Usually needed only once after install. |
 
 Examples:
 
 ```bash
 synbot sandbox start
+synbot sandbox setup   # Windows: run once as Administrator
 synbot sandbox agent --message "Hello"
 ```
 

@@ -4,11 +4,15 @@ If the daemon runs inside the Windows AppContainer sandbox with network enabled 
 
 ## First run (or after reboot): use Administrator once
 
-Adding the firewall outbound rule and WFP permit for the AppContainer requires **Administrator** rights. The rules are **persistent**: they are **not** removed when the sandbox stops. So:
+Adding the firewall outbound rule and WFP permit for the AppContainer requires **Administrator** rights. The rules are **persistent**: they are **not** removed when the sandbox stops. To avoid running the full Synbot daemon as Administrator:
 
-- **First run after install or after a reboot:** run `synbot sandbox` (or whatever starts the AppContainer daemon) **once as Administrator** (e.g. right-click → Run as administrator). The program will add the firewall and WFP rules; they remain in place after the sandbox stops.
-- **Later runs:** any user (including normal user) can start the sandbox; the existing rules allow the AppContainer’s outbound network, so no Administrator is needed.
-- **After a reboot:** WFP filters are cleared by Windows; firewall rules may remain. Run once as Administrator to re-add WFP (and any missing firewall rules), then normal user can run again. If rules were removed manually or by policy, run once as Administrator to re-add them.
+- **First run after install or after a reboot:** run **once as Administrator** (e.g. right-click → Run as administrator):
+  ```bash
+  synbot sandbox setup
+  ```
+  This only adds the firewall and WFP rules and exits; it does not start the daemon. You do **not** need to run `synbot sandbox start` as Administrator.
+- **Later runs:** any user (including normal user) can run `synbot sandbox start`; the existing rules allow the AppContainer’s outbound network, so no Administrator is needed.
+- **After a reboot:** Synbot’s WFP filters are **persistent** (added with `FWPM_FILTER_FLAG_PERSISTENT`) and are restored by BFE after reboot, so you usually do not need to run `setup` again. If firewall rules were cleared by the system or policy, or outbound still fails, run `synbot sandbox setup` once as Administrator again. If rules were removed manually, run `setup` as Administrator to re-add them.
 
 ## Turn off WFP packet-drop auditing (restore)
 

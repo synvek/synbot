@@ -11,6 +11,7 @@ fn progress(msg: &str) {
 
 /// Run the given subcommand and args inside the app sandbox.
 /// Example: cmd_sandbox(vec!["start".into()]) → starts sandbox, then runs `synbot start` in it.
+/// If child_args is ["setup"], on Windows only: install firewall/WFP rules then exit (no daemon).
 pub async fn cmd_sandbox(child_args: Vec<String>) -> Result<()> {
     progress("Loading config...");
     let cfg = crate::config::load_config(None).context("Load config for sandbox")?;
@@ -24,6 +25,11 @@ pub async fn cmd_sandbox(child_args: Vec<String>) -> Result<()> {
     progress("Building sandbox config...");
     let sandbox_config =
         crate::config::build_app_sandbox_config(app_cfg, monitoring).context("Build app sandbox config")?;
+
+    // Windows-only: setup adds firewall/WFP rules once (run as Administrator). After that, normal users can start the sandbox.
+    if child_args.get(0).map(|s| s.as_str()) == Some("setup") {
+        return run_sandbox_setup(&sandbox_config).await;
+    }
 
     #[cfg(target_os = "windows")]
     {
@@ -39,6 +45,26 @@ pub async fn cmd_sandbox(child_args: Vec<String>) -> Result<()> {
     {
         let _ = (sandbox_config, child_args);
         anyhow::bail!("`synbot sandbox` (app sandbox launcher) is not supported on this platform.");
+    }
+}
+
+/// Run `synbot sandbox setup`: add firewall and WFP rules for the AppContainer (Windows only).
+/// On Windows: requires Administrator. On other platforms: no-op with a message.
+async fn run_sandbox_setup(sandbox_config: &crate::sandbox::SandboxConfig) -> Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        progress("Installing firewall and WFP rules for AppContainer (requires Administrator)...");
+        crate::sandbox::windows_appcontainer::install_windows_sandbox_network_rules(sandbox_config.clone())
+            .context("Install Windows sandbox network rules")?;
+        progress("Rules installed. You can now run `synbot sandbox start` as a normal user.");
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = sandbox_config;
+        progress("setup is only needed on Windows (AppContainer). On this platform you can run `synbot sandbox start` directly.");
+        Ok(())
     }
 }
 

@@ -62,14 +62,22 @@ synbot start
 synbot start --config /path/to/config.json --log-level debug
 ```
 
-### `synbot sandbox` \<子命令参数...\>
+### `synbot sandbox` \<子命令或参数...\>
 
-先启动**应用沙箱**，再在沙箱内执行 `synbot <子命令参数...>`。需在配置中启用 `appSandbox`。若未提供参数，默认在沙箱内执行 `synbot start`。
+先启动**应用沙箱**，再在沙箱内执行 `synbot <参数...>`。需在配置中启用 `appSandbox`。若未提供参数，默认在沙箱内执行 `synbot start`。
+
+**子命令：**
+
+| 子命令 | 说明 |
+|--------|------|
+| `start` | 启动沙箱并在沙箱内运行 `synbot start`（默认）。 |
+| `setup` | **仅 Windows**：以管理员身份运行一次，添加防火墙与 WFP 规则（WFP 为持久筛选器，重启后自动恢复）；之后可用普通用户执行 `synbot sandbox start`。通常安装后执行一次即可。 |
 
 示例：
 
 ```bash
 synbot sandbox start
+synbot sandbox setup   # Windows：以管理员运行一次
 synbot sandbox agent --message "你好"
 ```
 

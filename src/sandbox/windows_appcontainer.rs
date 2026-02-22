@@ -177,6 +177,45 @@ fn to_wide_null(s: &str) -> Vec<u16> {
     OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
 }
 
+/// Returns true if the current process is running with elevated privileges (Administrator).
+/// Used to skip firewall/WFP/loopback add when running as normal user (rules should already exist from `synbot sandbox setup`).
+fn is_process_elevated() -> bool {
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_QUERY};
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    #[repr(C)]
+    struct TokenElevationLayout {
+        token_is_elevated: u32,
+    }
+
+    unsafe {
+        let process = GetCurrentProcess();
+        let mut token = HANDLE::default();
+        if OpenProcessToken(process, TOKEN_QUERY, &mut token).is_err() {
+            return false;
+        }
+        let mut ret_len = 0u32;
+        let _ = GetTokenInformation(token, TokenElevation, None, 0, &mut ret_len);
+        let mut buf = vec![0u8; ret_len as usize];
+        if GetTokenInformation(
+            token,
+            TokenElevation,
+            Some(buf.as_mut_ptr() as *mut _),
+            ret_len,
+            &mut ret_len,
+        )
+        .is_err()
+        {
+            let _ = CloseHandle(token);
+            return false;
+        }
+        let _ = CloseHandle(token);
+        let layout = &*(buf.as_ptr() as *const TokenElevationLayout);
+        layout.token_is_elevated != 0
+    }
+}
+
 /// Convert a Windows PSID to string form S-R-I-S-S using the system API (for firewall LocalAppPackageId).
 unsafe fn sid_to_string(sid: *mut std::ffi::c_void) -> Option<String> {
     if sid.is_null() {
@@ -369,6 +408,7 @@ impl Drop for SidCopyGuard {
 }
 
 /// Add WFP permit filters for the AppContainer SID so outbound TCP is allowed (high-priority sublayer + CLEAR_ACTION_RIGHT).
+/// Filters are added with FWPM_FILTER_FLAG_PERSISTENT so they survive reboot (BFE restores them from persistent store).
 /// Idempotent: if provider/sublayer/filters already exist (e.g. leftover from crash), treats as success.
 /// Cleanup in stop() uses delete-by-key (no stored IDs needed).
 fn add_wfp_permit_for_appcontainer(container_sid: *mut std::ffi::c_void) -> Result<()> {
@@ -377,7 +417,8 @@ fn add_wfp_permit_for_appcontainer(container_sid: *mut std::ffi::c_void) -> Resu
         FwpmProviderAdd0, FwpmProviderDeleteByKey0, FwpmSubLayerAdd0, FwpmSubLayerDeleteByKey0,
         FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_CONNECT_V6,
         FWPM_LAYER_ALE_FLOW_ESTABLISHED_V4, FWPM_LAYER_ALE_FLOW_ESTABLISHED_V6,
-        FWPM_CONDITION_ALE_PACKAGE_ID, FWPM_FILTER0, FWPM_FILTER_CONDITION0, FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT,
+        FWPM_CONDITION_ALE_PACKAGE_ID, FWPM_FILTER0, FWPM_FILTER_CONDITION0,
+        FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT, FWPM_FILTER_FLAG_PERSISTENT,
         FWPM_PROVIDER0, FWPM_SUBLAYER0, FWP_ACTION_PERMIT, FWP_CONDITION_VALUE0, FWP_CONDITION_VALUE0_0,
         FWP_MATCH_EQUAL, FWP_SID, FWP_VALUE0, FWP_VALUE0_0, FWP_EMPTY, FWPM_ACTION0, FWPM_ACTION0_0,
         FWPM_DISPLAY_DATA0, FWP_BYTE_BLOB,
@@ -513,7 +554,7 @@ fn add_wfp_permit_for_appcontainer(container_sid: *mut std::ffi::c_void) -> Resu
                 name: windows::core::PWSTR(filter_v4_name.as_ptr() as *mut u16),
                 description: windows::core::PWSTR::null(),
             },
-            flags: FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT,
+            flags: FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT | FWPM_FILTER_FLAG_PERSISTENT,
             providerKey: std::ptr::null_mut(),
             providerData: FWP_BYTE_BLOB::default(),
             layerKey: FWPM_LAYER_ALE_AUTH_CONNECT_V4,
@@ -1052,10 +1093,11 @@ impl WindowsAppContainerSandbox {
     }
 }
 
-impl Sandbox for WindowsAppContainerSandbox {
-    fn start(&mut self) -> Result<()> {
-        self.status.state = SandboxState::Starting;
-
+impl WindowsAppContainerSandbox {
+    /// Creates the AppContainer profile and adds firewall/WFP/loopback rules.
+    /// Used by both start() and install_windows_sandbox_network_rules().
+    /// Does not set sandbox state to Running.
+    fn create_profile_and_add_network_rules(&mut self) -> Result<()> {
         let name_wide = to_wide_null(&self.profile_name);
         let display_wide = to_wide_null(&format!("SynBot Sandbox {}", self.config.sandbox_id));
         let desc_wide = to_wide_null("Sandbox for SynBot agent process");
@@ -1128,69 +1170,104 @@ impl Sandbox for WindowsAppContainerSandbox {
             self.container_sid = Some(psid.0);
         }
 
-        // Allow outbound network: firewall rule + WFP permit (high-priority, CLEAR_ACTION_RIGHT) so AppContainer can reach internet.
-        // Rules are persistent (not removed on stop); add is idempotent (remove-then-add for firewall when we have admin).
+        // Allow outbound network: firewall rule + WFP permit. Only add when running elevated (Administrator);
+        // otherwise rules should already exist from `synbot sandbox setup` and we skip to avoid "access denied" warnings.
         if self.config.network.enabled {
-            if let Some(sid_str) = unsafe { sid_to_string(self.container_sid.unwrap()) } {
-                let rule_name = format!("SynBot Sandbox - {}", self.config.sandbox_id);
-                let _ = remove_firewall_rule_by_name(&rule_name); // idempotent: remove existing so Add succeeds when we have admin
-                match add_firewall_outbound_rule_for_appcontainer(&sid_str, &rule_name) {
-                    Ok(()) => {
-                        self.firewall_rule_name = Some(rule_name);
-                        let _ = writeln!(std::io::stderr(), "[synbot sandbox] Firewall outbound rule added for AppContainer");
+            if is_process_elevated() {
+                if let Some(sid_str) = unsafe { sid_to_string(self.container_sid.unwrap()) } {
+                    let rule_name = format!("SynBot Sandbox - {}", self.config.sandbox_id);
+                    let _ = remove_firewall_rule_by_name(&rule_name); // idempotent: remove existing so Add succeeds when we have admin
+                    match add_firewall_outbound_rule_for_appcontainer(&sid_str, &rule_name) {
+                        Ok(()) => {
+                            self.firewall_rule_name = Some(rule_name);
+                            let _ = writeln!(std::io::stderr(), "[synbot sandbox] Firewall outbound rule added for AppContainer");
+                            let _ = std::io::stderr().flush();
+                        }
+                        Err(e) => {
+                            let _ = writeln!(std::io::stderr(), "[synbot sandbox] WARNING: Could not add firewall rule: {}", e);
+                            let _ = writeln!(std::io::stderr(), "[synbot sandbox] Run once as Administrator: synbot sandbox setup");
+                            let _ = std::io::stderr().flush();
+                            log::warn!("Firewall outbound rule: {} (run as Administrator: synbot sandbox setup)", e);
+                        }
+                    }
+                }
+                if let Some(sid_str) = unsafe { sid_to_string(self.container_sid.unwrap()) } {
+                    let _ = writeln!(std::io::stderr(), "[synbot sandbox] WFP permit will use AppContainer SID: {}", sid_str);
+                    let _ = std::io::stderr().flush();
+                }
+                match add_wfp_permit_for_appcontainer(self.container_sid.unwrap()) {
+                    Ok(_) => {
+                        let _ = writeln!(std::io::stderr(), "[synbot sandbox] WFP permit filters added for AppContainer outbound (child SID should match above)");
+                        let _ = writeln!(std::io::stderr(), "[synbot sandbox] If outbound HTTPS still fails, see docs/getting-started/appcontainer-network-troubleshooting.md (WFP audit)");
                         let _ = std::io::stderr().flush();
                     }
                     Err(e) => {
-                        log::warn!("Firewall outbound rule: {} (rules persist; if already added by Administrator, network may work)", e);
+                        let _ = writeln!(std::io::stderr(), "[synbot sandbox] WARNING: Could not add WFP permit: {}", e);
+                        let _ = writeln!(std::io::stderr(), "[synbot sandbox] Run once as Administrator: synbot sandbox setup");
+                        let _ = writeln!(std::io::stderr(), "[synbot sandbox] Then you can start the sandbox as a normal user. WFP filters are persistent (survive reboot).");
+                        let _ = std::io::stderr().flush();
+                        log::warn!("WFP permit for AppContainer: {} (network may be blocked)", e);
                     }
                 }
-            }
-            if let Some(sid_str) = unsafe { sid_to_string(self.container_sid.unwrap()) } {
-                let _ = writeln!(std::io::stderr(), "[synbot sandbox] WFP permit will use AppContainer SID: {}", sid_str);
+
+                // Loopback exemption: allow processes on the same machine to connect to ports
+                // bound inside the AppContainer (e.g. web UI on 127.0.0.1).
+                match add_loopback_exemption_for_appcontainer(self.container_sid.unwrap()) {
+                    Ok(()) => {
+                        let _ = writeln!(std::io::stderr(), "[synbot sandbox] Loopback exemption granted for AppContainer (localhost access enabled)");
+                        let _ = std::io::stderr().flush();
+                    }
+                    Err(e) => {
+                        log::warn!("Loopback exemption failed: {} (localhost access to web UI may not work)", e);
+                    }
+                }
+
+                // Inbound firewall rule: allow LAN clients to reach the web server port.
+                for port in &self.config.network.allowed_ports {
+                    let inbound_rule_name = format!("SynBot Sandbox Inbound - {} port {}", self.config.sandbox_id, port);
+                    let _ = remove_firewall_rule_by_name(&inbound_rule_name);
+                    match add_firewall_inbound_rule_for_port(&inbound_rule_name, *port) {
+                        Ok(()) => {
+                            let _ = writeln!(std::io::stderr(), "[synbot sandbox] Firewall inbound rule added for port {}", port);
+                            let _ = std::io::stderr().flush();
+                        }
+                        Err(e) => {
+                            log::warn!("Firewall inbound rule for port {}: {}", port, e);
+                        }
+                    }
+                }
+            } else {
+                let _ = writeln!(std::io::stderr(), "[synbot sandbox] Running as normal user; using existing network rules (run 'synbot sandbox setup' as Administrator if network fails).");
                 let _ = std::io::stderr().flush();
             }
-            match add_wfp_permit_for_appcontainer(self.container_sid.unwrap()) {
-                Ok(_) => {
-                    let _ = writeln!(std::io::stderr(), "[synbot sandbox] WFP permit filters added for AppContainer outbound (child SID should match above)");
-                    let _ = writeln!(std::io::stderr(), "[synbot sandbox] If outbound HTTPS still fails, see docs/getting-started/appcontainer-network-troubleshooting.md (WFP audit)");
-                    let _ = std::io::stderr().flush();
-                }
-                Err(e) => {
-                    let _ = writeln!(std::io::stderr(), "[synbot sandbox] WARNING: Could not add WFP permit: {}", e);
-                    let _ = writeln!(std::io::stderr(), "[synbot sandbox] Troubleshooting: Run PowerShell or CMD as Administrator (e.g. right-click -> Run as administrator), then run synbot sandbox. If it still fails, ensure Base Filtering Engine (BFE) service is running.");
-                    let _ = std::io::stderr().flush();
-                    log::warn!("WFP permit for AppContainer: {} (network may be blocked)", e);
-                }
-            }
-
-            // Loopback exemption: allow processes on the same machine to connect to ports
-            // bound inside the AppContainer (e.g. web UI on 127.0.0.1).
-            // Equivalent to: CheckNetIsolation.exe LoopbackExempt -a -n="<profile>"
-            match add_loopback_exemption_for_appcontainer(self.container_sid.unwrap()) {
-                Ok(()) => {
-                    let _ = writeln!(std::io::stderr(), "[synbot sandbox] Loopback exemption granted for AppContainer (localhost access enabled)");
-                    let _ = std::io::stderr().flush();
-                }
-                Err(e) => {
-                    log::warn!("Loopback exemption failed: {} (localhost access to web UI may not work)", e);
-                }
-            }
-
-            // Inbound firewall rule: allow LAN clients to reach the web server port.
-            for port in &self.config.network.allowed_ports {
-                let inbound_rule_name = format!("SynBot Sandbox Inbound - {} port {}", self.config.sandbox_id, port);
-                let _ = remove_firewall_rule_by_name(&inbound_rule_name); // idempotent: remove existing so Add succeeds when we have admin
-                match add_firewall_inbound_rule_for_port(&inbound_rule_name, *port) {
-                    Ok(()) => {
-                        let _ = writeln!(std::io::stderr(), "[synbot sandbox] Firewall inbound rule added for port {}", port);
-                        let _ = std::io::stderr().flush();
-                    }
-                    Err(e) => {
-                        log::warn!("Firewall inbound rule for port {}: {}", port, e);
-                    }
-                }
-            }
         }
+
+        Ok(())
+    }
+}
+
+/// One-time setup of firewall and WFP rules for the AppContainer sandbox (Windows only).
+/// Run this **once as Administrator** after install or after each reboot so that normal users
+/// can start the sandbox without admin. The rules are keyed by AppContainer SID (deterministic
+/// from profile name); the profile is created then deleted so the next `synbot sandbox start`
+/// will recreate the same profile and reuse the rules.
+pub fn install_windows_sandbox_network_rules(config: SandboxConfig) -> Result<()> {
+    let mut sandbox = WindowsAppContainerSandbox::new(config)?;
+    sandbox.create_profile_and_add_network_rules()?;
+    if let Some(sid) = sandbox.container_sid.take() {
+        let name_wide = to_wide_null(&sandbox.profile_name);
+        unsafe {
+            let _ = DeleteAppContainerProfile(PCWSTR::from_raw(name_wide.as_ptr()));
+            FreeSid(PSID(sid));
+        }
+    }
+    Ok(())
+}
+
+impl Sandbox for WindowsAppContainerSandbox {
+    fn start(&mut self) -> Result<()> {
+        self.status.state = SandboxState::Starting;
+        self.create_profile_and_add_network_rules()?;
 
         log::info!(
             "AppContainer sandbox starting: id={}, network_enabled={}, writable_paths={}, readonly_paths={}, hidden_paths={}",

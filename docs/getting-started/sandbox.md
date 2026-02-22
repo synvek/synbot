@@ -63,7 +63,11 @@ This loads config, builds the app sandbox from `appSandbox`, starts the sandbox,
 
 ### Platform-specific behavior
 
-- **Windows**: Uses **AppContainer**. Requires running once as Administrator to add firewall/WFP rules if you enable network; see [AppContainer network troubleshooting](/getting-started/appcontainer-network-troubleshooting).
+- **Windows**: Uses **AppContainer**. With network enabled, run **once as Administrator** after install to add firewall and WFP rules (WFP filters are persistent and restored by BFE after reboot; you usually do not need to run setup again):
+  ```bash
+  synbot sandbox setup
+  ```
+  Then you can start the sandbox as a normal user; no need to run the full daemon as Administrator. See [AppContainer network troubleshooting](/getting-started/appcontainer-network-troubleshooting).
 - **Linux**: Uses **nono** with Landlock for capability-based isolation.
 - **macOS**: Uses **nono** with Seatbelt for capability-based isolation.
 

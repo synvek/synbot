@@ -103,7 +103,7 @@ synbot start
 synbot sandbox start
 ```
 
-You have to run as administrator at first time so sandbox can be configured. 
+On Windows, run `synbot sandbox setup` once as Administrator to add network rules; then you can run `synbot sandbox start` as a normal user. 
 
 ## Channels
 
