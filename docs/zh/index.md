@@ -1,4 +1,4 @@
-﻿---
+---
 title: Synbot文档
 description: 基于Rust构建的个人 AI 助手
 ---
@@ -29,12 +29,17 @@ Synbot 是一个用 Rust 编写的个人 AI 助手，最初灵感来源于 [nano
 ### 开发指南
 - [架构设计](/zh/developer-guide/architecture)
 
+### 入门进阶
+- [沙箱](/zh/getting-started/sandbox)
+- [CLI 参考](/zh/getting-started/cli-reference)
+
 ### 示例
 - [基础配置](/zh/examples/basic-config)
 
 ## 功能特性
 
 ### 多渠道支持
+- **Telegram**: 通过 Bot API 支持
 - **Discord**: 通过 Discord Gateway 支持
 - **飞书 (Feishu)**: 企业级消息支持
 

@@ -41,17 +41,23 @@ This requires the optional `schema` feature. The generated schema describes all 
 
 ## Configuration Structure
 
-The configuration file has the following structure:
+The configuration file has the following structure (all top-level keys optional with defaults):
 
 ```json
 {
-  "channels": {},
+  "channels": { "telegram": [], "discord": [], "feishu": [] },
   "providers": {},
   "agent": {},
+  "memory": {},
   "tools": {},
   "web": {},
   "log": {},
   "mainChannel": "",
+  "heartbeat": {},
+  "cron": {},
+  "appSandbox": null,
+  "toolSandbox": null,
+  "sandboxMonitoring": null,
   "groups": [],
   "topics": []
 }
@@ -61,84 +67,105 @@ The configuration file has the following structure:
 
 ### Minimal Configuration
 
-Here's a minimal configuration to get started:
+Here's a minimal configuration to get started. Channels are arrays; one entry per bot:
 
 ```json
 {
   "channels": {
-    "telegram": {
-      "enabled": true,
-      "token": "YOUR_TELEGRAM_BOT_TOKEN"
-    }
+    "telegram": [
+      { "enabled": true, "token": "YOUR_TELEGRAM_BOT_TOKEN" }
+    ]
   },
   "providers": {
-    "anthropic": {
-      "apiKey": "YOUR_ANTHROPIC_API_KEY"
-    }
+    "anthropic": { "apiKey": "YOUR_ANTHROPIC_API_KEY" }
   },
   "agent": {
     "provider": "anthropic",
-    "model": "claude-3-5-sonnet-20241022"
+    "model": "claude-sonnet-4-5"
   }
 }
 ```
 
 ## Channel Configuration
 
+Channels are configured as **arrays**: you can run multiple bots per platform (e.g. multiple Telegram bots). Each entry has a unique `name` (defaults to `"telegram"`, `"discord"`, `"feishu"`). Access control uses an **allowlist**: only chats in `allowlist` are accepted when `enableAllowlist` is true (default).
+
 ### Telegram
 
 ```json
 {
   "channels": {
-    "telegram": {
-      "enabled": true,
-      "token": "YOUR_BOT_TOKEN",
-      "allowFrom": ["@username1", "@username2"],
-      "proxy": "socks5://127.0.0.1:1080"
-    }
+    "telegram": [
+      {
+        "name": "telegram",
+        "enabled": true,
+        "token": "YOUR_BOT_TOKEN",
+        "allowlist": [
+          { "chatId": "123456789", "chatAlias": "My Chat", "myName": null }
+        ],
+        "enableAllowlist": true,
+        "proxy": "socks5://127.0.0.1:1080",
+        "showToolCalls": true
+      }
+    ]
   }
 }
 ```
 
 - **token**: Your Telegram bot token from [@BotFather](https://t.me/botfather)
-- **allowFrom**: Optional list of usernames or user IDs allowed to interact with the bot
+- **allowlist**: Array of `{ "chatId", "chatAlias", "myName"? }`. `chatId` is user or group ID; `chatAlias` is a label for logs/UI; `myName` in groups limits replies to messages that @mention the bot
+- **enableAllowlist**: When true (default), only chats in allowlist are accepted; when false, allowlist is not checked
 - **proxy**: Optional proxy URL for network connections
+- **showToolCalls**: When true (default), send tool execution progress to this channel
 
 ### Discord
 
 ```json
 {
   "channels": {
-    "discord": {
-      "enabled": true,
-      "token": "YOUR_DISCORD_BOT_TOKEN",
-      "allowFrom": ["user_id_1", "user_id_2"]
-    }
+    "discord": [
+      {
+        "name": "discord",
+        "enabled": true,
+        "token": "YOUR_DISCORD_BOT_TOKEN",
+        "allowlist": [
+          { "chatId": "user_id_or_channel_id", "chatAlias": "My Server" }
+        ],
+        "enableAllowlist": true,
+        "showToolCalls": true
+      }
+    ]
   }
 }
 ```
 
 - **token**: Your Discord bot token from the [Discord Developer Portal](https://discord.com/developers/applications)
-- **allowFrom**: Optional list of user IDs allowed to interact with the bot
+- **allowlist**: Same structure as Telegram; `chatId` is user or channel ID
 
-### Feishu (椋炰功)
+### Feishu (飞书)
 
 ```json
 {
   "channels": {
-    "feishu": {
-      "enabled": true,
-      "appId": "YOUR_APP_ID",
-      "appSecret": "YOUR_APP_SECRET",
-      "allowFrom": ["user_id_1", "user_id_2"]
-    }
+    "feishu": [
+      {
+        "name": "feishu",
+        "enabled": true,
+        "appId": "YOUR_APP_ID",
+        "appSecret": "YOUR_APP_SECRET",
+        "allowlist": [
+          { "chatId": "user_or_chat_id", "chatAlias": "Work Chat" }
+        ],
+        "enableAllowlist": true,
+        "showToolCalls": true
+      }
+    ]
   }
 }
 ```
 
-- **appId**: Your Feishu app ID
-- **appSecret**: Your Feishu app secret
-- **allowFrom**: Optional list of user IDs allowed to interact with the bot
+- **appId** / **appSecret**: Your Feishu app credentials
+- **allowlist**: Same structure; use Feishu user or chat IDs
 
 ## Provider Configuration
 
@@ -355,11 +382,19 @@ For selective behavior (some commands allowed without approval, some require app
 {
   "tools": {
     "web": {
-      "braveApiKey": "YOUR_BRAVE_SEARCH_API_KEY"
+      "searchBackend": "duckDuckGo",
+      "braveApiKey": "",
+      "searxngUrl": "https://searx.example.com",
+      "searchCount": 5
     }
   }
 }
 ```
+
+- **searchBackend**: `"duckDuckGo"` (default, no API key), `"searxNG"` (self-hosted; set `searxngUrl`), or `"brave"` (requires `braveApiKey`)
+- **braveApiKey**: Brave Search API key when using `"brave"`
+- **searxngUrl**: SearxNG instance URL when using `"searxNG"`
+- **searchCount**: Max number of search results (default 5)
 
 ## Web Dashboard Configuration
 
@@ -476,6 +511,101 @@ For selective behavior (some commands allowed without approval, some require app
 
 The `mainChannel` specifies which channel to use for multi-agent features when roles, groups, or topics are configured.
 
+## Memory Configuration
+
+Optional memory/embedding backend for conversation context (e.g. vector search when `memory-index` feature is enabled):
+
+```json
+{
+  "memory": {
+    "backend": "",
+    "embeddingModel": "local/default",
+    "vectorWeight": 0.7,
+    "textWeight": 0.3,
+    "autoIndex": true,
+    "compression": {}
+  }
+}
+```
+
+## Heartbeat Configuration
+
+Periodic tasks that run at a fixed interval and send results to a channel:
+
+```json
+{
+  "heartbeat": {
+    "enabled": true,
+    "interval": 300,
+    "tasks": [
+      {
+        "channel": "telegram",
+        "chatId": "123456789",
+        "userId": "123456789",
+        "target": "List files in workspace"
+      }
+    ]
+  }
+}
+```
+
+- **interval**: Seconds between runs (default 300)
+- **tasks**: Each task has **channel**, **chatId**, **userId**, and **target** (the task description sent to the agent)
+
+## Cron Configuration (config-file tasks)
+
+Scheduled tasks defined in config (cron expression, command, channel, user):
+
+```json
+{
+  "cron": {
+    "tasks": [
+      {
+        "schedule": "0 9 * * 1-5",
+        "description": "Weekdays at 9:00",
+        "enabled": true,
+        "command": "Summarize pending tasks",
+        "channel": "feishu",
+        "userId": "user_123",
+        "chatId": "oc_xxx"
+      }
+    ]
+  }
+}
+```
+
+- **schedule**: Cron expression (e.g. `0 9 * * 1-5` = weekdays 9:00)
+- **command**: Task text sent to the agent
+- **channel** / **userId** / **chatId**: Where to send the result
+
+## Sandbox Configuration
+
+Optional isolation for the main process (app sandbox) and for tool execution (tool sandbox). See [Sandbox](/getting-started/sandbox) for details.
+
+```json
+{
+  "appSandbox": {
+    "platform": "auto",
+    "workDir": "~",
+    "filesystem": { "readonlyPaths": [], "writablePaths": ["~/.synbot"], "hiddenPaths": [] },
+    "network": { "enabled": true, "allowedHosts": [], "allowedPorts": [] },
+    "resources": { "maxMemory": "1G", "maxCpu": 2.0, "maxDisk": "2G" }
+  },
+  "toolSandbox": {
+    "sandboxName": "synbot-tool",
+    "deleteOnStart": false,
+    "sandboxType": "gvisor-docker",
+    "image": null,
+    "filesystem": { "writablePaths": ["/workspace"] },
+    "network": { "enabled": true }
+  },
+  "sandboxMonitoring": {
+    "logLevel": "info",
+    "logOutput": [{ "type": "file", "path": "/var/log/synbot/sandbox.log" }]
+  }
+}
+```
+
 ## Complete Configuration Example
 
 Here's a complete configuration example:
@@ -483,22 +613,11 @@ Here's a complete configuration example:
 ```json
 {
   "channels": {
-    "telegram": {
-      "enabled": true,
-      "token": "YOUR_TELEGRAM_BOT_TOKEN",
-      "allowFrom": ["@your_username"]
-    },
-    "discord": {
-      "enabled": false,
-      "token": "",
-      "allowFrom": []
-    },
-    "feishu": {
-      "enabled": false,
-      "appId": "",
-      "appSecret": "",
-      "allowFrom": []
-    }
+    "telegram": [
+      { "enabled": true, "token": "YOUR_TELEGRAM_BOT_TOKEN", "allowlist": [{ "chatId": "YOUR_CHAT_ID", "chatAlias": "Me" }] }
+    ],
+    "discord": [],
+    "feishu": []
   },
   "providers": {
     "anthropic": {
@@ -610,6 +729,8 @@ Here's a complete configuration example:
     "moduleLevels": {}
   },
   "mainChannel": "telegram",
+  "heartbeat": { "enabled": true, "interval": 300, "tasks": [] },
+  "cron": { "tasks": [] },
   "groups": [],
   "topics": []
 }
@@ -689,15 +810,15 @@ Consider keeping your configuration in version control (excluding secrets).
 
 After configuring Synbot:
 
-1. **[Test your configuration](/docs/en/getting-started/running/)**: Start Synbot and verify it works
-2. **[Set up permissions](/docs/en/user-guide/permissions/)**: Configure appropriate permission rules
-3. **[Explore tools](/docs/en/user-guide/tools/)**: Learn about available tools and how to use them
-4. **[Monitor logs](/docs/en/user-guide/logging/)**: Set up logging for monitoring and debugging
+1. **[Test your configuration](/getting-started/running)**: Start Synbot and verify it works
+2. **[Set up permissions](/user-guide/permissions)**: Configure appropriate permission rules
+3. **[Explore tools](/user-guide/tools)**: Learn about available tools and how to use them
+4. **[Sandbox](/getting-started/sandbox)**: Optional app and tool sandbox isolation
 
 ## Related Documentation
 
-- [Installation Guide](/docs/en/getting-started/installation/)
-- [Running Synbot](/docs/en/getting-started/running/)
-- [Permission Guide](/docs/en/user-guide/permissions/)
-- [Logging Guide](/docs/en/user-guide/logging/)
+- [Installation Guide](/getting-started/installation)
+- [Running Synbot](/getting-started/running)
+- [Sandbox](/getting-started/sandbox)
+- [Permission Guide](/user-guide/permissions)
 

@@ -35,6 +35,9 @@ features:
   - title: Scheduled Tasks
     details: Cron job support for automated task execution.
     icon: ⏰
+  - title: Sandbox Isolation
+    details: App sandbox (AppContainer / nono) and tool sandbox (Docker / gVisor) for secure execution.
+    icon: 🛡️
 
 warning:
   title: Experimental Stage
@@ -155,6 +158,16 @@ Synbot is currently in research & experiment stage. Please:
     <h3>🏗️ Architecture</h3>
     <p>Understand how Synbot works</p>
   </a>
+  
+  <a class="quick-link-card" href="/getting-started/sandbox">
+    <h3>🛡️ Sandbox</h3>
+    <p>App and tool sandbox isolation</p>
+  </a>
+  
+  <a class="quick-link-card" href="/getting-started/cli-reference">
+    <h3>⌨️ CLI Reference</h3>
+    <p>Command-line subcommands and options</p>
+  </a>
 </div>
 
 ## What is Synbot?
@@ -188,9 +201,3 @@ We welcome contributions! Please see:
 - [Code of Conduct](https://github.com/synbot/synbot/blob/main/CODE_OF_CONDUCT.md)
 
 ---
-
-<div style="text-align: center; margin-top: 3rem; padding-top: 2rem; border-top: 1px solid var(--vp-c-divider);">
-  <p style="color: var(--vp-c-text-2); font-size: 0.9rem;">
-    &copy; 2024 Synbot Project. Licensed under MIT.
-  </p>
-</div>

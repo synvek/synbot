@@ -33,7 +33,9 @@ export default defineConfig({
               { text: 'Installation', link: '/getting-started/installation' },
               { text: 'Configuration', link: '/getting-started/configuration' },
               { text: 'Running Synbot', link: '/getting-started/running' },
-              { text: 'First Steps', link: '/getting-started/first-steps' }
+              { text: 'First Steps', link: '/getting-started/first-steps' },
+              { text: 'Sandbox', link: '/getting-started/sandbox' },
+              { text: 'CLI Reference', link: '/getting-started/cli-reference' }
             ]
           },
           {
@@ -79,7 +81,9 @@ export default defineConfig({
             { text: '安装指南', link: '/zh/getting-started/installation' },
             { text: '配置指南', link: '/zh/getting-started/configuration' },
             { text: '运行 Synbot', link: '/zh/getting-started/running' },
-            { text: '第一步', link: '/zh/getting-started/first-steps' }
+            { text: '第一步', link: '/zh/getting-started/first-steps' },
+            { text: '沙箱', link: '/zh/getting-started/sandbox' },
+            { text: 'CLI 参考', link: '/zh/getting-started/cli-reference' }
           ]
         },
         {

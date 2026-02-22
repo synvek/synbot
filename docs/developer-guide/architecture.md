@@ -1,4 +1,4 @@
-﻿---
+---
 title: Architecture Overview
 description: Understanding Synbot's architecture and design principles
 ---
@@ -82,7 +82,7 @@ The channel system handles communication with external messaging platforms.
 - **`channels/discord.rs`**: Discord integration  
 - **`channels/feishu.rs`**: Feishu integration
 - **`channels/approval_formatter.rs`**: Format approval messages
-- **`channels/approval_parser.rs`**: Parse approval responses
+- **`channels/approval_classifier.rs`**: Classify approval responses
 
 #### Channel Interface:
 ```rust
@@ -155,6 +155,25 @@ The cron system handles scheduled tasks.
 - **`cron/mod.rs`**: Cron module exports
 - **`cron/service.rs`**: Cron service
 - **`cron/types.rs`**: Cron job types
+
+### 7. Sandbox System
+
+Two-layer isolation: **app sandbox** (isolates the Synbot daemon) and **tool sandbox** (isolates tool execution, e.g. `exec`).
+
+#### Key Modules:
+- **`sandbox/mod.rs`**: Sandbox exports and platform selection
+- **`sandbox/manager.rs`**: Sandbox lifecycle
+- **`sandbox/isolation.rs`**: Isolation verification
+- **`sandbox/gvisor_docker.rs`**, **`sandbox/plain_docker.rs`**: Docker-based tool sandbox
+- **`sandbox/nono.rs`**: Linux/macOS app sandbox (Landlock/Seatbelt)
+- **`sandbox/windows_appcontainer.rs`**: Windows app sandbox (AppContainer)
+- **`sandbox/wsl2.rs`**: Windows WSL2-based tool sandbox
+
+#### Platform summary:
+| Layer        | Windows      | Linux     | macOS     |
+|-------------|--------------|-----------|-----------|
+| App sandbox | AppContainer | nono (Landlock) | nono (Seatbelt) |
+| Tool sandbox| Docker / gVisor / WSL2-gVisor | Docker / gVisor | Docker / gVisor |
 
 ## Data Flow
 

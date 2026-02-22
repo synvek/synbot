@@ -38,17 +38,23 @@ This requires the optional `schema` feature. The generated schema describes all 
 
 ## 配置结构
 
-配置文件具有以下结构：
+配置文件具有以下结构（所有顶层键均为可选并有默认值）：
 
 ```json
 {
-  "channels": {},
+  "channels": { "telegram": [], "discord": [], "feishu": [] },
   "providers": {},
   "agent": {},
+  "memory": {},
   "tools": {},
   "web": {},
   "log": {},
   "mainChannel": "",
+  "heartbeat": {},
+  "cron": {},
+  "appSandbox": null,
+  "toolSandbox": null,
+  "sandboxMonitoring": null,
   "groups": [],
   "topics": []
 }
@@ -58,84 +64,105 @@ This requires the optional `schema` feature. The generated schema describes all 
 
 ### 最小配置
 
-这是一个入门的最小配置：
+入门用最小配置。渠道为**数组**，每类可配置多个机器人实例：
 
 ```json
 {
   "channels": {
-    "telegram": {
-      "enabled": true,
-      "token": "YOUR_TELEGRAM_BOT_TOKEN"
-    }
+    "telegram": [
+      { "enabled": true, "token": "YOUR_TELEGRAM_BOT_TOKEN" }
+    ]
   },
   "providers": {
-    "anthropic": {
-      "apiKey": "YOUR_ANTHROPIC_API_KEY"
-    }
+    "anthropic": { "apiKey": "YOUR_ANTHROPIC_API_KEY" }
   },
   "agent": {
     "provider": "anthropic",
-    "model": "claude-3-5-sonnet-20241022"
+    "model": "claude-sonnet-4-5"
   }
 }
 ```
 
 ## 渠道配置
 
+渠道以**数组**形式配置，可在一类平台下配置多个机器人（如多个 Telegram 机器人）。每条记录可有唯一 `name`（默认 `"telegram"`、`"discord"`、`"feishu"`）。访问控制使用**白名单**：当 `enableAllowlist` 为 true（默认）时，仅接受 `allowlist` 中的会话。
+
 ### Telegram
 
 ```json
 {
   "channels": {
-    "telegram": {
-      "enabled": true,
-      "token": "YOUR_BOT_TOKEN",
-      "allowFrom": ["@username1", "@username2"],
-      "proxy": "socks5://127.0.0.1:1080"
-    }
+    "telegram": [
+      {
+        "name": "telegram",
+        "enabled": true,
+        "token": "YOUR_BOT_TOKEN",
+        "allowlist": [
+          { "chatId": "123456789", "chatAlias": "我的会话", "myName": null }
+        ],
+        "enableAllowlist": true,
+        "proxy": "socks5://127.0.0.1:1080",
+        "showToolCalls": true
+      }
+    ]
   }
 }
 ```
 
 - **token**: 来自 [@BotFather](https://t.me/botfather) 的 Telegram 机器人令牌
-- **allowFrom**: 可选，允许与机器人交互的用户名或用户 ID 列表
-- **proxy**: 可选，网络连接的代理 URL
+- **allowlist**: `{ "chatId", "chatAlias", "myName"? }` 的数组。`chatId` 为用户或群组 ID；`chatAlias` 为日志/界面标签；群组中 `myName` 可限制仅在被 @ 时回复
+- **enableAllowlist**: 为 true（默认）时仅接受白名单会话；为 false 时不校验白名单
+- **proxy**: 可选，网络代理 URL
+- **showToolCalls**: 为 true（默认）时向该渠道推送工具执行进度
 
 ### Discord
 
 ```json
 {
   "channels": {
-    "discord": {
-      "enabled": true,
-      "token": "YOUR_DISCORD_BOT_TOKEN",
-      "allowFrom": ["user_id_1", "user_id_2"]
-    }
+    "discord": [
+      {
+        "name": "discord",
+        "enabled": true,
+        "token": "YOUR_DISCORD_BOT_TOKEN",
+        "allowlist": [
+          { "chatId": "user_id_or_channel_id", "chatAlias": "我的服务器" }
+        ],
+        "enableAllowlist": true,
+        "showToolCalls": true
+      }
+    ]
   }
 }
 ```
 
 - **token**: 来自 [Discord 开发者门户](https://discord.com/developers/applications) 的 Discord 机器人令牌
-- **allowFrom**: 可选，允许与机器人交互的用户 ID 列表
+- **allowlist**: 结构同 Telegram；`chatId` 为用户或频道 ID
 
 ### 飞书 (Feishu)
 
 ```json
 {
   "channels": {
-    "feishu": {
-      "enabled": true,
-      "appId": "YOUR_APP_ID",
-      "appSecret": "YOUR_APP_SECRET",
-      "allowFrom": ["user_id_1", "user_id_2"]
-    }
+    "feishu": [
+      {
+        "name": "feishu",
+        "enabled": true,
+        "appId": "YOUR_APP_ID",
+        "appSecret": "YOUR_APP_SECRET",
+        "allowlist": [
+          { "chatId": "user_or_chat_id", "chatAlias": "工作群" }
+        ],
+        "enableAllowlist": true,
+        "showToolCalls": true
+      }
+    ]
   }
 }
 ```
 
-- **appId**: 您的飞书应用 ID
-- **appSecret**: 您的飞书应用密钥
-- **allowFrom**: 可选，允许与机器人交互的用户 ID 列表
+- **appId** / **appSecret**: 飞书应用 ID 与密钥
+- **allowlist**: 结构同上；使用飞书用户或会话 ID
 
 ## 提供商配置
 
@@ -352,11 +379,19 @@ This requires the optional `schema` feature. The generated schema describes all 
 {
   "tools": {
     "web": {
-      "braveApiKey": "YOUR_BRAVE_SEARCH_API_KEY"
+      "searchBackend": "duckDuckGo",
+      "braveApiKey": "",
+      "searxngUrl": "https://searx.example.com",
+      "searchCount": 5
     }
   }
 }
 ```
+
+- **searchBackend**: `"duckDuckGo"`（默认，无需 API 密钥）、`"searxNG"`（自建；需设置 `searxngUrl`）或 `"brave"`（需 `braveApiKey`）
+- **braveApiKey**: 使用 `"brave"` 时的 Brave Search API 密钥
+- **searxngUrl**: 使用 `"searxNG"` 时的 SearxNG 实例地址
+- **searchCount**: 最多返回的搜索结果数（默认 5）
 
 ## Web 控制台配置
 
@@ -473,6 +508,101 @@ This requires the optional `schema` feature. The generated schema describes all 
 
 `mainChannel` 指定在配置角色、群组或主题时用于多代理功能的渠道。
 
+## 记忆配置
+
+可选：对话上下文记忆/向量检索（需启用 `memory-index` 等特性）：
+
+```json
+{
+  "memory": {
+    "backend": "",
+    "embeddingModel": "local/default",
+    "vectorWeight": 0.7,
+    "textWeight": 0.3,
+    "autoIndex": true,
+    "compression": {}
+  }
+}
+```
+
+## 心跳配置
+
+按固定间隔执行的周期任务，并将结果发送到指定渠道：
+
+```json
+{
+  "heartbeat": {
+    "enabled": true,
+    "interval": 300,
+    "tasks": [
+      {
+        "channel": "telegram",
+        "chatId": "123456789",
+        "userId": "123456789",
+        "target": "列出工作区文件"
+      }
+    ]
+  }
+}
+```
+
+- **interval**: 执行间隔（秒），默认 300
+- **tasks**: 每项含 **channel**、**chatId**、**userId**、**target**（发给代理的任务描述）
+
+## 定时任务配置（配置文件）
+
+在配置中定义的定时任务（cron 表达式、命令、渠道、用户）：
+
+```json
+{
+  "cron": {
+    "tasks": [
+      {
+        "schedule": "0 9 * * 1-5",
+        "description": "工作日 9:00",
+        "enabled": true,
+        "command": "总结待办任务",
+        "channel": "feishu",
+        "userId": "user_123",
+        "chatId": "oc_xxx"
+      }
+    ]
+  }
+}
+```
+
+- **schedule**: Cron 表达式（如 `0 9 * * 1-5` 表示工作日 9:00）
+- **command**: 发给代理的任务内容
+- **channel** / **userId** / **chatId**: 结果发送目标
+
+## 沙箱配置
+
+可选：为主进程（应用沙箱）和工具执行（工具沙箱）提供隔离。详见 [沙箱](/zh/getting-started/sandbox)。
+
+```json
+{
+  "appSandbox": {
+    "platform": "auto",
+    "workDir": "~",
+    "filesystem": { "readonlyPaths": [], "writablePaths": ["~/.synbot"], "hiddenPaths": [] },
+    "network": { "enabled": true, "allowedHosts": [], "allowedPorts": [] },
+    "resources": { "maxMemory": "1G", "maxCpu": 2.0, "maxDisk": "2G" }
+  },
+  "toolSandbox": {
+    "sandboxName": "synbot-tool",
+    "deleteOnStart": false,
+    "sandboxType": "gvisor-docker",
+    "image": null,
+    "filesystem": { "writablePaths": ["/workspace"] },
+    "network": { "enabled": true }
+  },
+  "sandboxMonitoring": {
+    "logLevel": "info",
+    "logOutput": [{ "type": "file", "path": "/var/log/synbot/sandbox.log" }]
+  }
+}
+```
+
 ## 完整配置示例
 
 这是一个完整的配置示例：
@@ -480,22 +610,11 @@ This requires the optional `schema` feature. The generated schema describes all 
 ```json
 {
   "channels": {
-    "telegram": {
-      "enabled": true,
-      "token": "YOUR_TELEGRAM_BOT_TOKEN",
-      "allowFrom": ["@your_username"]
-    },
-    "discord": {
-      "enabled": false,
-      "token": "",
-      "allowFrom": []
-    },
-    "feishu": {
-      "enabled": false,
-      "appId": "",
-      "appSecret": "",
-      "allowFrom": []
-    }
+    "telegram": [
+      { "enabled": true, "token": "YOUR_TELEGRAM_BOT_TOKEN", "allowlist": [{ "chatId": "YOUR_CHAT_ID", "chatAlias": "我" }] }
+    ],
+    "discord": [],
+    "feishu": []
   },
   "providers": {
     "anthropic": {
@@ -607,6 +726,8 @@ This requires the optional `schema` feature. The generated schema describes all 
     "moduleLevels": {}
   },
   "mainChannel": "telegram",
+  "heartbeat": { "enabled": true, "interval": 300, "tasks": [] },
+  "cron": { "tasks": [] },
   "groups": [],
   "topics": []
 }
@@ -693,7 +814,8 @@ curl -X POST http://localhost:18888/api/config/reload
 
 ## 相关文档
 
-- [安装指南](/zh/getting-started/installation/)
-- [运行 Synbot](/zh/getting-started/running/)
-- [权限指南](/zh/user-guide/permissions/)
-- [日志指南](/zh/user-guide/logging/)
+- [安装指南](/zh/getting-started/installation)
+- [运行 Synbot](/zh/getting-started/running)
+- [沙箱](/zh/getting-started/sandbox)
+- [CLI 参考](/zh/getting-started/cli-reference)
+- [权限指南](/zh/user-guide/permissions)

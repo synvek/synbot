@@ -1,4 +1,4 @@
-﻿---
+---
 title: Installation Guide
 description: How to install Synbot on your system
 ---
@@ -286,10 +286,10 @@ cargo build --release -j 2
 
 After successful installation:
 
-1. **[Configure Synbot](/docs/en/getting-started/configuration/)**: Set up your configuration file
-2. **[Get API Keys](/docs/en/getting-started/configuration/#api-keys)**: Obtain LLM provider API keys
-3. **[Set Up Channels](/docs/en/user-guide/channels/)**: Configure messaging platforms
-4. **[Run Synbot](/docs/en/getting-started/running/)**: Start the service
+1. **[Configure Synbot](/getting-started/configuration)**: Set up your configuration file
+2. **[Get API Keys](/getting-started/configuration#api-keys)**: Obtain LLM provider API keys
+3. **[Set Up Channels](/user-guide/channels)**: Configure messaging platforms
+4. **[Run Synbot](/getting-started/running)**: Start the service
 
 ## Uninstallation
 
@@ -319,6 +319,6 @@ If you encounter issues during installation:
 
 ## Related Documentation
 
-- [Configuration Guide](/docs/en/getting-started/configuration/)
-- [Running Synbot](/docs/en/getting-started/running/)
-- [Troubleshooting Guide](/docs/en/user-guide/troubleshooting/)
+- [Configuration Guide](/getting-started/configuration)
+- [Running Synbot](/getting-started/running)
+- [Sandbox](/getting-started/sandbox)

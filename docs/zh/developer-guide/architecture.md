@@ -78,7 +78,7 @@ description: 理解 Synbot 的架构和设计原则
 - **`channels/discord.rs`**：Discord 集成  
 - **`channels/feishu.rs`**：Feishu 集成
 - **`channels/approval_formatter.rs`**：格式化审批消息
-- **`channels/approval_parser.rs`**：解析审批响应
+- **`channels/approval_classifier.rs`**：审批响应分类
 
 #### 渠道接口：
 ```rust
@@ -151,6 +151,25 @@ Cron 系统处理计划任务。
 - **`cron/mod.rs`**：Cron 模块导出
 - **`cron/service.rs`**：Cron 服务
 - **`cron/types.rs`**：Cron 作业类型
+
+### 7. 沙箱系统
+
+两层隔离：**应用沙箱**（隔离 Synbot 守护进程）与**工具沙箱**（隔离工具执行，如 `exec`）。
+
+#### 关键模块：
+- **`sandbox/mod.rs`**：沙箱导出与平台选择
+- **`sandbox/manager.rs`**：沙箱生命周期
+- **`sandbox/isolation.rs`**：隔离校验
+- **`sandbox/gvisor_docker.rs`**、**`sandbox/plain_docker.rs`**：基于 Docker 的工具沙箱
+- **`sandbox/nono.rs`**：Linux/macOS 应用沙箱（Landlock/Seatbelt）
+- **`sandbox/windows_appcontainer.rs`**：Windows 应用沙箱（AppContainer）
+- **`sandbox/wsl2.rs`**：Windows 下基于 WSL2 的工具沙箱
+
+#### 平台概览：
+| 层级       | Windows      | Linux        | macOS        |
+|------------|--------------|--------------|--------------|
+| 应用沙箱   | AppContainer | nono (Landlock) | nono (Seatbelt) |
+| 工具沙箱   | Docker / gVisor / WSL2-gVisor | Docker / gVisor | Docker / gVisor |
 
 ## 数据流
 

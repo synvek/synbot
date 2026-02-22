@@ -1,4 +1,4 @@
-﻿---
+---
 title: First Steps
 description: Getting started with Synbot after installation
 ---
@@ -281,9 +281,9 @@ Extend Synbot with your own tool implementations.
 ## Getting Help
 
 ### Documentation
-- [Configuration Guide](/docs/en/getting-started/configuration/)
-- [Tools Guide](/docs/en/user-guide/tools/)
-- [Permission Guide](/docs/en/user-guide/permissions/)
+- [Configuration Guide](/getting-started/configuration)
+- [Tools Guide](/user-guide/tools)
+- [Permission Guide](/user-guide/permissions)
 
 ### Community Support
 - [GitHub Issues](https://github.com/synbot/synbot/issues)
