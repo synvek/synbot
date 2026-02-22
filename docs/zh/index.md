@@ -7,7 +7,7 @@ description: 基于Rust构建的个人 AI 助手
 
 ## 概述
 
-Synbot 是一个用 Rust 编写的个人 AI 助手，最初灵感来源于 [nanobot](https://github.com/HKUDS/nanobot)（Python 版本）和 [Openclaw](https://github.com/openclaw/openclaw)。它提供了一个灵活、可扩展的平台，用于构建支持多种消息渠道、工具和权限控制的 AI 助手。
+Synbot 是一个用 Rust 编写的个人 AI 助手，灵感来源于 [nanobot](https://github.com/HKUDS/nanobot)（Python 版本）和 [Openclaw](https://github.com/openclaw/openclaw)。它提供了一个灵活、可扩展的平台，用于构建支持多种消息渠道、工具和权限控制的 AI 助手。
 
 ## 快速开始
 
