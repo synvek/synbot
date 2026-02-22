@@ -129,6 +129,8 @@ You have to run as administrator at first time so sandbox can be configured.
 
 ## Project Status
 
+**Important**: Synbot is currently in research & experiment stage. Please run in a sandbox environment and be careful when trying it out.
+
 ## Tools & Skills
 
 ### Tools
