@@ -35,7 +35,6 @@ Synbot 是一个用 Rust 编写的个人 AI 助手，最初灵感来源于 [nano
 ## 功能特性
 
 ### 多渠道支持
-- **Telegram**: 完整的机器人 API 支持
 - **Discord**: 通过 Discord Gateway 支持
 - **飞书 (Feishu)**: 企业级消息支持
 
@@ -64,7 +63,7 @@ Synbot 是一个用 Rust 编写的个人 AI 助手，最初灵感来源于 [nano
 
 ## 项目状态
 
-::: warning 实验性软件
+::: 警告 实验性软件
 Synbot 目前处于研究和实验阶段。请在沙箱环境中运行，并谨慎尝试。
 :::
 

@@ -125,7 +125,7 @@ warning:
 }
 </style>
 
-::: warning Experimental Software
+::: Warning Experimental Software
 Synbot is currently in research & experiment stage. Please:
 - Run in a sandbox environment
 - Be careful when trying it out
@@ -163,7 +163,7 @@ Synbot is a personal AI assistant written in Rust, originally inspired by [nanob
 
 ### Key Features
 
-- **Multi-channel Support**: Telegram, Discord, Feishu (飞书)
+- **Multi-channel Support**: Discord, Feishu (飞书)
 - **Tool System**: Extensible tool framework with built-in tools
 - **Permission Control**: Fine-grained permission system with approval workflows
 - **Web Dashboard**: Built-in web interface for monitoring and management
