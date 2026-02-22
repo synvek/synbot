@@ -24,6 +24,10 @@ auditpol /set /subcategory:"{0CCE9225-69AE-11D9-BED3-505054503030}" /success:dis
 
 To confirm it is off: `auditpol /get /subcategory:"{0CCE9225-69AE-11D9-BED3-505054503030}"` should show Success and Failure as disabled.
 
+## FwpmFilterAdd0 (V4) failed error 2150760470 (FWP_E_LIFETIME_MISMATCH)
+
+If the log shows **FwpmFilterAdd0 (V4) failed (error 2150760470)** (i.e. **FWP_E_LIFETIME_MISMATCH**), the filter is persistent but the referenced Provider/Sublayer were added as dynamic (incompatible lifetimes). Newer code sets Provider and Sublayer as persistent and, on this error, automatically removes and re-adds them as persistent then retries. With that fix, run **once as Administrator**: `synbot sandbox setup`. If the error persists, upgrade to a build that includes the fix, then run `synbot sandbox setup` again.
+
 ## Root cause: DNS (11001) vs WFP
 
 If the daemon log shows **raw_os_error=Some(11001)** (WSAHOST_NOT_FOUND) or **dns error: proto error: no connections available**, the failure is **DNS** inside the AppContainer: the system resolver does not work there, and a resolver that reads system DNS has no nameservers (cannot read system DNS config). Synbot uses **hickory-dns** for reqwest and, in the startup diagnostic when inside AppContainer, a custom **GoogleDnsResolver** (Google 8.8.8.8 via `ResolverConfig::google()`) so the diagnostic request does not rely on system config. If you see `AppContainer network diagnostic: GET https://www.microsoft.com -> 200`, outbound HTTPS with explicit DNS works. The **open-lark (Feishu)** client still uses its default resolver; if it shows "no connections available", that confirms the system nameserver list is empty in the container. No 5152/5157 events appear for DNS failures.

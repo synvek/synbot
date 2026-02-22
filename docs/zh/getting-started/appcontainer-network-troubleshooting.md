@@ -24,6 +24,10 @@ auditpol /set /subcategory:"{0CCE9225-69AE-11D9-BED3-505054503030}" /success:dis
 
 确认已关闭：执行 `auditpol /get /subcategory:"{0CCE9225-69AE-11D9-BED3-505054503030}"`，应显示“成功”和“失败”均为“已禁用”。
 
+## FwpmFilterAdd0 (V4) 失败 error 2150760470（FWP_E_LIFETIME_MISMATCH）
+
+若日志出现 **FwpmFilterAdd0 (V4) failed (error 2150760470)**（即 **FWP_E_LIFETIME_MISMATCH**），表示筛选器为持久化而所引用的 Provider/Sublayer 为旧版动态对象，生命周期不一致。新版本已自动将 Provider 与 Sublayer 也设为持久化，并在检测到该错误时自动删除并重建为持久对象后重试。若你使用的版本已包含该修复，以**管理员**再运行一次 `synbot sandbox setup` 即可；若仍报错，请升级到包含上述修复的版本后再运行 `synbot sandbox setup`。
+
 ## 根因区分：DNS (11001) 与 WFP
 
 若守护进程日志出现 **raw_os_error=Some(11001)**（WSAHOST_NOT_FOUND）或 **dns error: proto error: no connections available**，说明是 AppContainer 内的 **DNS** 问题：系统解析器在此不可用，依赖系统 DNS 的解析器拿不到 nameserver（无法读取系统 DNS 配置）。Synbot 在 reqwest 中使用 **hickory-dns**，在 AppContainer 内启动诊断时使用自定义 **GoogleDnsResolver**（通过 `ResolverConfig::google()` 使用 Google 8.8.8.8），因此诊断请求不依赖系统配置。若看到 `AppContainer network diagnostic: GET https://www.microsoft.com -> 200`，说明使用显式 DNS 的出站 HTTPS 是通的。**open-lark（飞书）** 客户端仍使用默认解析器；若出现 "no connections available"，可确认容器内系统 nameserver 列表为空。DNS 失败不会产生 5152/5157 事件。

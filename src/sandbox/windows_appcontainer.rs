@@ -396,6 +396,8 @@ fn wfp_engine_open_error_message(err: u32) -> String {
 
 /// WFP error: object with this key already exists (e.g. from a previous run that did not clean up).
 const FWP_E_ALREADY_EXISTS: u32 = 0x8032_0009;
+/// WFP error: filter is persistent but referenced provider/sublayer are dynamic (lifetime mismatch).
+const FWP_E_LIFETIME_MISMATCH: u32 = 0x8032_0016;
 
 /// Frees HLOCAL on drop (used for SID copy buffer in add_wfp_permit_for_appcontainer).
 struct SidCopyGuard(HLOCAL);
@@ -413,13 +415,14 @@ impl Drop for SidCopyGuard {
 /// Cleanup in stop() uses delete-by-key (no stored IDs needed).
 fn add_wfp_permit_for_appcontainer(container_sid: *mut std::ffi::c_void) -> Result<()> {
     use windows::Win32::NetworkManagement::WindowsFilteringPlatform::{
-        FwpmEngineClose0, FwpmEngineOpen0, FwpmFilterAdd0, FwpmFilterDeleteById0,
+        FwpmEngineClose0, FwpmEngineOpen0, FwpmFilterAdd0, FwpmFilterDeleteById0, FwpmFilterDeleteByKey0,
         FwpmProviderAdd0, FwpmProviderDeleteByKey0, FwpmSubLayerAdd0, FwpmSubLayerDeleteByKey0,
         FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_CONNECT_V6,
         FWPM_LAYER_ALE_FLOW_ESTABLISHED_V4, FWPM_LAYER_ALE_FLOW_ESTABLISHED_V6,
         FWPM_CONDITION_ALE_PACKAGE_ID, FWPM_FILTER0, FWPM_FILTER_CONDITION0,
         FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT, FWPM_FILTER_FLAG_PERSISTENT,
-        FWPM_PROVIDER0, FWPM_SUBLAYER0, FWP_ACTION_PERMIT, FWP_CONDITION_VALUE0, FWP_CONDITION_VALUE0_0,
+        FWPM_PROVIDER0, FWPM_PROVIDER_FLAG_PERSISTENT, FWPM_SUBLAYER0, FWPM_SUBLAYER_FLAG_PERSISTENT,
+        FWP_ACTION_PERMIT, FWP_CONDITION_VALUE0, FWP_CONDITION_VALUE0_0,
         FWP_MATCH_EQUAL, FWP_SID, FWP_VALUE0, FWP_VALUE0_0, FWP_EMPTY, FWPM_ACTION0, FWPM_ACTION0_0,
         FWPM_DISPLAY_DATA0, FWP_BYTE_BLOB,
     };
@@ -473,7 +476,7 @@ fn add_wfp_permit_for_appcontainer(container_sid: *mut std::ffi::c_void) -> Resu
                 name: windows::core::PWSTR(provider_name.as_ptr() as *mut u16),
                 description: windows::core::PWSTR::null(),
             },
-            flags: 0,
+            flags: FWPM_PROVIDER_FLAG_PERSISTENT,
             providerData: FWP_BYTE_BLOB::default(),
             serviceName: windows::core::PWSTR::null(),
         };
@@ -493,7 +496,7 @@ fn add_wfp_permit_for_appcontainer(container_sid: *mut std::ffi::c_void) -> Resu
                 name: windows::core::PWSTR(sublayer_name.as_ptr() as *mut u16),
                 description: windows::core::PWSTR::null(),
             },
-            flags: 0,
+            flags: FWPM_SUBLAYER_FLAG_PERSISTENT,
             providerKey: &provider_key as *const _ as *mut _,
             providerData: FWP_BYTE_BLOB::default(),
             weight: 0,
@@ -570,7 +573,43 @@ fn add_wfp_permit_for_appcontainer(container_sid: *mut std::ffi::c_void) -> Resu
         };
 
         let mut id_v4: u64 = 0;
-        let add4 = FwpmFilterAdd0(engine, &filter_v4, None, Some(&mut id_v4));
+        let mut add4 = FwpmFilterAdd0(engine, &filter_v4, None, Some(&mut id_v4));
+        // If existing provider/sublayer were added without PERSISTENT (e.g. by older code), we get LIFETIME_MISMATCH.
+        // Remove our WFP objects and re-add provider/sublayer as persistent, then retry.
+        if add4 == FWP_E_LIFETIME_MISMATCH {
+            let _ = FwpmFilterDeleteByKey0(engine, &filter_key_v4);
+            let _ = FwpmFilterDeleteByKey0(engine, &filter_key_v6);
+            let _ = FwpmFilterDeleteByKey0(engine, &filter_flow_v4_key);
+            let _ = FwpmFilterDeleteByKey0(engine, &filter_flow_v6_key);
+            let _ = FwpmFilterDeleteByKey0(engine, &filter_recv_v4_key);
+            let _ = FwpmFilterDeleteByKey0(engine, &filter_recv_v6_key);
+            let _ = FwpmSubLayerDeleteByKey0(engine, &sublayer_key);
+            let _ = FwpmProviderDeleteByKey0(engine, &provider_key);
+            let provider2 = FWPM_PROVIDER0 {
+                providerKey: provider_key,
+                displayData: FWPM_DISPLAY_DATA0 {
+                    name: windows::core::PWSTR(provider_name.as_ptr() as *mut u16),
+                    description: windows::core::PWSTR::null(),
+                },
+                flags: FWPM_PROVIDER_FLAG_PERSISTENT,
+                providerData: FWP_BYTE_BLOB::default(),
+                serviceName: windows::core::PWSTR::null(),
+            };
+            let _ = FwpmProviderAdd0(engine, &provider2, None);
+            let sublayer2 = FWPM_SUBLAYER0 {
+                subLayerKey: sublayer_key,
+                displayData: FWPM_DISPLAY_DATA0 {
+                    name: windows::core::PWSTR(sublayer_name.as_ptr() as *mut u16),
+                    description: windows::core::PWSTR::null(),
+                },
+                flags: FWPM_SUBLAYER_FLAG_PERSISTENT,
+                providerKey: &provider_key as *const _ as *mut _,
+                providerData: FWP_BYTE_BLOB::default(),
+                weight: 0,
+            };
+            let _ = FwpmSubLayerAdd0(engine, &sublayer2, None);
+            add4 = FwpmFilterAdd0(engine, &filter_v4, None, Some(&mut id_v4));
+        }
         if add4 != ERROR_SUCCESS && add4 != FWP_E_ALREADY_EXISTS {
             if provider_added_this_run {
                 let _ = FwpmSubLayerDeleteByKey0(engine, &sublayer_key);
@@ -578,7 +617,7 @@ fn add_wfp_permit_for_appcontainer(container_sid: *mut std::ffi::c_void) -> Resu
             }
             let _ = FwpmEngineClose0(engine);
             return Err(SandboxError::CreationFailed(format!(
-                "FwpmFilterAdd0 (V4) failed (error {})",
+                "FwpmFilterAdd0 (V4) failed (error {}). If error is FWP_E_LIFETIME_MISMATCH (0x80320016), run 'synbot sandbox setup' as Administrator to recreate persistent WFP objects.",
                 add4
             )));
         }
