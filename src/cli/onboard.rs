@@ -44,7 +44,6 @@ fn create_workspace_templates(ws: &std::path::Path) -> Result<()> {
             std::fs::write(&path, content)?;
         }
     }
-    std::fs::create_dir_all(ws.join("memory"))?;
     // Skills dir is global at ~/.synbot/skills/, not under workspace
     Ok(())
 }
