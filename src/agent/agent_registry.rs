@@ -98,7 +98,7 @@ impl AgentRegistry {
     ) -> Result<()> {
         // Register the implicit main agent (role "main").
         let role_ctx = role_registry.get("main").with_context(|| {
-            "main agent requires role 'main' (add ~/.synbot/roles/main/ with AGENTS.md, SOUL.md, TOOLS.md)"
+            "main agent requires role 'main' (add ~/.synbot/roles/main/ with AGENTS.md, SOUL.md, TOOLS.md, USER.md, IDENTITY.md)"
         })?;
         let system_prompt = role_ctx.system_prompt.clone();
         let params = ResolvedAgentParams::from_main_defaults(main_agent);
