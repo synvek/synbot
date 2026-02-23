@@ -27,6 +27,8 @@
 
 - Tool execution with approval
 
+- Memory: Daily memory & Long term memory & Sqlite vec & FTS5 & Auto compression 
+
 - Sandbox support 
 
 | Platform | App Sandbox | Tool Sandbox |
