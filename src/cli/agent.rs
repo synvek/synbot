@@ -14,8 +14,8 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
     
     let ws = config::workspace_path(&cfg);
 
-    let model_name = model.unwrap_or(cfg.agent.model.clone());
-    let provider_name = provider.unwrap_or(cfg.agent.provider.clone());
+    let model_name = model.unwrap_or(cfg.main_agent.model.clone());
+    let provider_name = provider.unwrap_or(cfg.main_agent.provider.clone());
     info!(model = %model_name, provider = %provider_name, "Starting agent");
 
     // Resolve API key for this provider (so model and key stay consistent when multiple providers are configured)
@@ -40,7 +40,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
     let subagent_mgr = std::sync::Arc::new(
         tokio::sync::Mutex::new(
             crate::agent::subagent::SubagentManager::new(
-                cfg.agent.max_concurrent_subagents,
+                cfg.main_agent.max_concurrent_subagents,
             ),
         ),
     );
@@ -83,16 +83,34 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
     let inbound_tx = bus.inbound_sender();
     let inbound_rx = bus.take_inbound_receiver().unwrap();
 
+    // Load role and agent registries
+    let roles_dir = config::roles_dir();
+    let mut role_registry = crate::agent::role_registry::RoleRegistry::new();
+    if let Err(e) = role_registry.load_from_dirs(&roles_dir) {
+        tracing::warn!(error = %e, "Failed to load role registry");
+    }
+    let role_registry = std::sync::Arc::new(role_registry);
+    let mut agent_registry = crate::agent::agent_registry::AgentRegistry::new();
+    if let Err(e) = agent_registry.load_from_config(
+        &cfg.main_agent,
+        &role_registry,
+        &ws,
+    ) {
+        tracing::warn!(error = %e, "Failed to load agent registry");
+    }
+    let agent_registry = std::sync::Arc::new(agent_registry);
+
     // Agent loop (CLI agent has no tool sandbox)
     let mut agent_loop = crate::agent::r#loop::AgentLoop::new(
         completion_model,
         ws,
         tools,
-        cfg.agent.max_tool_iterations,
+        cfg.main_agent.max_tool_iterations,
         inbound_rx,
         bus.outbound_tx_clone(),
         &cfg,
         shared_session_state,
+        agent_registry,
         false,
     )
     .await;

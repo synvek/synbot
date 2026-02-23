@@ -5,7 +5,7 @@ import type {
   SessionDetail,
   ChannelInfo,
   CronJobInfo,
-  RoleInfo,
+  AgentInfo,
   SkillInfo,
   SkillDetail,
   SanitizedConfig,
@@ -129,9 +129,9 @@ export class ApiClient {
     return response.data.data!;
   }
 
-  // Roles
-  async getRoles(): Promise<RoleInfo[]> {
-    const response = await this.client.get<ApiResponse<RoleInfo[]>>('/api/roles');
+  // Agents
+  async getAgents(): Promise<AgentInfo[]> {
+    const response = await this.client.get<ApiResponse<AgentInfo[]>>('/api/agents');
     return response.data.data!;
   }
 

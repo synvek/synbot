@@ -152,41 +152,53 @@ pub struct ProvidersConfig {
 }
 
 // ---------------------------------------------------------------------------
-// Role configs
+// Agent config (runtime entity that references one role)
 // ---------------------------------------------------------------------------
 
-/// Configuration for a single role.
+/// Agent configuration: runtime entity that references exactly one role.
+/// Role is discovered from ~/.synbot/roles/ (subdir name = role name). All agents use the same workspace from MainAgent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
-pub struct RoleConfig {
+pub struct AgentConfig {
     pub name: String,
-    /// Deprecated: use `reference` instead; system prompt is generated from templates/roles/{reference} md files.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub system_prompt: Option<String>,
-    /// Subdirectory name under templates/roles; used to build system prompt from AGENTS.md, SOUL.md, TOOLS.md.
+    /// Role name (must match a subdir under ~/.synbot/roles/, e.g. main, dev).
+    pub role: String,
     #[serde(default)]
-    pub reference: Option<String>,
-    #[serde(default)]
-    pub skills: Vec<String>,
-    #[serde(default)]
-    pub tools: Vec<String>,
-    /// Optional; when unset, values are inherited from AgentDefaults.
     pub provider: Option<String>,
     pub model: Option<String>,
     pub max_tokens: Option<u32>,
     pub temperature: Option<f32>,
     pub max_iterations: Option<u32>,
+    #[serde(default)]
+    pub skills: Vec<String>,
+    #[serde(default)]
+    pub tools: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
-// Agent defaults
+// Main agent config (workspace and defaults; agents reference roles from filesystem)
 // ---------------------------------------------------------------------------
+
+/// Additional agents only; the main agent is implicit (role "main", from MainAgent settings).
+fn default_agents() -> Vec<AgentConfig> {
+    vec![AgentConfig {
+        name: "dev".to_string(),
+        role: "dev".to_string(),
+        provider: None,
+        model: None,
+        max_tokens: None,
+        temperature: None,
+        max_iterations: None,
+        skills: Vec::new(),
+        tools: Vec::new(),
+    }]
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
-pub struct AgentDefaults {
+pub struct MainAgent {
     #[serde(default = "default_workspace")]
     pub workspace: String,
     #[serde(default = "default_provider")]
@@ -201,8 +213,8 @@ pub struct AgentDefaults {
     pub max_tool_iterations: u32,
     #[serde(default = "default_max_concurrent_subagents")]
     pub max_concurrent_subagents: usize,
-    #[serde(default)]
-    pub roles: Vec<RoleConfig>,
+    #[serde(default = "default_agents")]
+    pub agents: Vec<AgentConfig>,
 }
 
 fn default_workspace() -> String {
@@ -229,17 +241,17 @@ fn default_max_concurrent_subagents() -> usize {
     5
 }
 
-impl Default for AgentDefaults {
+impl Default for MainAgent {
     fn default() -> Self {
         Self {
             workspace: default_workspace(),
-            provider: default_model(),
+            provider: default_provider(),
             model: default_model(),
             max_tokens: default_max_tokens(),
             temperature: default_temperature(),
             max_tool_iterations: default_max_iterations(),
             max_concurrent_subagents: default_max_concurrent_subagents(),
-            roles: Vec::new(),
+            agents: default_agents(),
         }
     }
 }
@@ -274,7 +286,7 @@ fn default_permission_level() -> PermissionLevel {
 }
 
 fn default_approval_timeout() -> u64 {
-    60 // 5 minutes
+    300 // 5 minutes
 }
 
 impl Default for PermissionConfig {
@@ -955,8 +967,8 @@ pub struct Config {
     pub channels: ChannelsConfig,
     #[serde(default)]
     pub providers: ProvidersConfig,
-    #[serde(default)]
-    pub agent: AgentDefaults,
+    #[serde(default, rename = "mainAgent")]
+    pub main_agent: MainAgent,
     #[serde(default)]
     pub memory: MemoryConfig,
     #[serde(default)]
@@ -1208,35 +1220,35 @@ impl std::fmt::Display for ValidationError {
 /// can fix every problem in a single pass.
 ///
 /// # Validation rules
-/// - `agent.max_tokens > 0`
-/// - `agent.temperature` in `[0.0, 2.0]`
-/// - `agent.max_tool_iterations > 0`
+/// - `mainAgent.max_tokens > 0`
+/// - `mainAgent.temperature` in `[0.0, 2.0]`
+/// - `mainAgent.max_tool_iterations > 0`
 /// - `tools.exec.timeout_secs > 0`
 /// - Enabled channels must have non-empty credentials
 pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
     let mut errors = Vec::new();
 
     // --- Agent defaults ---
-    if config.agent.max_tokens == 0 {
+    if config.main_agent.max_tokens == 0 {
         errors.push(ValidationError {
-            field: "agent.max_tokens".into(),
-            value: config.agent.max_tokens.to_string(),
+            field: "mainAgent.max_tokens".into(),
+            value: config.main_agent.max_tokens.to_string(),
             constraint: "must be greater than 0".into(),
         });
     }
 
-    if config.agent.temperature < 0.0 || config.agent.temperature > 2.0 {
+    if config.main_agent.temperature < 0.0 || config.main_agent.temperature > 2.0 {
         errors.push(ValidationError {
-            field: "agent.temperature".into(),
-            value: config.agent.temperature.to_string(),
+            field: "mainAgent.temperature".into(),
+            value: config.main_agent.temperature.to_string(),
             constraint: "must be between 0.0 and 2.0".into(),
         });
     }
 
-    if config.agent.max_tool_iterations == 0 {
+    if config.main_agent.max_tool_iterations == 0 {
         errors.push(ValidationError {
-            field: "agent.max_tool_iterations".into(),
-            value: config.agent.max_tool_iterations.to_string(),
+            field: "mainAgent.max_tool_iterations".into(),
+            value: config.main_agent.max_tool_iterations.to_string(),
             constraint: "must be greater than 0".into(),
         });
     }
@@ -1416,65 +1428,86 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
     };
 
     // --- main_channel validation ---
-    let has_multi_agent_features = !config.agent.roles.is_empty();
+    let has_multi_agent_features = !config.main_agent.agents.is_empty();
 
-    if has_multi_agent_features {
-        if config.main_channel.is_empty() {
-            errors.push(ValidationError {
-                field: "main_channel".into(),
-                value: String::new(),
-                constraint: "must be non-empty when roles are configured".into(),
-            });
-        } else if !enabled_channels.contains(&config.main_channel) {
-            errors.push(ValidationError {
-                field: "main_channel".into(),
-                value: config.main_channel.clone(),
-                constraint: format!(
-                    "must reference an enabled channel (available: {})",
-                    enabled_channels.join(", ")
-                ),
-            });
-        }
+    if has_multi_agent_features && !enabled_channels.is_empty() && config.main_channel.is_empty() {
+        errors.push(ValidationError {
+            field: "main_channel".into(),
+            value: String::new(),
+            constraint: "must be non-empty when multiple agents are configured".into(),
+        });
+    }
+    if !config.main_channel.is_empty() && !enabled_channels.contains(&config.main_channel) {
+        errors.push(ValidationError {
+            field: "main_channel".into(),
+            value: config.main_channel.clone(),
+            constraint: format!(
+                "must reference an enabled channel (available: {})",
+                enabled_channels.join(", ")
+            ),
+        });
     }
 
-    // --- Role validation ---
-    let mut seen_role_names = std::collections::HashSet::new();
-    for (i, role) in config.agent.roles.iter().enumerate() {
-        let role_label = if role.name.is_empty() {
-            format!("agent.roles[{}]", i)
+    // --- Agent validation (main is implicit; agents list must not define "main") ---
+    let mut seen_agent_names = std::collections::HashSet::new();
+    for (i, agent) in config.main_agent.agents.iter().enumerate() {
+        let agent_label = if agent.name.is_empty() {
+            format!("mainAgent.agents[{}]", i)
         } else {
-            format!("agent.roles[{}] ({})", i, role.name)
+            format!("mainAgent.agents[{}] ({})", i, agent.name)
         };
 
-        // Required fields
-        if role.name.is_empty() {
+        if agent.name.is_empty() {
             errors.push(ValidationError {
-                field: format!("{}.name", role_label),
+                field: format!("{}.name", agent_label),
                 value: String::new(),
-                constraint: "role name must be non-empty".into(),
+                constraint: "agent name must be non-empty".into(),
             });
         }
-        // Name format: only [a-zA-Z0-9_]
-        if !role.name.is_empty()
-            && !role
+        if agent.name == "main" {
+            errors.push(ValidationError {
+                field: format!("{}.name", agent_label),
+                value: "main".into(),
+                constraint: "agent name must not be 'main' (main agent is implicit from mainAgent and uses role main)".into(),
+            });
+        }
+        if !agent.name.is_empty()
+            && !agent
                 .name
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || c == '_')
         {
             errors.push(ValidationError {
-                field: format!("{}.name", role_label),
-                value: role.name.clone(),
-                constraint: "role name must contain only letters, digits, and underscores"
+                field: format!("{}.name", agent_label),
+                value: agent.name.clone(),
+                constraint: "agent name must contain only letters, digits, and underscores"
                     .into(),
             });
         }
-
-        // Duplicate names
-        if !role.name.is_empty() && !seen_role_names.insert(role.name.clone()) {
+        if agent.role.trim().is_empty() {
             errors.push(ValidationError {
-                field: format!("{}.name", role_label),
-                value: role.name.clone(),
-                constraint: "duplicate role name".into(),
+                field: format!("{}.role", agent_label),
+                value: agent.role.clone(),
+                constraint: "agent role must be non-empty (must match a subdir under ~/.synbot/roles/)".into(),
+            });
+        }
+        if !agent.role.is_empty()
+            && !agent
+                .role
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            errors.push(ValidationError {
+                field: format!("{}.role", agent_label),
+                value: agent.role.clone(),
+                constraint: "agent role must contain only letters, digits, and underscores".into(),
+            });
+        }
+        if !agent.name.is_empty() && !seen_agent_names.insert(agent.name.clone()) {
+            errors.push(ValidationError {
+                field: format!("{}.name", agent_label),
+                value: agent.name.clone(),
+                constraint: "duplicate agent name".into(),
             });
         }
     }
@@ -1533,7 +1566,7 @@ pub fn skills_dir() -> PathBuf {
 }
 
 pub fn workspace_path(cfg: &Config) -> PathBuf {
-    let raw = &cfg.agent.workspace;
+    let raw = &cfg.main_agent.workspace;
     if raw.starts_with('~') {
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
@@ -1682,9 +1715,9 @@ mod tests {
     #[test]
     fn max_tokens_zero_is_rejected() {
         let mut cfg = valid_config();
-        cfg.agent.max_tokens = 0;
+        cfg.main_agent.max_tokens = 0;
         let errors = validate_config(&cfg).unwrap_err();
-        let err = find_error(&errors, "agent.max_tokens").expect("expected error for max_tokens");
+        let err = find_error(&errors, "mainAgent.max_tokens").expect("expected error for max_tokens");
         assert_eq!(err.value, "0");
         assert!(err.constraint.contains("greater than 0"));
     }
@@ -1692,7 +1725,7 @@ mod tests {
     #[test]
     fn max_tokens_positive_is_accepted() {
         let mut cfg = valid_config();
-        cfg.agent.max_tokens = 1;
+        cfg.main_agent.max_tokens = 1;
         assert!(validate_config(&cfg).is_ok());
     }
 
@@ -1701,26 +1734,26 @@ mod tests {
     #[test]
     fn temperature_below_zero_is_rejected() {
         let mut cfg = valid_config();
-        cfg.agent.temperature = -0.1;
+        cfg.main_agent.temperature = -0.1;
         let errors = validate_config(&cfg).unwrap_err();
-        assert!(find_error(&errors, "agent.temperature").is_some());
+        assert!(find_error(&errors, "mainAgent.temperature").is_some());
     }
 
     #[test]
     fn temperature_above_two_is_rejected() {
         let mut cfg = valid_config();
-        cfg.agent.temperature = 2.1;
+        cfg.main_agent.temperature = 2.1;
         let errors = validate_config(&cfg).unwrap_err();
-        assert!(find_error(&errors, "agent.temperature").is_some());
+        assert!(find_error(&errors, "mainAgent.temperature").is_some());
     }
 
     #[test]
     fn temperature_at_boundaries_is_accepted() {
         let mut cfg = valid_config();
-        cfg.agent.temperature = 0.0;
+        cfg.main_agent.temperature = 0.0;
         assert!(validate_config(&cfg).is_ok());
 
-        cfg.agent.temperature = 2.0;
+        cfg.main_agent.temperature = 2.0;
         assert!(validate_config(&cfg).is_ok());
     }
 
@@ -1729,9 +1762,9 @@ mod tests {
     #[test]
     fn max_tool_iterations_zero_is_rejected() {
         let mut cfg = valid_config();
-        cfg.agent.max_tool_iterations = 0;
+        cfg.main_agent.max_tool_iterations = 0;
         let errors = validate_config(&cfg).unwrap_err();
-        assert!(find_error(&errors, "agent.max_tool_iterations").is_some());
+        assert!(find_error(&errors, "mainAgent.max_tool_iterations").is_some());
     }
 
     // --- tools.exec.timeout_secs ---
@@ -1768,6 +1801,7 @@ mod tests {
             token: "bot123:abc".into(),
             ..Default::default()
         }];
+        cfg.main_channel = "telegram".into();
         assert!(validate_config(&cfg).is_ok());
     }
 
@@ -1803,6 +1837,7 @@ mod tests {
             token: "discord-token".into(),
             ..Default::default()
         }];
+        cfg.main_channel = "discord".into();
         assert!(validate_config(&cfg).is_ok());
     }
 
@@ -1831,6 +1866,7 @@ mod tests {
             app_secret: "app-secret".into(),
             ..Default::default()
         }];
+        cfg.main_channel = "feishu".into();
         assert!(validate_config(&cfg).is_ok());
     }
 
@@ -1839,8 +1875,8 @@ mod tests {
     #[test]
     fn multiple_errors_are_collected() {
         let mut cfg = valid_config();
-        cfg.agent.max_tokens = 0;
-        cfg.agent.temperature = 5.0;
+        cfg.main_agent.max_tokens = 0;
+        cfg.main_agent.temperature = 5.0;
         cfg.tools.exec.timeout_secs = 0;
         cfg.channels.telegram = vec![TelegramConfig {
             name: "telegram".into(),
@@ -1851,8 +1887,8 @@ mod tests {
 
         let errors = validate_config(&cfg).unwrap_err();
         assert!(errors.len() >= 4, "expected at least 4 errors, got {}", errors.len());
-        assert!(find_error(&errors, "agent.max_tokens").is_some());
-        assert!(find_error(&errors, "agent.temperature").is_some());
+        assert!(find_error(&errors, "mainAgent.max_tokens").is_some());
+        assert!(find_error(&errors, "mainAgent.temperature").is_some());
         assert!(find_error(&errors, "tools.exec.timeout_secs").is_some());
         assert!(errors.iter().any(|e| e.field == "channels.telegram[0].token"));
     }
@@ -1865,7 +1901,7 @@ mod tests {
         let path = dir.path().join("bad_config.json");
         std::fs::write(
             &path,
-            r#"{"agent":{"maxTokens":0,"temperature":3.0}}"#,
+            r#"{"mainAgent":{"maxTokens":0,"temperature":3.0}}"#,
         )
         .unwrap();
 
@@ -1873,8 +1909,8 @@ mod tests {
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("config validation failed"));
-        assert!(msg.contains("agent.max_tokens"));
-        assert!(msg.contains("agent.temperature"));
+        assert!(msg.contains("mainAgent.max_tokens"));
+        assert!(msg.contains("mainAgent.temperature"));
     }
 
     #[test]
@@ -1883,14 +1919,14 @@ mod tests {
         let path = dir.path().join("good_config.json");
         std::fs::write(
             &path,
-            r#"{"agent":{"maxTokens":4096,"temperature":0.5,"maxToolIterations":10},"tools":{"exec":{"timeoutSecs":30}}}"#,
+            r#"{"mainAgent":{"maxTokens":4096,"temperature":0.5,"maxToolIterations":10},"tools":{"exec":{"timeoutSecs":30}}}"#,
         )
         .unwrap();
 
         let result = load_config(Some(&path));
         assert!(result.is_ok());
         let cfg = result.unwrap();
-        assert_eq!(cfg.agent.max_tokens, 4096);
+        assert_eq!(cfg.main_agent.max_tokens, 4096);
     }
 
     // --- Helper: config with multi-agent features enabled ---
@@ -1907,28 +1943,27 @@ mod tests {
         cfg
     }
 
-    fn make_role(name: &str, reference: Option<&str>) -> RoleConfig {
-        RoleConfig {
+    fn make_agent(name: &str, role: &str) -> AgentConfig {
+        AgentConfig {
             name: name.into(),
-            system_prompt: None,
-            reference: reference.map(String::from),
-            skills: Vec::new(),
-            tools: Vec::new(),
+            role: role.into(),
             provider: None,
             model: None,
             max_tokens: None,
             temperature: None,
             max_iterations: None,
+            skills: Vec::new(),
+            tools: Vec::new(),
         }
     }
 
     // --- main_channel validation ---
 
     #[test]
-    fn main_channel_empty_with_roles_is_rejected() {
+    fn main_channel_empty_with_multiple_agents_is_rejected() {
         let mut cfg = config_with_telegram();
         cfg.main_channel = String::new();
-        cfg.agent.roles = vec![make_role("helper", Some("dev"))];
+        cfg.main_agent.agents = vec![make_agent("helper", "dev")];
         let errors = validate_config(&cfg).unwrap_err();
         assert!(errors.iter().any(|e| e.field == "main_channel"));
     }
@@ -1937,7 +1972,7 @@ mod tests {
     fn main_channel_referencing_disabled_channel_is_rejected() {
         let mut cfg = valid_config();
         cfg.main_channel = "telegram".into();
-        cfg.agent.roles = vec![make_role("helper", Some("dev"))];
+        cfg.main_agent.agents = vec![make_agent("helper", "dev")];
         // telegram is not enabled
         let errors = validate_config(&cfg).unwrap_err();
         assert!(errors.iter().any(|e| e.field == "main_channel"));
@@ -1946,63 +1981,51 @@ mod tests {
     #[test]
     fn main_channel_referencing_enabled_channel_is_accepted() {
         let mut cfg = config_with_telegram();
-        cfg.agent.roles = vec![make_role("helper", Some("dev"))];
+        cfg.main_agent.agents = vec![make_agent("helper", "dev")];
         assert!(validate_config(&cfg).is_ok());
     }
 
     #[test]
-    fn main_channel_not_required_without_multi_agent_features() {
+    fn main_channel_not_required_with_single_agent() {
         let mut cfg = valid_config();
         cfg.main_channel = String::new();
-        // No roles, groups, or topics
+        cfg.main_agent.agents = vec![];
         assert!(validate_config(&cfg).is_ok());
     }
 
-    // --- Role name format validation ---
+    // --- Agent validation (main is implicit; must not define agent named "main") ---
 
     #[test]
-    fn role_name_with_special_chars_is_rejected() {
+    fn agent_named_main_is_rejected() {
         let mut cfg = config_with_telegram();
-        cfg.agent.roles = vec![make_role("bad-name!", Some("dev"))];
+        cfg.main_agent.agents = vec![make_agent("main", "main")];
+        let errors = validate_config(&cfg).unwrap_err();
+        assert!(errors.iter().any(|e| e.constraint.contains("must not be 'main'")));
+    }
+
+    #[test]
+    fn agent_role_with_special_chars_is_rejected() {
+        let mut cfg = config_with_telegram();
+        cfg.main_agent.agents = vec![make_agent("helper", "bad-role!")];
         let errors = validate_config(&cfg).unwrap_err();
         assert!(errors.iter().any(|e| e.constraint.contains("letters, digits, and underscores")));
     }
 
     #[test]
-    fn role_name_alphanumeric_underscore_is_accepted() {
+    fn agent_role_alphanumeric_underscore_is_accepted() {
         let mut cfg = config_with_telegram();
-        cfg.agent.roles = vec![make_role("good_Role_123", Some("dev"))];
+        cfg.main_agent.agents = vec![make_agent("helper", "good_Role_123")];
         assert!(validate_config(&cfg).is_ok());
     }
 
-    // --- Role duplicate names ---
-
     #[test]
-    fn duplicate_role_names_are_rejected() {
+    fn agent_role_empty_is_rejected() {
         let mut cfg = config_with_telegram();
-        cfg.agent.roles = vec![
-            make_role("helper", Some("dev")),
-            make_role("helper", Some("dev")),
+        cfg.main_agent.agents = vec![
+            AgentConfig { name: "helper".into(), role: String::new(), provider: None, model: None, max_tokens: None, temperature: None, max_iterations: None, skills: Vec::new(), tools: Vec::new() },
         ];
         let errors = validate_config(&cfg).unwrap_err();
-        assert!(errors.iter().any(|e| e.constraint.contains("duplicate")));
-    }
-
-    // --- Role required fields ---
-
-    #[test]
-    fn role_empty_name_is_rejected() {
-        let mut cfg = config_with_telegram();
-        cfg.agent.roles = vec![make_role("", Some("dev"))];
-        let errors = validate_config(&cfg).unwrap_err();
-        assert!(errors.iter().any(|e| e.constraint.contains("name must be non-empty")));
-    }
-
-    #[test]
-    fn role_without_reference_is_accepted() {
-        let mut cfg = config_with_telegram();
-        cfg.agent.roles = vec![make_role("helper", None)];
-        assert!(validate_config(&cfg).is_ok());
+        assert!(errors.iter().any(|e| e.constraint.contains("role must be non-empty")));
     }
 
     // --- ValidationError Display ---
@@ -2010,12 +2033,12 @@ mod tests {
     #[test]
     fn validation_error_display_format() {
         let err = ValidationError {
-            field: "agent.temperature".into(),
+            field: "mainAgent.temperature".into(),
             value: "3.0".into(),
             constraint: "must be between 0.0 and 2.0".into(),
         };
         let msg = err.to_string();
-        assert!(msg.contains("agent.temperature"));
+        assert!(msg.contains("mainAgent.temperature"));
         assert!(msg.contains("3.0"));
         assert!(msg.contains("must be between 0.0 and 2.0"));
     }

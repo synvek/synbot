@@ -126,13 +126,13 @@ fn date_from_filename(filename: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(stem, "%Y-%m-%d").ok()
 }
 
-/// Ensures memory dirs and MEMORY.md exist for main and all configured roles.
+/// Ensures memory dirs and MEMORY.md exist for main and all configured agents.
 /// Call at startup so `~/.synbot/memory/{agentId}/` and `MEMORY.md` are created
 /// even before any message is processed.
 pub fn ensure_memory_dirs(cfg: &crate::config::Config) {
-    let _ = MemoryStore::new("main");
-    for role in &cfg.agent.roles {
-        let _ = MemoryStore::new(&role.name);
+    MemoryStore::new("main");
+    for agent in &cfg.main_agent.agents {
+        let _ = MemoryStore::new(&agent.name);
     }
 }
 

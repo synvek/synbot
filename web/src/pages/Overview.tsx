@@ -84,7 +84,7 @@ const Overview: React.FC = () => {
     },
     {
       title: t('overview.roles'),
-      value: status.role_count,
+      value: status.agent_count,
       color: 'secondary',
       icon: RolesIcon,
     },

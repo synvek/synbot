@@ -1,5 +1,5 @@
+use crate::agent::agent_registry::AgentRegistry;
 use crate::agent::session_manager::SessionManager;
-use crate::agent::role_registry::RoleRegistry;
 use crate::agent::skills::SkillsLoader;
 use crate::bus::{InboundMessage, OutboundMessage};
 use crate::config::Config;
@@ -14,7 +14,7 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub session_manager: Arc<RwLock<SessionManager>>,
     pub cron_service: Arc<RwLock<CronService>>,
-    pub role_registry: Arc<RoleRegistry>,
+    pub agent_registry: Arc<AgentRegistry>,
     pub skills_loader: Arc<SkillsLoader>,
     pub inbound_tx: mpsc::Sender<InboundMessage>,
     pub outbound_tx: broadcast::Sender<OutboundMessage>,
@@ -28,7 +28,7 @@ impl AppState {
         config: Arc<Config>,
         session_manager: Arc<RwLock<SessionManager>>,
         cron_service: Arc<RwLock<CronService>>,
-        role_registry: Arc<RoleRegistry>,
+        agent_registry: Arc<AgentRegistry>,
         skills_loader: Arc<SkillsLoader>,
         inbound_tx: mpsc::Sender<InboundMessage>,
         outbound_tx: broadcast::Sender<OutboundMessage>,
@@ -40,7 +40,7 @@ impl AppState {
             config,
             session_manager,
             cron_service,
-            role_registry,
+            agent_registry,
             skills_loader,
             inbound_tx,
             outbound_tx,

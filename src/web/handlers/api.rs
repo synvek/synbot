@@ -118,7 +118,7 @@ pub struct SystemStatus {
     pub session_count: usize,
     pub channel_count: usize,
     pub cron_job_count: usize,
-    pub role_count: usize,
+    pub agent_count: usize,
 }
 
 /// GET /api/status - Returns system status
@@ -158,8 +158,8 @@ pub async fn get_status(state: web::Data<AppState>) -> Result<HttpResponse> {
         cron.job_count()
     };
 
-    // Get role count
-    let role_count = state.config.agent.roles.len();
+    // Get agent count
+    let agent_count = 1 + state.config.main_agent.agents.len();
 
     let status = SystemStatus {
         running: true,
@@ -167,7 +167,7 @@ pub async fn get_status(state: web::Data<AppState>) -> Result<HttpResponse> {
         session_count,
         channel_count,
         cron_job_count,
-        role_count,
+        agent_count,
     };
 
     Ok(HttpResponse::Ok().json(ApiResponse::success(status)))
@@ -547,10 +547,11 @@ pub async fn update_cron_job(
     Ok(HttpResponse::Ok().json(ApiResponse::success(job_info)))
 }
 
-/// Role information for API responses
+/// Agent information for API responses
 #[derive(Serialize)]
-pub struct RoleInfo {
+pub struct AgentInfo {
     pub name: String,
+    pub role: String,
     pub system_prompt: String,
     pub skills: Vec<String>,
     pub tools: Vec<String>,
@@ -562,15 +563,16 @@ pub struct RoleInfo {
     pub workspace_dir: String,
 }
 
-/// GET /api/roles - Returns list of roles with full configuration
-pub async fn get_roles(state: web::Data<AppState>) -> Result<HttpResponse> {
-    let role_names = state.role_registry.list_names();
-    
-    let roles: Vec<RoleInfo> = role_names
+/// GET /api/agents - Returns list of agents with full configuration
+pub async fn get_agents(state: web::Data<AppState>) -> Result<HttpResponse> {
+    let agent_names = state.agent_registry.list_names();
+
+    let agents: Vec<AgentInfo> = agent_names
         .into_iter()
         .filter_map(|name| {
-            state.role_registry.get(name).map(|ctx| RoleInfo {
+            state.agent_registry.get(name).map(|ctx| AgentInfo {
                 name: ctx.name.clone(),
+                role: ctx.role_name.clone(),
                 system_prompt: ctx.system_prompt.clone(),
                 skills: ctx.skills.clone(),
                 tools: ctx.tools.clone(),
@@ -583,15 +585,15 @@ pub async fn get_roles(state: web::Data<AppState>) -> Result<HttpResponse> {
             })
         })
         .collect();
-    
-    Ok(HttpResponse::Ok().json(ApiResponse::success(roles)))
+
+    Ok(HttpResponse::Ok().json(ApiResponse::success(agents)))
 }
 
 /// Skill information for API responses
 #[derive(Serialize)]
 pub struct SkillInfo {
     pub name: String,
-    pub assigned_roles: Vec<String>,
+    pub assigned_agents: Vec<String>,
 }
 
 /// Skill detail with content
@@ -599,38 +601,37 @@ pub struct SkillInfo {
 pub struct SkillDetail {
     pub name: String,
     pub content: String,
-    pub assigned_roles: Vec<String>,
+    pub assigned_agents: Vec<String>,
 }
 
 /// GET /api/skills - Returns list of available skills
 pub async fn get_skills(state: web::Data<AppState>) -> Result<HttpResponse> {
     let skill_names = state.skills_loader.list_skills();
-    let role_names = state.role_registry.list_names();
-    
+    let agent_names = state.agent_registry.list_names();
+
     let skills: Vec<SkillInfo> = skill_names
         .into_iter()
         .map(|skill_name| {
-            // Find which roles have this skill assigned
-            let assigned_roles: Vec<String> = role_names
+            let assigned_agents: Vec<String> = agent_names
                 .iter()
-                .filter_map(|role_name| {
-                    state.role_registry.get(role_name).and_then(|ctx| {
+                .filter_map(|agent_name| {
+                    state.agent_registry.get(agent_name).and_then(|ctx| {
                         if ctx.skills.contains(&skill_name) {
-                            Some((*role_name).to_string())
+                            Some((*agent_name).to_string())
                         } else {
                             None
                         }
                     })
                 })
                 .collect();
-            
+
             SkillInfo {
                 name: skill_name,
-                assigned_roles,
+                assigned_agents,
             }
         })
         .collect();
-    
+
     Ok(HttpResponse::Ok().json(ApiResponse::success(skills)))
 }
 
@@ -640,34 +641,34 @@ pub async fn get_skill_by_name(
     path: web::Path<String>,
 ) -> Result<HttpResponse> {
     let skill_name = path.into_inner();
-    
+
     // Load skill content
     let content = state
         .skills_loader
         .load_skill(&skill_name)
         .ok_or_else(|| ApiError::NotFound(format!("Skill not found: {}", skill_name)))?;
-    
-    // Find which roles have this skill assigned
-    let role_names = state.role_registry.list_names();
-    let assigned_roles: Vec<String> = role_names
+
+    // Find which agents have this skill assigned
+    let agent_names = state.agent_registry.list_names();
+    let assigned_agents: Vec<String> = agent_names
         .iter()
-        .filter_map(|role_name| {
-            state.role_registry.get(role_name).and_then(|ctx| {
+        .filter_map(|agent_name| {
+            state.agent_registry.get(agent_name).and_then(|ctx| {
                 if ctx.skills.contains(&skill_name) {
-                    Some((*role_name).to_string())
+                    Some((*agent_name).to_string())
                 } else {
                     None
                 }
             })
         })
         .collect();
-    
+
     let detail = SkillDetail {
         name: skill_name,
         content,
-        assigned_roles,
+        assigned_agents,
     };
-    
+
     Ok(HttpResponse::Ok().json(ApiResponse::success(detail)))
 }
 

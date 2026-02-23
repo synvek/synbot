@@ -1,7 +1,20 @@
 //! Onboard command - Initialize configuration and workspace.
+//!
+//! Role templates are embedded at compile time from `templates/roles/`. Adding a new role
+//! only requires a new subdirectory under `templates/roles/` and a rebuild.
 
-use anyhow::Result;
+use std::path::Path;
+
+use anyhow::{Context, Result};
+use include_dir::{include_dir, Dir};
+
 use crate::config;
+
+/// Role templates embedded at compile time (templates/roles/).
+static TEMPLATES_ROLES: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/roles");
+
+/// Config JSON schema embedded at compile time; written to ~/.synbot for editor/IDE validation.
+static CONFIG_SCHEMA_JSON: &str = include_str!("../../templates/config.schema.json");
 
 pub async fn cmd_onboard() -> Result<()> {
     let cfg_path = config::config_path();
@@ -15,9 +28,14 @@ pub async fn cmd_onboard() -> Result<()> {
     config::save_config(&cfg, None)?;
     println!("✓ Created config at {}", cfg_path.display());
 
+    let dir = config::config_dir();
+    std::fs::create_dir_all(&dir)?;
+    let schema_path = dir.join("config.schema.json");
+    std::fs::write(&schema_path, CONFIG_SCHEMA_JSON)?;
+    println!("✓ Created config schema at {}", schema_path.display());
+
     let ws = config::workspace_path(&cfg);
     std::fs::create_dir_all(&ws)?;
-    create_workspace_templates(&ws)?;
     println!("✓ Created workspace at {}", ws.display());
 
     create_roles_templates()?;
@@ -30,51 +48,29 @@ pub async fn cmd_onboard() -> Result<()> {
     Ok(())
 }
 
-/// At compile time, read template content from crate root templates/.
-fn create_workspace_templates(ws: &std::path::Path) -> Result<()> {
-    let templates: &[(&str, &str)] = &[
-        ("AGENTS.md", include_str!("../../templates/agent/AGENTS.md")),
-        ("SOUL.md", include_str!("../../templates/agent/SOUL.md")),
-        ("USER.md", include_str!("../../templates/agent/USER.md")),
-        ("TOOLS.md", include_str!("../../templates/agent/TOOLS.md")),
-    ];
-    for (name, content) in templates {
-        let path = ws.join(name);
-        if !path.exists() {
-            std::fs::write(&path, content)?;
-        }
+/// Extract an embedded Dir to the filesystem. Creates dirs and overwrites existing files.
+fn extract_embedded_dir(embed: &Dir, dest: &Path) -> Result<()> {
+    for subdir in embed.dirs() {
+        let d = dest.join(subdir.path());
+        std::fs::create_dir_all(&d)?;
+        extract_embedded_dir(subdir, &d)?;
     }
-    // Skills dir is global at ~/.synbot/skills/, not under workspace
+    for file in embed.files() {
+        let fpath = dest.join(file.path());
+        if let Some(parent) = fpath.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&fpath, file.contents())
+            .with_context(|| format!("write {}", fpath.display()))?;
+    }
     Ok(())
 }
 
-/// Write role templates from templates/roles to ~/.synbot/roles (fixed path).
+/// Copy embedded templates/roles into ~/.synbot/roles/. Existing files are overwritten.
+/// All content is compiled into the binary; no templates directory is needed at runtime.
 fn create_roles_templates() -> Result<()> {
-    let roles_root = config::roles_dir();
-    let role_files: &[(&str, &str, &str)] = &[
-        (
-            "dev",
-            "AGENTS.md",
-            include_str!("../../templates/roles/dev/AGENTS.md"),
-        ),
-        (
-            "dev",
-            "SOUL.md",
-            include_str!("../../templates/roles/dev/SOUL.md"),
-        ),
-        (
-            "dev",
-            "TOOLS.md",
-            include_str!("../../templates/roles/dev/TOOLS.md"),
-        ),
-    ];
-    for (role_name, file_name, content) in role_files {
-        let dir = roles_root.join(role_name);
-        std::fs::create_dir_all(&dir)?;
-        let path = dir.join(file_name);
-        if !path.exists() {
-            std::fs::write(&path, content)?;
-        }
-    }
+    let dest = config::roles_dir();
+    std::fs::create_dir_all(&dest)?;
+    extract_embedded_dir(&TEMPLATES_ROLES, &dest)?;
     Ok(())
 }

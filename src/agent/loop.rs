@@ -10,9 +10,9 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, Mutex};
 use tracing::{error, info, warn, Instrument};
 
+use crate::agent::agent_registry::AgentRegistry;
 use crate::agent::context::ContextBuilder;
 use crate::agent::directive::DirectiveParser;
-use crate::agent::role_registry::RoleRegistry;
 use crate::agent::session_state::SharedSessionState;
 use crate::agent::subagent::SubagentManager;
 use crate::bus::{InboundMessage, OutboundMessage};
@@ -28,7 +28,7 @@ pub struct AgentLoop {
     inbound_rx: mpsc::Receiver<InboundMessage>,
     outbound_tx: broadcast::Sender<OutboundMessage>,
     session_state: SharedSessionState,
-    role_registry: Arc<RoleRegistry>,
+    agent_registry: Arc<AgentRegistry>,
     subagent_manager: Arc<Mutex<SubagentManager>>,
     tool_sandbox_enabled: bool,
 }
@@ -43,19 +43,10 @@ impl AgentLoop {
         outbound_tx: broadcast::Sender<OutboundMessage>,
         config: &Config,
         session_state: SharedSessionState,
+        agent_registry: Arc<AgentRegistry>,
         tool_sandbox_enabled: bool,
     ) -> Self {
-        let mut role_registry = RoleRegistry::new();
-        let roles_dir = crate::config::roles_dir();
-        if let Err(e) = role_registry.load_from_config(
-            &config.agent.roles,
-            &config.agent,
-            &workspace,
-            &roles_dir,
-        ) {
-            warn!(error = %e, "Failed to load role registry from config");
-        }
-        let subagent_manager = SubagentManager::new(config.agent.max_concurrent_subagents);
+        let subagent_manager = SubagentManager::new(config.main_agent.max_concurrent_subagents);
         Self {
             workspace,
             model,
@@ -64,7 +55,7 @@ impl AgentLoop {
             inbound_rx,
             outbound_tx,
             session_state,
-            role_registry: Arc::new(role_registry),
+            agent_registry,
             subagent_manager: Arc::new(Mutex::new(subagent_manager)),
             tool_sandbox_enabled,
         }
@@ -178,13 +169,23 @@ impl AgentLoop {
             let agent_id = match &directive.target {
                 None => "main".to_string(),
                 Some(name) => {
-                    if !self.role_registry.contains(name) {
-                        self.send_unknown_role_error(msg, name).await;
+                    if !self.agent_registry.contains(name) {
+                        self.send_unknown_agent_error(msg, name).await;
                         continue;
                     }
                     name.clone()
                 }
             };
+
+            let agent_ctx = self.agent_registry.get(&agent_id).unwrap();
+            let context_builder = ContextBuilder::new(
+                &agent_ctx.workspace_dir,
+                &agent_id,
+                config::skills_dir().as_path(),
+                self.tool_sandbox_enabled,
+            );
+            let system_prompt = context_builder.build_system_prompt_with_role_prompt(&agent_ctx.system_prompt);
+            let model_max_iterations = agent_ctx.params.max_iterations;
 
             let session_id = {
                 let sm = self.session_state.session_manager.write().await;
@@ -192,31 +193,8 @@ impl AgentLoop {
             };
             let session_key = session_id.format();
 
-            let (system_prompt, model_max_iterations) = if agent_id == "main" {
-                let context = ContextBuilder::new(
-                    &self.workspace,
-                    "main",
-                    config::skills_dir().as_path(),
-                    self.tool_sandbox_enabled,
-                );
-                (context.build_system_prompt(), self.max_iterations)
-            } else {
-                let role = self.role_registry.get(&agent_id).unwrap();
-                (role.system_prompt.clone(), role.params.max_iterations)
-            };
-
-            let (agent_workspace, agent_memory_dir) = if agent_id == "main" {
-                (
-                    self.workspace.clone(),
-                    config::memory_dir("main"),
-                )
-            } else {
-                let role = self.role_registry.get(&agent_id).unwrap();
-                (
-                    role.workspace_dir.clone(),
-                    config::memory_dir(&agent_id),
-                )
-            };
+            let agent_workspace = agent_ctx.workspace_dir.clone();
+            let agent_memory_dir = config::memory_dir(&agent_id);
             let tool_ctx = ToolContext {
                 agent_id: agent_id.clone(),
                 workspace: agent_workspace,
@@ -335,32 +313,29 @@ impl AgentLoop {
             let agent_id = match &directive.target {
                 None => "main".to_string(),
                 Some(name) => {
-                    if !self.role_registry.contains(name) {
-                        self.send_unknown_role_error(msg, name).await;
+                    if !self.agent_registry.contains(name) {
+                        self.send_unknown_agent_error(msg, name).await;
                         continue;
                     }
                     name.clone()
                 }
             };
 
+            let agent_ctx = self.agent_registry.get(&agent_id).unwrap();
+            let context_builder = ContextBuilder::new(
+                &agent_ctx.workspace_dir,
+                &agent_id,
+                config::skills_dir().as_path(),
+                self.tool_sandbox_enabled,
+            );
+            let system_prompt = context_builder.build_system_prompt_with_role_prompt(&agent_ctx.system_prompt);
+            let model_max_iterations = agent_ctx.params.max_iterations;
+
             let session_id = {
                 let sm = self.session_state.session_manager.write().await;
                 sm.resolve_session(&agent_id, &msg.channel, &msg.chat_id, &msg.metadata)
             };
             let session_key = session_id.format();
-
-            let (system_prompt, model_max_iterations) = if agent_id == "main" {
-                let context = ContextBuilder::new(
-                    &self.workspace,
-                    "main",
-                    config::skills_dir().as_path(),
-                    self.tool_sandbox_enabled,
-                );
-                (context.build_system_prompt(), self.max_iterations)
-            } else {
-                let role = self.role_registry.get(&agent_id).unwrap();
-                (role.system_prompt.clone(), role.params.max_iterations)
-            };
 
             let tool_defs = self.tools.rig_definitions();
 
@@ -394,18 +369,8 @@ impl AgentLoop {
                 sm.append(&session_id, user_msg);
             }
 
-            let (agent_workspace, agent_memory_dir) = if agent_id == "main" {
-                (
-                    self.workspace.clone(),
-                    crate::config::memory_dir("main"),
-                )
-            } else {
-                let role = self.role_registry.get(&agent_id).unwrap();
-                (
-                    role.workspace_dir.clone(),
-                    crate::config::memory_dir(&agent_id),
-                )
-            };
+            let agent_workspace = agent_ctx.workspace_dir.clone();
+            let agent_memory_dir = crate::config::memory_dir(&agent_id);
 
             let model = Arc::clone(&self.model);
             let tools = Arc::clone(&self.tools);
@@ -512,7 +477,7 @@ impl AgentLoop {
                     let _ = self.outbound_tx.send(OutboundMessage::chat(
                         msg.channel.clone(),
                         msg.chat_id.clone(),
-                        format!("Role '{}' is busy, please retry later", agent_id),
+                        format!("Agent '{}' is busy, please retry later", agent_id),
                         vec![],
                         None,
                     ));
@@ -546,17 +511,17 @@ impl AgentLoop {
         Ok(())
     }
 
-    async fn send_unknown_role_error(&self, msg: &InboundMessage, unknown_role: &str) {
-        let available = self.role_registry.list_names();
-        let role_list = if available.is_empty() {
-            "(no registered roles)".to_string()
+    async fn send_unknown_agent_error(&self, msg: &InboundMessage, unknown_agent: &str) {
+        let available = self.agent_registry.list_names();
+        let agent_list = if available.is_empty() {
+            "(no registered agents)".to_string()
         } else {
             available.join(", ")
         };
         let _ = self.outbound_tx.send(OutboundMessage::chat(
             msg.channel.clone(),
             msg.chat_id.clone(),
-            format!("Unknown role '{}'. Available: {}", unknown_role, role_list),
+            format!("Unknown agent '{}'. Available: {}", unknown_agent, agent_list),
             vec![],
             None,
         ));

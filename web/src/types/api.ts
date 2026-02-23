@@ -19,7 +19,7 @@ export interface SystemStatus {
   session_count: number;
   channel_count: number;
   cron_job_count: number;
-  role_count: number;
+  agent_count: number;
 }
 
 // Session Types
@@ -79,9 +79,10 @@ export interface CronJobInfo {
   payload: Record<string, unknown>;
 }
 
-// Role Types
-export interface RoleInfo {
+// Agent Types
+export interface AgentInfo {
   name: string;
+  role: string;
   system_prompt: string;
   skills: string[];
   tools: string[];
@@ -89,19 +90,20 @@ export interface RoleInfo {
   model: string;
   max_tokens: number;
   temperature: number;
+  max_iterations: number;
   workspace_dir: string;
 }
 
 // Skill Types
 export interface SkillInfo {
   name: string;
-  assigned_roles: string[];
+  assigned_agents: string[];
 }
 
 export interface SkillDetail {
   name: string;
   content: string;
-  assigned_roles: string[];
+  assigned_agents: string[];
 }
 
 // Config Types

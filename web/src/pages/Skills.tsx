@@ -78,16 +78,16 @@ const Skills: React.FC = () => {
               <h3 className="text-lg font-semibold text-text">{skill.name}</h3>
               <div className="mt-2">
                 <p className="text-sm text-text-secondary">
-                  {t('roles.assignedTo')} {skill.assigned_roles.length} {t('roles.role')}
+                  {t('roles.assignedTo')} {skill.assigned_agents.length} {t('roles.role')}
                 </p>
-                {skill.assigned_roles.length > 0 && (
+                {skill.assigned_agents.length > 0 && (
                   <div className="flex flex-wrap gap-2 mt-2">
-                    {skill.assigned_roles.map((role) => (
+                    {skill.assigned_agents.map((agent) => (
                       <span
-                        key={role}
+                        key={agent}
                         className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs"
                       >
-                        {role}
+                        {agent}
                       </span>
                     ))}
                   </div>
@@ -111,15 +111,15 @@ const Skills: React.FC = () => {
               <div className="mb-4">
                 <h4 className="text-sm font-medium text-gray-700 mb-2">{t('skills.assignedRoles')}</h4>
                 <div className="flex flex-wrap gap-2">
-                  {selectedSkill.assigned_roles.map((role) => (
+                  {selectedSkill.assigned_agents.map((agent) => (
                     <span
-                      key={role}
+                      key={agent}
                       className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm"
                     >
-                      {role}
+                      {agent}
                     </span>
                   ))}
-                  {selectedSkill.assigned_roles.length === 0 && (
+                  {selectedSkill.assigned_agents.length === 0 && (
                     <span className="text-text-secondary text-sm">{t('skills.notAssigned')}</span>
                   )}
                 </div>

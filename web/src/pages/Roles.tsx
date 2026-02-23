@@ -1,21 +1,21 @@
 import React, { useEffect, useState } from 'react'
 import { apiClient } from '../api/client'
-import type { RoleInfo } from '../types/api'
+import type { AgentInfo } from '../types/api'
 import { useI18n } from '../i18n/I18nContext'
 
 const Roles: React.FC = () => {
-  const [roles, setRoles] = useState<RoleInfo[]>([])
+  const [agents, setAgents] = useState<AgentInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [selectedRole, setSelectedRole] = useState<RoleInfo | null>(null)
+  const [selectedAgent, setSelectedAgent] = useState<AgentInfo | null>(null)
   const { t } = useI18n()
 
   useEffect(() => {
-    const fetchRoles = async () => {
+    const fetchAgents = async () => {
       try {
         setLoading(true)
-        const data = await apiClient.getRoles()
-        setRoles(data)
+        const data = await apiClient.getAgents()
+        setAgents(data)
         setError(null)
       } catch (err) {
         setError(t('roles.failedToFetch'))
@@ -25,7 +25,7 @@ const Roles: React.FC = () => {
       }
     }
 
-    fetchRoles()
+    fetchAgents()
   }, [t])
 
   if (loading) {
@@ -53,52 +53,58 @@ const Roles: React.FC = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="space-y-4">
-          {roles.map((role) => (
+          {agents.map((agent) => (
             <div
-              key={role.name}
-              onClick={() => setSelectedRole(role)}
+              key={agent.name}
+              onClick={() => setSelectedAgent(agent)}
               className={`bg-surface rounded-lg shadow p-4 cursor-pointer transition-all hover:shadow-lg ${
-                selectedRole?.name === role.name ? 'ring-2 ring-primary' : ''
+                selectedAgent?.name === agent.name ? 'ring-2 ring-primary' : ''
               }`}
             >
-              <h3 className="text-lg font-semibold text-text">{role.name}</h3>
+              <h3 className="text-lg font-semibold text-text">{agent.name}</h3>
               <div className="mt-2 space-y-1 text-sm text-text-secondary">
-                <p>{t('roles.model')}: {role.provider}/{role.model}</p>
-                <p>{t('roles.skills')}: {role.skills.length}</p>
-                <p>{t('roles.tools')}: {role.tools.length}</p>
+                <p>{t('roles.role')}: {agent.role}</p>
+                <p>{t('roles.model')}: {agent.provider}/{agent.model}</p>
+                <p>{t('roles.skills')}: {agent.skills.length}</p>
+                <p>{t('roles.tools')}: {agent.tools.length}</p>
               </div>
             </div>
           ))}
         </div>
 
-        {selectedRole && (
+        {selectedAgent && (
           <div className="bg-surface rounded-lg shadow p-6">
             <h3 className="text-xl font-bold text-text mb-4">
-              {selectedRole.name}
+              {selectedAgent.name}
             </h3>
 
             <div className="space-y-4">
               <div>
+                <h4 className="text-sm font-medium text-text-secondary mb-2">{t('roles.role')}</h4>
+                <p className="text-text">{selectedAgent.role}</p>
+              </div>
+
+              <div>
                 <h4 className="text-sm font-medium text-text-secondary mb-2">{t('roles.systemPrompt')}</h4>
                 <div className="bg-background border border-border rounded p-3 text-sm text-text whitespace-pre-wrap max-h-48 overflow-y-auto">
-                  {selectedRole.system_prompt}
+                  {selectedAgent.system_prompt}
                 </div>
               </div>
 
               <div>
                 <h4 className="text-sm font-medium text-text-secondary mb-2">{t('roles.modelConfiguration')}</h4>
                 <div className="bg-background border border-border rounded p-3 space-y-1 text-sm text-text">
-                  <p><span className="font-medium">{t('roles.provider')}:</span> {selectedRole.provider}</p>
-                  <p><span className="font-medium">{t('roles.model')}:</span> {selectedRole.model}</p>
-                  <p><span className="font-medium">{t('roles.maxTokens')}:</span> {selectedRole.max_tokens}</p>
-                  <p><span className="font-medium">{t('roles.temperature')}:</span> {selectedRole.temperature}</p>
+                  <p><span className="font-medium">{t('roles.provider')}:</span> {selectedAgent.provider}</p>
+                  <p><span className="font-medium">{t('roles.model')}:</span> {selectedAgent.model}</p>
+                  <p><span className="font-medium">{t('roles.maxTokens')}:</span> {selectedAgent.max_tokens}</p>
+                  <p><span className="font-medium">{t('roles.temperature')}:</span> {selectedAgent.temperature}</p>
                 </div>
               </div>
 
               <div>
                 <h4 className="text-sm font-medium text-text-secondary mb-2">{t('roles.skills')}</h4>
                 <div className="flex flex-wrap gap-2">
-                  {selectedRole.skills.map((skill) => (
+                  {selectedAgent.skills.map((skill) => (
                     <span
                       key={skill}
                       className="px-3 py-1 bg-primary-muted text-primary rounded-full text-sm"
@@ -106,7 +112,7 @@ const Roles: React.FC = () => {
                       {skill}
                     </span>
                   ))}
-                  {selectedRole.skills.length === 0 && (
+                  {selectedAgent.skills.length === 0 && (
                     <span className="text-text-secondary text-sm">{t('roles.noSkills')}</span>
                   )}
                 </div>
@@ -115,7 +121,7 @@ const Roles: React.FC = () => {
               <div>
                 <h4 className="text-sm font-medium text-text-secondary mb-2">{t('roles.tools')}</h4>
                 <div className="flex flex-wrap gap-2">
-                  {selectedRole.tools.map((tool) => (
+                  {selectedAgent.tools.map((tool) => (
                     <span
                       key={tool}
                       className="px-3 py-1 bg-background border border-border text-text rounded-full text-sm"
@@ -123,7 +129,7 @@ const Roles: React.FC = () => {
                       {tool}
                     </span>
                   ))}
-                  {selectedRole.tools.length === 0 && (
+                  {selectedAgent.tools.length === 0 && (
                     <span className="text-text-secondary text-sm">{t('roles.noTools')}</span>
                   )}
                 </div>
@@ -132,7 +138,7 @@ const Roles: React.FC = () => {
               <div>
                 <h4 className="text-sm font-medium text-text-secondary mb-2">{t('roles.workspace')}</h4>
                 <code className="block bg-background border border-border rounded p-3 text-sm text-text font-mono">
-                  {selectedRole.workspace_dir}
+                  {selectedAgent.workspace_dir}
                 </code>
               </div>
             </div>
@@ -140,7 +146,7 @@ const Roles: React.FC = () => {
         )}
       </div>
 
-      {roles.length === 0 && (
+      {agents.length === 0 && (
         <div className="text-center py-12 text-text-secondary">
           {t('roles.noRoles')}
         </div>

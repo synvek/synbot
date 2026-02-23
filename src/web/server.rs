@@ -32,7 +32,7 @@ pub async fn start_web_server(config: WebConfig, state: AppState) -> Result<()> 
                     .route("/channels", web::get().to(api::get_channels))
                     .route("/cron", web::get().to(api::get_cron_jobs))
                     .route("/cron/{id}", web::patch().to(api::update_cron_job))
-                    .route("/roles", web::get().to(api::get_roles))
+                    .route("/agents", web::get().to(api::get_agents))
                     .route("/skills", web::get().to(api::get_skills))
                     .route("/skills/{name}", web::get().to(api::get_skill_by_name))
                     .route("/config", web::get().to(api::get_config))

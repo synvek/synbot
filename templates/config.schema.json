@@ -3,23 +3,6 @@
   "title": "Config",
   "type": "object",
   "properties": {
-    "agent": {
-      "default": {
-        "maxConcurrentSubagents": 5,
-        "maxTokens": 8192,
-        "maxToolIterations": 20,
-        "model": "claude-sonnet-4-5",
-        "provider": "claude-sonnet-4-5",
-        "roles": [],
-        "temperature": 0.699999988079071,
-        "workspace": "~/.synbot/workspace"
-      },
-      "allOf": [
-        {
-          "$ref": "#/definitions/AgentDefaults"
-        }
-      ]
-    },
     "appSandbox": {
       "description": "Optional app sandbox (isolates main process; platform-specific).",
       "default": null,
@@ -88,6 +71,35 @@
       "allOf": [
         {
           "$ref": "#/definitions/LogConfig"
+        }
+      ]
+    },
+    "mainAgent": {
+      "default": {
+        "agents": [
+          {
+            "maxIterations": null,
+            "maxTokens": null,
+            "model": null,
+            "name": "dev",
+            "provider": null,
+            "role": "dev",
+            "skills": [],
+            "temperature": null,
+            "tools": []
+          }
+        ],
+        "maxConcurrentSubagents": 5,
+        "maxTokens": 8192,
+        "maxToolIterations": 20,
+        "model": "claude-sonnet-4-5",
+        "provider": "anthropic",
+        "temperature": 0.699999988079071,
+        "workspace": "~/.synbot/workspace"
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/MainAgent"
         }
       ]
     },
@@ -200,7 +212,7 @@
             "fork bomb"
           ],
           "permissions": {
-            "approvalTimeoutSecs": 60,
+            "approvalTimeoutSecs": 300,
             "defaultLevel": "require_approval",
             "enabled": false,
             "rules": []
@@ -238,50 +250,70 @@
     }
   },
   "definitions": {
-    "AgentDefaults": {
+    "AgentConfig": {
+      "description": "Agent configuration: runtime entity that references exactly one role. Role is discovered from ~/.synbot/roles/ (subdir name = role name). All agents use the same workspace from MainAgent.",
       "type": "object",
+      "required": [
+        "name",
+        "role"
+      ],
       "properties": {
-        "maxConcurrentSubagents": {
-          "default": 5,
-          "type": "integer",
-          "format": "uint",
-          "minimum": 0.0
-        },
-        "maxTokens": {
-          "default": 8192,
-          "type": "integer",
+        "maxIterations": {
+          "type": [
+            "integer",
+            "null"
+          ],
           "format": "uint32",
           "minimum": 0.0
         },
-        "maxToolIterations": {
-          "default": 20,
-          "type": "integer",
+        "maxTokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
           "format": "uint32",
           "minimum": 0.0
         },
         "model": {
-          "default": "claude-sonnet-4-5",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
           "type": "string"
         },
         "provider": {
-          "default": "anthropic",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "role": {
+          "description": "Role name (must match a subdir under ~/.synbot/roles/, e.g. main, dev).",
           "type": "string"
         },
-        "roles": {
+        "skills": {
           "default": [],
           "type": "array",
           "items": {
-            "$ref": "#/definitions/RoleConfig"
+            "type": "string"
           }
         },
         "temperature": {
-          "default": 0.699999988079071,
-          "type": "number",
+          "type": [
+            "number",
+            "null"
+          ],
           "format": "float"
         },
-        "workspace": {
-          "default": "~/.synbot/workspace",
-          "type": "string"
+        "tools": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       }
     },
@@ -566,7 +598,7 @@
         },
         "permissions": {
           "default": {
-            "approvalTimeoutSecs": 60,
+            "approvalTimeoutSecs": 300,
             "defaultLevel": "require_approval",
             "enabled": false,
             "rules": []
@@ -773,6 +805,65 @@
         }
       }
     },
+    "MainAgent": {
+      "type": "object",
+      "properties": {
+        "agents": {
+          "default": [
+            {
+              "maxIterations": null,
+              "maxTokens": null,
+              "model": null,
+              "name": "dev",
+              "provider": null,
+              "role": "dev",
+              "skills": [],
+              "temperature": null,
+              "tools": []
+            }
+          ],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AgentConfig"
+          }
+        },
+        "maxConcurrentSubagents": {
+          "default": 5,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "maxTokens": {
+          "default": 8192,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "maxToolIterations": {
+          "default": 20,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "model": {
+          "default": "claude-sonnet-4-5",
+          "type": "string"
+        },
+        "provider": {
+          "default": "anthropic",
+          "type": "string"
+        },
+        "temperature": {
+          "default": 0.699999988079071,
+          "type": "number",
+          "format": "float"
+        },
+        "workspace": {
+          "default": "~/.synbot/workspace",
+          "type": "string"
+        }
+      }
+    },
     "MemoryCompressionConfig": {
       "type": "object",
       "properties": {
@@ -837,7 +928,7 @@
       "properties": {
         "approvalTimeoutSecs": {
           "description": "Approval request timeout (seconds)",
-          "default": 60,
+          "default": 300,
           "type": "integer",
           "format": "uint64",
           "minimum": 0.0
@@ -990,83 +1081,6 @@
               "$ref": "#/definitions/ProviderEntry"
             }
           ]
-        }
-      }
-    },
-    "RoleConfig": {
-      "description": "Configuration for a single role.",
-      "type": "object",
-      "required": [
-        "name"
-      ],
-      "properties": {
-        "maxIterations": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint32",
-          "minimum": 0.0
-        },
-        "maxTokens": {
-          "type": [
-            "integer",
-            "null"
-          ],
-          "format": "uint32",
-          "minimum": 0.0
-        },
-        "model": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "name": {
-          "type": "string"
-        },
-        "provider": {
-          "description": "Optional; when unset, values are inherited from AgentDefaults.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "reference": {
-          "description": "Subdirectory name under templates/roles; used to build system prompt from AGENTS.md, SOUL.md, TOOLS.md.",
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "skills": {
-          "default": [],
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "systemPrompt": {
-          "description": "Deprecated: use `reference` instead; system prompt is generated from templates/roles/{reference} md files.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "temperature": {
-          "type": [
-            "number",
-            "null"
-          ],
-          "format": "float"
-        },
-        "tools": {
-          "default": [],
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
         }
       }
     },
@@ -1396,7 +1410,7 @@
               "fork bomb"
             ],
             "permissions": {
-              "approvalTimeoutSecs": 60,
+              "approvalTimeoutSecs": 300,
               "defaultLevel": "require_approval",
               "enabled": false,
               "rules": []

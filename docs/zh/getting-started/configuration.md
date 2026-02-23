@@ -33,7 +33,7 @@ cargo run --example generate_config_schema --features schema
 cargo run --example generate_config_schema --features schema -- -o config.schema.json
 ```
 
-This requires the optional `schema` feature. The generated schema describes all top-level keys (`channels`, `providers`, `agent`, `memory`, `tools`, `web`, `log`, `heartbeat`, `cron`, `appSandbox`, `toolSandbox`, etc.) and their nested structure.
+需要启用可选的 `schema` 特性。生成的 schema 描述所有顶层键（`channels`、`providers`、`mainAgent`、`memory`、`tools`、`web`、`log`、`heartbeat`、`cron`、`appSandbox`、`toolSandbox` 等）及其嵌套结构。
 
 
 ## 配置结构
@@ -44,7 +44,7 @@ This requires the optional `schema` feature. The generated schema describes all 
 {
   "channels": { "telegram": [], "discord": [], "feishu": [] },
   "providers": {},
-  "agent": {},
+  "mainAgent": {},
   "memory": {},
   "tools": {},
   "web": {},
@@ -76,7 +76,7 @@ This requires the optional `schema` feature. The generated schema describes all 
   "providers": {
     "anthropic": { "apiKey": "YOUR_ANTHROPIC_API_KEY" }
   },
-  "agent": {
+  "mainAgent": {
     "provider": "anthropic",
     "model": "claude-sonnet-4-5"
   }
@@ -233,11 +233,13 @@ This requires the optional `schema` feature. The generated schema describes all 
 
 ## 代理配置
 
-### 默认代理设置
+配置键为 **`mainAgent`**（JSON 中为 camelCase）。**主 agent 是隐式的**：始终存在，使用角色 `main`，其工作区、provider、model 等均来自 `mainAgent`。**不要在** `agents` 列表中定义名为 `main` 的 agent；名称 `main` 保留，以便 `@@main` 和无目标消息唯一解析到该 agent。
+
+### mainAgent 结构
 
 ```json
 {
-  "agent": {
+  "mainAgent": {
     "workspace": "~/.synbot/workspace",
     "provider": "anthropic",
     "model": "claude-3-5-sonnet-20241022",
@@ -245,41 +247,38 @@ This requires the optional `schema` feature. The generated schema describes all 
     "temperature": 0.7,
     "maxToolIterations": 20,
     "maxConcurrentSubagents": 5,
-    "roles": []
+    "agents": [
+      { "name": "dev", "role": "dev" }
+    ]
   }
 }
 ```
 
-### 角色配置
+### 角色（来自文件系统）
 
-您可以定义具有不同系统提示的多个角色：
+**角色** 由文件系统自动发现。`~/.synbot/roles/` 下每个子目录（如 `main`、`dev`）即一个角色；该角色的系统提示由该目录下的 AGENTS.md、SOUL.md、TOOLS.md 构建。运行 `synbot onboard` 可创建默认角色目录（`main` 与 `dev`）。配置中**没有** `roles` 数组。
+
+### Agents
+
+- **main** agent 是隐式的：始终使用角色 `main`，工作区、provider、model 等来自 `mainAgent`。无 `@@` 的消息由该 agent 处理。
+- **`mainAgent.agents`** 仅列出**额外**的 agent。每项有 `name`、`role`（须对应 `~/.synbot/roles/` 下的角色子目录）及可选覆盖（provider、model、maxTokens、temperature、maxIterations、skills、tools）。Agent 名称必须唯一；**不得**在此列表中定义名为 `main` 的 agent。
+- 使用 `@@agentName 内容` 指定 agent（如 `@@dev`）。每个 agent 名称对应唯一 agent，便于指令正确解析。
+
+示例：增加使用 dev 角色的 agent：
 
 ```json
 {
-  "agent": {
-    "roles": [
-      {
-        "name": "assistant",
-        "systemPrompt": "你是一个有用的助手...",
-        "skills": ["filesystem", "web"],
-        "tools": ["read_file", "write_file", "web_search"],
-        "provider": "anthropic",
-        "model": "claude-3-5-sonnet-20241022",
-        "maxTokens": 4096,
-        "temperature": 0.7,
-        "maxIterations": 10
-      },
-      {
-        "name": "coder",
-        "systemPrompt": "你是一个编程专家...",
-        "skills": ["filesystem", "shell"],
-        "tools": ["read_file", "write_file", "execute_command"],
-        "provider": "openai",
-        "model": "gpt-4",
-        "maxTokens": 8192,
-        "temperature": 0.3,
-        "maxIterations": 15
-      }
+  "mainAgent": {
+    "workspace": "~/.synbot/workspace",
+    "provider": "anthropic",
+    "model": "claude-3-5-sonnet-20241022",
+    "maxTokens": 8192,
+    "temperature": 0.7,
+    "maxToolIterations": 20,
+    "maxConcurrentSubagents": 5,
+    "agents": [
+      { "name": "dev", "role": "dev" },
+      { "name": "helper", "role": "dev", "model": "gpt-4", "maxTokens": 4096 }
     ]
   }
 }
@@ -638,7 +637,7 @@ This requires the optional `schema` feature. The generated schema describes all 
       "apiBase": "http://localhost:11434"
     }
   },
-  "agent": {
+  "mainAgent": {
     "workspace": "~/.synbot/workspace",
     "provider": "anthropic",
     "model": "claude-3-5-sonnet-20241022",
@@ -646,18 +645,8 @@ This requires the optional `schema` feature. The generated schema describes all 
     "temperature": 0.7,
     "maxToolIterations": 20,
     "maxConcurrentSubagents": 5,
-    "roles": [
-      {
-        "name": "assistant",
-        "systemPrompt": "你是一个有用的助手，可以帮助处理各种任务，包括文件管理、网页搜索和命令执行。",
-        "skills": ["filesystem", "web", "shell"],
-        "tools": ["read_file", "write_file", "web_search", "execute_command"],
-        "provider": "anthropic",
-        "model": "claude-3-5-sonnet-20241022",
-        "maxTokens": 4096,
-        "temperature": 0.7,
-        "maxIterations": 10
-      }
+    "agents": [
+      { "name": "dev", "role": "dev" }
     ]
   },
   "tools": {

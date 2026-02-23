@@ -37,7 +37,7 @@ cargo run --example generate_config_schema --features schema
 cargo run --example generate_config_schema --features schema -- -o config.schema.json
 ```
 
-This requires the optional `schema` feature. The generated schema describes all top-level keys (`channels`, `providers`, `agent`, `memory`, `tools`, `web`, `log`, `heartbeat`, `cron`, `appSandbox`, `toolSandbox`, etc.) and their nested structure.
+This requires the optional `schema` feature. The generated schema describes all top-level keys (`channels`, `providers`, `mainAgent`, `memory`, `tools`, `web`, `log`, `heartbeat`, `cron`, `appSandbox`, `toolSandbox`, etc.) and their nested structure.
 
 ## Configuration Structure
 
@@ -47,7 +47,7 @@ The configuration file has the following structure (all top-level keys optional 
 {
   "channels": { "telegram": [], "discord": [], "feishu": [] },
   "providers": {},
-  "agent": {},
+  "mainAgent": {},
   "memory": {},
   "tools": {},
   "web": {},
@@ -79,7 +79,7 @@ Here's a minimal configuration to get started. Channels are arrays; one entry pe
   "providers": {
     "anthropic": { "apiKey": "YOUR_ANTHROPIC_API_KEY" }
   },
-  "agent": {
+  "mainAgent": {
     "provider": "anthropic",
     "model": "claude-sonnet-4-5"
   }
@@ -236,11 +236,13 @@ Channels are configured as **arrays**: you can run multiple bots per platform (e
 
 ## Agent Configuration
 
-### Default Agent Settings
+Configuration key: **`mainAgent`** (camelCase in JSON). The main agent is **implicit**: it always exists, uses role `main`, and takes its settings (workspace, provider, model, etc.) from `mainAgent`. You do **not** define an agent named `main` in the `agents` list; the name `main` is reserved so that `@@main` and untargeted messages resolve to exactly one agent.
+
+### mainAgent structure
 
 ```json
 {
-  "agent": {
+  "mainAgent": {
     "workspace": "~/.synbot/workspace",
     "provider": "anthropic",
     "model": "claude-3-5-sonnet-20241022",
@@ -248,41 +250,38 @@ Channels are configured as **arrays**: you can run multiple bots per platform (e
     "temperature": 0.7,
     "maxToolIterations": 20,
     "maxConcurrentSubagents": 5,
-    "roles": []
+    "agents": [
+      { "name": "dev", "role": "dev" }
+    ]
   }
 }
 ```
 
-### Role Configuration
+### Roles (from filesystem)
 
-You can define multiple roles with different system prompts:
+**Roles** are discovered automatically from the filesystem. Each subdirectory under `~/.synbot/roles/` (e.g. `main`, `dev`) is a role; the system prompt for that role is built from `AGENTS.md`, `SOUL.md`, and `TOOLS.md` inside that directory. Run `synbot onboard` to create the default role directories (`main` and `dev`). There is no `roles` array in config.
+
+### Agents
+
+- The **main** agent is implicit: it always uses role `main` and the workspace/provider/model/etc. from `mainAgent`. Untargeted messages (no `@@`) go to this agent.
+- **`mainAgent.agents`** lists **additional** agents only. Each has `name`, `role` (must match a role subdir under `~/.synbot/roles/`), and optional overrides (provider, model, maxTokens, temperature, maxIterations, skills, tools). Agent names must be unique; **you must not** define an agent named `main` in this list.
+- Use `@@agentName content` to address a specific agent (e.g. `@@dev`). Each agent name maps to exactly one agent so directives resolve correctly.
+
+Example with an extra agent using the dev role:
 
 ```json
 {
-  "agent": {
-    "roles": [
-      {
-        "name": "assistant",
-        "systemPrompt": "You are a helpful assistant...",
-        "skills": ["filesystem", "web"],
-        "tools": ["read_file", "write_file", "web_search"],
-        "provider": "anthropic",
-        "model": "claude-3-5-sonnet-20241022",
-        "maxTokens": 4096,
-        "temperature": 0.7,
-        "maxIterations": 10
-      },
-      {
-        "name": "coder",
-        "systemPrompt": "You are a programming expert...",
-        "skills": ["filesystem", "shell"],
-        "tools": ["read_file", "write_file", "execute_command"],
-        "provider": "openai",
-        "model": "gpt-4",
-        "maxTokens": 8192,
-        "temperature": 0.3,
-        "maxIterations": 15
-      }
+  "mainAgent": {
+    "workspace": "~/.synbot/workspace",
+    "provider": "anthropic",
+    "model": "claude-3-5-sonnet-20241022",
+    "maxTokens": 8192,
+    "temperature": 0.7,
+    "maxToolIterations": 20,
+    "maxConcurrentSubagents": 5,
+    "agents": [
+      { "name": "dev", "role": "dev" },
+      { "name": "helper", "role": "dev", "model": "gpt-4", "maxTokens": 4096 }
     ]
   }
 }
@@ -509,7 +508,7 @@ For selective behavior (some commands allowed without approval, some require app
 }
 ```
 
-The `mainChannel` specifies which channel to use for multi-agent features when roles, groups, or topics are configured.
+The `mainChannel` specifies which channel to use for multi-agent features when multiple agents, groups, or topics are configured.
 
 ## Memory Configuration
 
@@ -641,7 +640,7 @@ Here's a complete configuration example:
       "apiBase": "http://localhost:11434"
     }
   },
-  "agent": {
+  "mainAgent": {
     "workspace": "~/.synbot/workspace",
     "provider": "anthropic",
     "model": "claude-3-5-sonnet-20241022",
@@ -649,18 +648,8 @@ Here's a complete configuration example:
     "temperature": 0.7,
     "maxToolIterations": 20,
     "maxConcurrentSubagents": 5,
-    "roles": [
-      {
-        "name": "assistant",
-        "systemPrompt": "You are a helpful assistant that can help with various tasks including file management, web search, and command execution.",
-        "skills": ["filesystem", "web", "shell"],
-        "tools": ["read_file", "write_file", "web_search", "execute_command"],
-        "provider": "anthropic",
-        "model": "claude-3-5-sonnet-20241022",
-        "maxTokens": 4096,
-        "temperature": 0.7,
-        "maxIterations": 10
-      }
+    "agents": [
+      { "name": "dev", "role": "dev" }
     ]
   },
   "tools": {

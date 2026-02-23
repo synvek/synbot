@@ -44,26 +44,27 @@ impl ContextBuilder {
         }
     }
 
-    /// Build the full system prompt.
+    /// Build the full system prompt (identity + bootstrap from workspace + memory + skills).
     pub fn build_system_prompt(&self) -> String {
+        self.build_system_prompt_with_role_prompt(&self.load_bootstrap_files())
+    }
+
+    /// Build the full system prompt using a pre-built role prompt instead of loading bootstrap from workspace.
+    /// Used when all agents get their behavior from a role (identity + role_prompt + memory + skills).
+    pub fn build_system_prompt_with_role_prompt(&self, role_prompt: &str) -> String {
         let mut parts = Vec::new();
 
-        // Identity header
         parts.push(self.identity_section());
 
-        // Bootstrap files
-        let bootstrap = self.load_bootstrap_files();
-        if !bootstrap.is_empty() {
-            parts.push(bootstrap);
+        if !role_prompt.trim().is_empty() {
+            parts.push(role_prompt.trim().to_string());
         }
 
-        // Memory
         let mem = self.memory.get_memory_context();
         if !mem.is_empty() {
             parts.push(format!("# Memory\n\n{}", mem));
         }
 
-        // Skills summary
         let skills = self.skills.build_skills_summary();
         if !skills.is_empty() {
             parts.push(format!("# Skills\n\n{}", skills));

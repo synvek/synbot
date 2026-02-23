@@ -94,8 +94,8 @@ pub async fn cmd_start() -> Result<()> {
 
     let ws = config::workspace_path(&cfg);
 
-    let model = cfg.agent.model.clone();
-    let provider_name = cfg.agent.provider.clone();
+    let model = cfg.main_agent.model.clone();
+    let provider_name = cfg.main_agent.provider.clone();
     let (api_key, api_base) = resolve_provider(&cfg, &provider_name);
     if api_key.is_empty() {
         anyhow::bail!(
@@ -115,7 +115,7 @@ pub async fn cmd_start() -> Result<()> {
     let subagent_mgr = std::sync::Arc::new(
         tokio::sync::Mutex::new(
             crate::agent::subagent::SubagentManager::new(
-                cfg.agent.max_concurrent_subagents,
+                cfg.main_agent.max_concurrent_subagents,
             ),
         ),
     );
@@ -164,12 +164,24 @@ pub async fn cmd_start() -> Result<()> {
         shared_session_state.clone(),
     ));
 
-    let mut role_registry = crate::agent::role_registry::RoleRegistry::new();
     let roles_dir = config::roles_dir();
-    role_registry.load_from_config(&cfg.agent.roles, &cfg.agent, &ws, &roles_dir)?;
+    let mut role_registry = crate::agent::role_registry::RoleRegistry::new();
+    if let Err(e) = role_registry.load_from_dirs(&roles_dir) {
+        tracing::warn!(error = %e, "Failed to load role registry from config");
+    }
     let role_registry = std::sync::Arc::new(role_registry);
 
-    // Ensure memory dirs and MEMORY.md exist under ~/.synbot/memory/{agentId} (main + each role)
+    let mut agent_registry = crate::agent::agent_registry::AgentRegistry::new();
+    if let Err(e) = agent_registry.load_from_config(
+        &cfg.main_agent,
+        &role_registry,
+        &ws,
+    ) {
+        tracing::warn!(error = %e, "Failed to load agent registry from config");
+    }
+    let agent_registry = std::sync::Arc::new(agent_registry);
+
+    // Ensure memory dirs and MEMORY.md exist under ~/.synbot/memory/{agentId} (main + each agent)
     crate::agent::memory::ensure_memory_dirs(&cfg);
 
     // Create main agent's SQLite index file so it exists and can be populated by reindex later
@@ -199,11 +211,12 @@ pub async fn cmd_start() -> Result<()> {
         std::sync::Arc::clone(&completion_model),
         ws.clone(),
         tools,
-        cfg.agent.max_tool_iterations,
+        cfg.main_agent.max_tool_iterations,
         inbound_rx,
         bus.outbound_tx_clone(),
         &cfg,
         shared_session_state.clone(),
+        std::sync::Arc::clone(&agent_registry),
         tool_sandbox_enabled,
     )
     .await;
@@ -304,7 +317,7 @@ pub async fn cmd_start() -> Result<()> {
             std::sync::Arc::new(cfg.clone()),
             shared_session_state.session_manager.clone(),
             cron_service,
-            role_registry,
+            agent_registry,
             skills_loader,
             inbound_tx.clone(),
             bus.outbound_tx_clone(),

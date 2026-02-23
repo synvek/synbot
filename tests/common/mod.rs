@@ -37,7 +37,7 @@ pub async fn create_test_app_state_with_approval(
     outbound_tx: tokio::sync::broadcast::Sender<synbot::bus::OutboundMessage>,
     approval_manager: std::sync::Arc<synbot::tools::approval::ApprovalManager>,
 ) -> synbot::web::state::AppState {
-    use synbot::agent::role_registry::RoleRegistry;
+    use synbot::agent::agent_registry::AgentRegistry;
     use synbot::agent::session_manager::SessionManager;
     use synbot::agent::skills::SkillsLoader;
     use synbot::config::Config;
@@ -46,19 +46,19 @@ pub async fn create_test_app_state_with_approval(
     use std::sync::Arc;
     use tokio::sync::RwLock;
     use std::path::PathBuf;
-    
+
     let config = Arc::new(Config::default());
     let session_manager = Arc::new(RwLock::new(SessionManager::new()));
     let cron_service = Arc::new(RwLock::new(CronService::new(PathBuf::from("test_cron.json"))));
-    let role_registry = Arc::new(RoleRegistry::new());
+    let agent_registry = Arc::new(AgentRegistry::new());
     let skills_loader = Arc::new(SkillsLoader::new(&PathBuf::from(".")));
     let log_buffer = Arc::new(RwLock::new(LogBuffer::new(1000)));
-    
+
     synbot::web::state::AppState::new(
         config,
         session_manager,
         cron_service,
-        role_registry,
+        agent_registry,
         skills_loader,
         inbound_tx,
         outbound_tx,
