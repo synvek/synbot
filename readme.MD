@@ -2,8 +2,8 @@
   <img src="docs/logo.png" alt="Synbot" width="220" />
 </p>
 
-<h1 align="center">Synbot </h1>
-<h3 align="center">Personal AI bot with performance and safety</h1>
+<h1 align="center">Synbot</h1>
+<h3 align="center">Personal AI bot with performance and safety</h3>
 
 **Synbot** is a personal AI assistant in Rust inspired by [nanobot](https://github.com/HKUDS/nanobot) (in Python) and [Openclaw](https://github.com/openclaw/openclaw). 
 
@@ -21,7 +21,9 @@
 
 - Support Windows, Macos, Linux with Intel x86 and ARM64 architecture
 
-- Multi agents support
+- Multi agents support in parallel
+
+- Multi workspace support
 
 - Tool execution with approval
 
@@ -30,8 +32,8 @@
 | Platform | App Sandbox | Tool Sandbox |
 |------|---------|---------|
 | Windows | AppContainer | Docker & gVisor  |
-| Linux | nono.sh(Landlock) | Docker & gVisorr |
-| macOS | nono.sh(Seatbelt) | Docker & gVisor |
+| Linux | nono.sh (Landlock) | Docker & gVisor |
+| macOS | nono.sh (Seatbelt) | Docker & gVisor |
 
 ## Install
 
@@ -68,11 +70,19 @@ Check the [Releases page](https://github.com/synbot/synbot/releases) for pre-bui
 synbot onboard
 ```
 
+For a custom workspace root, use `--root-dir`:
+
+```bash
+synbot --root-dir /path/to/workspace onboard
+```
+
 ### Configuration
 
-Please check configurationo on ~/.synbot/configuration.
+See configuration under `~/.synbot/` (or under the root directory when using `--root-dir`).
 
-Minimal configuration
+Minimal configuration example:
+
+```json
 {
   "channels": {
     "discord": [
@@ -82,13 +92,14 @@ Minimal configuration
   "providers": {
     "openrouter": { "apiKey": "Your openrouter key" }
   },
-  "agent": {
+  "mainAgent": {
     "provider": "openrouter",
     "model": "openai/gpt-5.2"
   }
 }
+```
 
-More configuration please check docs
+For more options see the [documentation](https://github.com/synbot/synbot/tree/main/docs).
 
 ### Basic Startup (no sandbox)
 
@@ -146,7 +157,7 @@ On Windows, run `synbot sandbox setup` once as Administrator to add network rule
 
 ### Skills
 
-- Put skills under ~/.synbot/workspace/skills
+- Put skills under `~/.synbot/skills/` (or under `skills/` in the root directory when using `--root-dir`)
 
 **Important**: Synbot is currently in research & experiment stage. Please run in a sandbox environment and be careful when trying it out.
 
