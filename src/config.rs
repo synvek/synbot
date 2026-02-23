@@ -96,6 +96,34 @@ pub struct FeishuConfig {
     pub show_tool_calls: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct SlackConfig {
+    /// Unique channel name (default "slack").
+    #[serde(default = "default_slack_name")]
+    pub name: String,
+    #[serde(default)]
+    pub enabled: bool,
+    /// Bot token (xoxb-...) for Web API (e.g. chat.postMessage). Required for sending messages.
+    #[serde(default)]
+    pub token: String,
+    /// App-level token (xapp-...) for Socket Mode connection. Required for receiving events.
+    #[serde(default)]
+    pub app_token: String,
+    #[serde(default)]
+    pub allowlist: Vec<AllowlistEntry>,
+    /// When true (default), only chats in allowlist are accepted; when false, allowlist is not checked.
+    #[serde(default = "default_true")]
+    pub enable_allowlist: bool,
+    /// When enable_allowlist is false, bot user id used for channel @ check (optional).
+    #[serde(default)]
+    pub group_my_name: Option<String>,
+    /// When true (default), push tool execution progress to this channel.
+    #[serde(default = "default_true")]
+    pub show_tool_calls: bool,
+}
+
 fn default_telegram_name() -> String {
     "telegram".into()
 }
@@ -104,6 +132,9 @@ fn default_discord_name() -> String {
 }
 fn default_feishu_name() -> String {
     "feishu".into()
+}
+fn default_slack_name() -> String {
+    "slack".into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -116,6 +147,8 @@ pub struct ChannelsConfig {
     pub discord: Vec<DiscordConfig>,
     #[serde(default)]
     pub feishu: Vec<FeishuConfig>,
+    #[serde(default)]
+    pub slack: Vec<SlackConfig>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1406,6 +1439,31 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
             });
         }
     }
+    for (i, c) in config.channels.slack.iter().enumerate() {
+        if c.enabled {
+            if c.token.is_empty() {
+                errors.push(ValidationError {
+                    field: format!("channels.slack[{}].token", i),
+                    value: String::new(),
+                    constraint: "must be non-empty when enabled (use Bot token xoxb-...)".into(),
+                });
+            }
+            if c.app_token.is_empty() {
+                errors.push(ValidationError {
+                    field: format!("channels.slack[{}].appToken", i),
+                    value: String::new(),
+                    constraint: "must be non-empty when enabled (use App-level token xapp-... for Socket Mode)".into(),
+                });
+            }
+        }
+        if !c.name.is_empty() && !all_channel_names.insert(c.name.clone()) {
+            errors.push(ValidationError {
+                field: format!("channels.slack[{}].name", i),
+                value: c.name.clone(),
+                constraint: "channel name must be globally unique".into(),
+            });
+        }
+    }
 
     // --- Collect enabled channel names for main_channel validation ---
     let enabled_channels: Vec<String> = {
@@ -1421,6 +1479,11 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
             }
         }
         for c in &config.channels.feishu {
+            if c.enabled && !c.name.is_empty() {
+                ch.push(c.name.clone());
+            }
+        }
+        for c in &config.channels.slack {
             if c.enabled && !c.name.is_empty() {
                 ch.push(c.name.clone());
             }

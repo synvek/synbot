@@ -1,4 +1,4 @@
-﻿---
+---
 title: Channels Guide
 description: How to configure and use messaging channels in Synbot
 ---
@@ -17,9 +17,9 @@ Synbot supports multiple messaging channels, allowing you to interact with the A
 - **Telegram**: Popular messaging platform with bot API
 - **Discord**: Community chat platform with rich features
 - **Feishu (椋炰功)**: Enterprise messaging platform popular in China
+- **Slack**: Team chat with **Socket Mode** (no public URL required)
 
 ### Planned Support
-- Slack
 - WeChat (寰俊)
 - Matrix
 - Email
@@ -330,6 +330,60 @@ Feishu uses event-driven architecture:
 2. **Rate Limiting**: Feishu has rate limits (100 requests per 10 seconds per app)
 3. **Error Handling**: Handle network errors and retry logic
 4. **Logging**: Log all incoming events for debugging
+
+## Slack (Socket Mode)
+
+Synbot uses **Slack Socket Mode**, so you do not need a public URL or ngrok. The bot connects to Slack over WebSockets using an **App-level token** and sends messages with the **Bot token**.
+
+### Getting Started with Slack
+
+1. **Create a Slack App**:
+   - Go to [Slack API](https://api.slack.com/apps) → Create New App → From scratch
+   - Enable **Socket Mode** under Settings → Socket Mode
+   - Create an **App-level token** (starts with `xapp-`) with `connections:write` scope
+   - Under OAuth & Permissions, install the app to your workspace and get the **Bot User OAuth Token** (starts with `xoxb-`)
+
+2. **Subscribe to events** (Event Subscriptions):
+   - Enable **Subscribe to bot events**
+   - Add e.g. `message.channels`, `message.im`, `app_mention` so the bot receives messages
+
+3. **Configure Synbot**:
+   ```json
+   {
+     "channels": {
+       "slack": [
+         {
+           "name": "slack",
+           "enabled": true,
+           "token": "xoxb-YOUR_BOT_TOKEN",
+           "appToken": "xapp-YOUR_APP_LEVEL_TOKEN",
+           "allowlist": [],
+           "enableAllowlist": false
+         }
+       ]
+     }
+   }
+   ```
+   **Important:** Do not swap the two tokens. If you see `not_allowed_token_type` in logs, you likely put the Bot token in `appToken` or the App-level token in `token`.
+   - **token** = **Bot User OAuth Token** (`xoxb-...`) from **OAuth & Permissions** → used to send messages.
+   - **appToken** = **App-level token** (`xapp-...`) from **Basic Information → App-Level Tokens** (scope `connections:write`) → used for Socket Mode connection only.
+
+4. **Start Synbot**:
+   ```bash
+   synbot start
+   ```
+
+- **token**: Bot token (`xoxb-...`) for sending messages (e.g. `chat.postMessage`).
+- **appToken**: App-level token (`xapp-...`) for the Socket Mode WebSocket connection.
+- **allowlist**: Optional; when `enableAllowlist` is true, only listed `chatId`s (channel or user IDs) are accepted.
+- **groupMyName**: Optional bot user ID (e.g. `U01234ABCD`) for requiring @mentions in channels.
+
+**Error `not_allowed_token_type`:** You have the two tokens reversed. Use `token` = Bot token (xoxb-) and `appToken` = App-level token (xapp-). Create the App-level token under **Basic Information → App-Level Tokens** with scope `connections:write`.
+
+**If the bot does not respond:**
+- Ensure **Socket Mode** is enabled in the Slack app (Settings → Socket Mode).
+- Under **Event Subscriptions**, enable **Subscribe to bot events** and add at least: `message.channels`, `message.im`, `app_mention`.
+- Run with debug logs: `RUST_LOG=synbot::channels::slack=info,slack_morphism=debug synbot start` to see connection and incoming events.
 
 ## Multi-Channel Configuration
 

@@ -302,6 +302,31 @@ pub async fn cmd_start() -> Result<()> {
         });
     }
 
+    for slack_cfg in &cfg.channels.slack {
+        if !slack_cfg.enabled {
+            continue;
+        }
+        let slack_cfg = slack_cfg.clone();
+        let slack_inbound = inbound_tx.clone();
+        let slack_outbound = bus.subscribe_outbound();
+        let show_tool_calls = cfg.show_tool_calls && slack_cfg.show_tool_calls;
+        tokio::spawn(async move {
+            match crate::channels::slack::SlackChannel::new(
+                slack_cfg,
+                slack_inbound,
+                slack_outbound,
+                show_tool_calls,
+            ) {
+                Ok(mut ch) => {
+                    if let Err(e) = ch.start().await {
+                        tracing::error!("Slack channel error: {e:#}");
+                    }
+                }
+                Err(e) => tracing::error!("Slack channel init error: {e:#}"),
+            }
+        });
+    }
+
     // Start web server if enabled
     if cfg.web.enabled {
         let mut web_config = cfg.web.clone();

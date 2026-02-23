@@ -463,6 +463,13 @@
           "items": {
             "$ref": "#/definitions/TelegramConfig"
           }
+        },
+        "slack": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SlackConfig"
+          }
         }
       }
     },
@@ -562,6 +569,55 @@
           "type": "boolean"
         },
         "token": {
+          "default": "",
+          "type": "string"
+        }
+      }
+    },
+    "SlackConfig": {
+      "type": "object",
+      "properties": {
+        "allowlist": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AllowlistEntry"
+          }
+        },
+        "appToken": {
+          "description": "App-level token (xapp-...) for Socket Mode connection. Required when enabled.",
+          "default": "",
+          "type": "string"
+        },
+        "enableAllowlist": {
+          "description": "When true (default), only chats in allowlist are accepted; when false, allowlist is not checked.",
+          "default": true,
+          "type": "boolean"
+        },
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "groupMyName": {
+          "description": "When enable_allowlist is false, bot user id used for channel @ check (optional).",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "Unique channel name (default \"slack\").",
+          "default": "slack",
+          "type": "string"
+        },
+        "showToolCalls": {
+          "description": "When true (default), push tool execution progress to this channel.",
+          "default": true,
+          "type": "boolean"
+        },
+        "token": {
+          "description": "Bot token (xoxb-...) for Web API (e.g. chat.postMessage). Required when enabled.",
           "default": "",
           "type": "string"
         }
