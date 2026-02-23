@@ -9,9 +9,6 @@
 
 **It is still in experiment stage, be careful to try, please run in sandbox**
 
-## News
-
-- 2026-02-22 Initial publish. Welcome to try.
 
 ## Features
 
