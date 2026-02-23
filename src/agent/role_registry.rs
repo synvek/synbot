@@ -16,7 +16,7 @@ pub fn build_system_prompt_from_role_dir(roles_dir: &Path, reference: &str) -> S
     if !role_dir.is_dir() {
         return String::new();
     }
-    let files = ["AGENTS.md", "SOUL.md", "TOOLS.md"];
+    let files = ["AGENTS.md", "SOUL.md", "TOOLS.md", "USER.md"];
     let mut parts = Vec::new();
     for name in &files {
         let path = role_dir.join(name);
