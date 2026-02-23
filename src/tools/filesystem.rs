@@ -1,7 +1,7 @@
 //! File-system tools: read_file, write_file, edit_file, list_dir.
 //!
-//! When a role runs, paths are restricted to that agent's workspace and memory dir
-//! via the tool execution context (~/.synbot/memory/{agent_id} and workspace/roles/{role}).
+//! When an agent runs, paths are restricted to that agent's workspace and memory dir
+//! via the tool execution context (~/.synbot/memory/{agent_id} and workspace or workspace/agents/{name}).
 
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -25,11 +25,16 @@ fn path_for_prefix_check(p: &Path) -> PathBuf {
 
 /// Resolve path and enforce scope: when restrict is true, path must be under
 /// the current agent's allowed roots (workspace and memory_dir from context, or default workspace).
+/// When a tool context is set (e.g. @@dev), relative paths are resolved against that agent's
+/// workspace, not the tool's registered workspace (which may be main's).
 fn resolve_path(path: &str, workspace: &Path, restrict: bool) -> anyhow::Result<PathBuf> {
+    let effective_workspace: PathBuf = context::current_allowed_roots()
+        .map(|(ctx_ws, _)| ctx_ws)
+        .unwrap_or_else(|| workspace.to_path_buf());
     let p = if Path::new(path).is_absolute() {
         PathBuf::from(path)
     } else {
-        workspace.join(path)
+        effective_workspace.join(path)
     };
     // For new files (e.g. write_file) canonicalize() fails; use p so scope check still works
     let canonical = p.canonicalize().unwrap_or_else(|_| p.clone());
