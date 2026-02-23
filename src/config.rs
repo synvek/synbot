@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::{OnceLock, RwLock};
 
 // ---------------------------------------------------------------------------
 // Channel configs
@@ -1523,10 +1524,38 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
 // Paths & loading
 // ---------------------------------------------------------------------------
 
+/// Per-process root directory override (set from CLI --root-dir). When set, config_dir() returns this path
+/// instead of ~/.synbot. Enables multiple synbot instances with different workspaces.
+static ROOT_DIR_OVERRIDE: OnceLock<RwLock<Option<PathBuf>> > = OnceLock::new();
+
+fn root_dir_guard() -> &'static RwLock<Option<PathBuf>> {
+    ROOT_DIR_OVERRIDE.get_or_init(|| RwLock::new(None))
+}
+
+/// Set the root directory for this process (called from CLI when --root-dir is passed).
+/// Should be called once at startup before any config path is used.
+pub fn set_root_dir(path: Option<PathBuf>) {
+    if let Ok(mut g) = root_dir_guard().write() {
+        *g = path;
+    }
+}
+
+/// Return the current root directory override, if any. Used by sandbox to pass --root-dir to child process.
+pub fn get_root_dir_override() -> Option<PathBuf> {
+    root_dir_guard().read().ok().and_then(|g| g.clone())
+}
+
+/// Root directory for this instance: config, roles, memory, sessions, etc. Default is ~/.synbot.
 pub fn config_dir() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".synbot")
+    root_dir_guard()
+        .read()
+        .ok()
+        .and_then(|g| g.clone())
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".synbot")
+        })
 }
 
 pub fn config_path() -> PathBuf {

@@ -19,12 +19,12 @@ synbot start
 ### 使用自定义配置
 
 ```bash
-# 指定配置文件
-synbot start --config /path/to/config.json
+# 使用不同工作区（包含 config.json、roles/ 等的根目录）
+synbot --root-dir /path/to/workspace start
 
-# 或使用环境变量
-export SYNBOT_CONFIG=/path/to/config.json
-synbot start
+# 如需要可先初始化该工作区
+synbot --root-dir /path/to/workspace onboard
+synbot --root-dir /path/to/workspace start
 ```
 
 ### 使用日志级别
@@ -256,7 +256,7 @@ synbot agent session-info <session_id>
 
 ```bash
 # 开发模式，带调试日志
-RUST_LOG=debug synbot start --config dev-config.json
+RUST_LOG=debug synbot --root-dir ./dev-workspace start
 
 # 或带热重载（如果支持）
 cargo watch -x 'run -- start'
@@ -265,8 +265,8 @@ cargo watch -x 'run -- start'
 ### 测试环境
 
 ```bash
-# 测试模式，带测试配置
-synbot start --config test-config.json --log-level info
+# 测试模式，使用独立工作区
+synbot --root-dir ./test-workspace start --log-level info
 
 # 带测试 API 密钥
 export ANTHROPIC_API_KEY=test_key
@@ -453,11 +453,11 @@ synbot start
 
 #### 3. 配置问题
 ```bash
-# 验证配置
-synbot validate-config --config /path/to/config.json
+# 确保工作区已初始化且配置有效
+synbot --root-dir /path/to/workspace onboard   # 缺少时创建配置
 
-# 生成默认配置
-synbot config generate > new-config.json
+# 生成默认 schema（从仓库）
+cargo run --example generate_config_schema --features schema
 
 # 与工作配置比较
 diff working-config.json broken-config.json
@@ -548,14 +548,14 @@ export RUST_CONNECTIONS=1000
 
 ### 水平扩展
 
-运行多个实例：
+运行多个实例（每个使用独立工作区）：
 
 ```bash
 # 实例 1
-synbot start --port 18888 --config instance1.json
+synbot --root-dir /data/synbot-instance1 start
 
-# 实例 2  
-synbot start --port 18889 --config instance2.json
+# 实例 2（例如通过该工作区内配置使用不同端口）
+synbot --root-dir /data/synbot-instance2 start
 
 # 负载均衡器
 nginx -c load-balancer.conf

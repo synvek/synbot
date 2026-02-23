@@ -11,6 +11,7 @@ Synbot is controlled via the `synbot` command. This page lists all subcommands a
 
 - `-h`, `--help` — Print help.
 - `-V`, `--version` — Print version (e.g. `synbot 0.1.0`).
+- `--root-dir <DIR>` — Root directory for this instance (config, roles, memory, sessions). Default: `~/.synbot`. Use different values to run multiple synbot instances with separate workspaces.
 
 ## Subcommands
 
@@ -48,18 +49,18 @@ synbot agent   # interactive (no -m)
 
 ### `synbot start` [options]
 
-Start the full daemon: channels (Telegram, Discord, Feishu), heartbeat, cron, and optional web dashboard. Loads config from the default path or `--config`.
+Start the full daemon: channels (Telegram, Discord, Feishu), heartbeat, cron, and optional web dashboard. Loads config from the default root (`~/.synbot`) or from the directory given by `--root-dir`.
 
 | Option | Description |
 |--------|-------------|
-| `--config <PATH>` | Path to `config.json`. |
 | `--log-level <LEVEL>` | Override log level (e.g. `debug`, `info`). |
 
 Examples:
 
 ```bash
 synbot start
-synbot start --config /path/to/config.json --log-level debug
+synbot --root-dir /path/to/workspace start
+synbot --root-dir /path/to/workspace start --log-level debug
 ```
 
 ### `synbot sandbox` \<subcommand or child_args...\>
@@ -115,9 +116,10 @@ synbot cron remove abc-123
 
 ## Config and paths
 
-- **Config file**: By default `~/.synbot/config.json` (Windows: `%USERPROFILE%\.synbot\config.json`). Override with `synbot start --config <path>`.
-- **Workspace**: From config `agent.workspace` (default `~/.synbot/workspace`).
-- **Roles**: `~/.synbot/roles/` (from code; not a config key).
+- **Root directory**: By default `~/.synbot` (Windows: `%USERPROFILE%\.synbot`). Override with the global option `--root-dir <DIR>` for any command (e.g. `synbot --root-dir /data/synbot start`). Each process uses a single workspace; run multiple processes with different `--root-dir` for multiple workspaces or versions.
+- **Config file**: `config.json` inside the root directory.
+- **Workspace**: From config `mainAgent.workspace` (default `~/.synbot/workspace`).
+- **Roles**: `roles/` inside the root directory (not a config key).
 
 ## See also
 

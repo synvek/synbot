@@ -19,10 +19,11 @@ By default, Synbot looks for configuration at:
 ~/.synbot/config.json
 ```
 
-You can specify a different configuration file using the `--config` flag:
+To use a different workspace (e.g. to run multiple synbot instances), use the `--root-dir` global option. The root directory contains `config.json`, `roles/`, `memory/`, `sessions/`, and related data:
 
 ```bash
-synbot start --config /path/to/your/config.json
+synbot --root-dir /path/to/workspace start
+synbot --root-dir /path/to/workspace onboard   # initialize that workspace first
 ```
 
 ## Config JSON Schema

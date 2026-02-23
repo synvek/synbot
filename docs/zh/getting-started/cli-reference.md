@@ -11,6 +11,7 @@ Synbot 通过 `synbot` 命令控制。本文列出所有子命令与选项。
 
 - `-h`, `--help` — 显示帮助。
 - `-V`, `--version` — 显示版本（如 `synbot 0.1.0`）。
+- `--root-dir <目录>` — 当前实例的根目录（配置、角色、记忆、会话等）。默认：`~/.synbot`。使用不同值可同时运行多个 synbot 实例，各自独立工作区。
 
 ## 子命令
 
@@ -48,18 +49,18 @@ synbot agent   # 交互模式（不加 -m）
 
 ### `synbot start` [选项]
 
-启动完整守护进程：渠道（Telegram、Discord、飞书）、心跳、定时任务及可选 Web 控制台。从默认路径或 `--config` 指定路径加载配置。
+启动完整守护进程：渠道（Telegram、Discord、飞书）、心跳、定时任务及可选 Web 控制台。从默认根目录 `~/.synbot` 或通过 `--root-dir` 指定的目录加载配置。
 
 | 选项 | 说明 |
 |------|------|
-| `--config <路径>` | 指定 `config.json` 路径。 |
 | `--log-level <级别>` | 覆盖日志级别（如 `debug`、`info`）。 |
 
 示例：
 
 ```bash
 synbot start
-synbot start --config /path/to/config.json --log-level debug
+synbot --root-dir /path/to/workspace start
+synbot --root-dir /path/to/workspace start --log-level debug
 ```
 
 ### `synbot sandbox` \<子命令或参数...\>
@@ -115,9 +116,10 @@ synbot cron remove abc-123
 
 ## 配置与路径
 
-- **配置文件**：默认 `~/.synbot/config.json`（Windows：`%USERPROFILE%\.synbot\config.json`）。可用 `synbot start --config <路径>` 覆盖。
-- **工作区**：由配置项 `agent.workspace` 决定（默认 `~/.synbot/workspace`）。
-- **角色目录**：`~/.synbot/roles/`（代码固定路径，非配置项）。
+- **根目录**：默认 `~/.synbot`（Windows：`%USERPROFILE%\.synbot`）。可通过全局选项 `--root-dir <目录>` 覆盖（如 `synbot --root-dir /data/synbot start`）。每个进程只使用一个工作区；要使用多工作区或多版本，可启动多个进程并传入不同 `--root-dir`。
+- **配置文件**：根目录下的 `config.json`。
+- **工作区**：由配置项 `mainAgent.workspace` 决定（默认 `~/.synbot/workspace`）。
+- **角色目录**：根目录下的 `roles/`（非配置项）。
 
 ## 相关文档
 

@@ -24,7 +24,9 @@ pub async fn cmd_onboard() -> Result<()> {
         return Ok(());
     }
 
-    let cfg = config::Config::default();
+    let mut cfg = config::Config::default();
+    // Use workspace under current root (important when using --root-dir).
+    cfg.main_agent.workspace = config::config_dir().join("workspace").to_string_lossy().into_owned();
     config::save_config(&cfg, None)?;
     println!("✓ Created config at {}", cfg_path.display());
 

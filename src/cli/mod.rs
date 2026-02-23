@@ -7,6 +7,7 @@ mod cron;
 mod sandbox_cmd;
 mod helpers;
 
+use std::path::PathBuf;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
@@ -19,6 +20,11 @@ pub use sandbox_cmd::cmd_sandbox;
 #[derive(Parser)]
 #[command(name = "synbot", about = "synbot — Personal AI Assistant")]
 struct Cli {
+    /// Root directory for this instance (config, roles, memory, sessions). Default: ~/.synbot.
+    /// Use different --root-dir to run multiple synbot instances with separate workspaces.
+    #[arg(long, value_name = "DIR", global = true)]
+    root_dir: Option<PathBuf>,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -63,6 +69,8 @@ enum Commands {
 
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
+
+    crate::config::set_root_dir(cli.root_dir.clone());
 
     match cli.command {
         Commands::Onboard => cmd_onboard().await,

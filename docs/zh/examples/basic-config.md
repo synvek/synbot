@@ -334,8 +334,8 @@ jq . ~/.synbot/config.json
 # 启动 Synbot
 synbot start
 
-# 或使用特定配置
-synbot start --config ~/.synbot/config.json
+# 或指定工作区根目录
+synbot --root-dir ~/.synbot start
 ```
 
 ## 配置分解

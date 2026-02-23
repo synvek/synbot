@@ -1,4 +1,4 @@
-﻿---
+---
 title: Running Synbot
 description: How to start, stop, and manage Synbot
 ---
@@ -23,12 +23,12 @@ synbot start
 ### With Custom Configuration
 
 ```bash
-# Specify configuration file
-synbot start --config /path/to/config.json
+# Use a different workspace (root directory containing config.json, roles/, etc.)
+synbot --root-dir /path/to/workspace start
 
-# Or use environment variable
-export SYNBOT_CONFIG=/path/to/config.json
-synbot start
+# Initialize that workspace first if needed
+synbot --root-dir /path/to/workspace onboard
+synbot --root-dir /path/to/workspace start
 ```
 
 ### With Log Level
@@ -260,7 +260,7 @@ synbot agent session-info <session_id>
 
 ```bash
 # Development mode with debug logging
-RUST_LOG=debug synbot start --config dev-config.json
+RUST_LOG=debug synbot --root-dir ./dev-workspace start
 
 # Or with hot reload (if supported)
 cargo watch -x 'run -- start'
@@ -269,8 +269,8 @@ cargo watch -x 'run -- start'
 ### Testing Environment
 
 ```bash
-# Test mode with test configuration
-synbot start --config test-config.json --log-level info
+# Test mode with a separate workspace
+synbot --root-dir ./test-workspace start --log-level info
 
 # With test API keys
 export ANTHROPIC_API_KEY=test_key
@@ -457,11 +457,11 @@ synbot start
 
 #### 3. Configuration Issues
 ```bash
-# Validate configuration
-synbot validate-config --config /path/to/config.json
+# Ensure the workspace is initialized and config is valid
+synbot --root-dir /path/to/workspace onboard   # creates config if missing
 
-# Generate default config
-synbot config generate > new-config.json
+# Generate default config (from repo)
+cargo run --example generate_config_schema --features schema
 
 # Compare with working config
 diff working-config.json broken-config.json
@@ -552,14 +552,14 @@ export RUST_CONNECTIONS=1000
 
 ### Horizontal Scaling
 
-Run multiple instances:
+Run multiple instances (each with its own workspace):
 
 ```bash
 # Instance 1
-synbot start --port 18888 --config instance1.json
+synbot --root-dir /data/synbot-instance1 start
 
-# Instance 2  
-synbot start --port 18889 --config instance2.json
+# Instance 2 (e.g. different port via config in that workspace)
+synbot --root-dir /data/synbot-instance2 start
 
 # Load balancer
 nginx -c load-balancer.conf

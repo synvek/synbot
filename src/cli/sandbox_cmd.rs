@@ -9,6 +9,26 @@ fn progress(msg: &str) {
     let _ = std::io::stderr().flush();
 }
 
+/// Build argv for the child process: prepend --root-dir if this instance was started with one,
+/// so the child uses the same workspace.
+fn child_argv(child_args: &[String]) -> Vec<String> {
+    let base: Vec<String> = if child_args.is_empty() {
+        vec!["start".to_string()]
+    } else {
+        child_args.to_vec()
+    };
+    if let Some(root) = crate::config::get_root_dir_override() {
+        let mut out = vec![
+            "--root-dir".to_string(),
+            root.to_string_lossy().into_owned(),
+        ];
+        out.extend(base);
+        out
+    } else {
+        base
+    }
+}
+
 /// Run the given subcommand and args inside the app sandbox.
 /// Example: cmd_sandbox(vec!["start".into()]) → starts sandbox, then runs `synbot start` in it.
 /// If child_args is ["setup"], on Windows only: install firewall/WFP rules then exit (no daemon).
@@ -83,11 +103,7 @@ async fn run_sandbox_windows(
     info!(sandbox_id = %sandbox_config.sandbox_id, "App sandbox started");
 
     let exe = std::env::current_exe().context("Current executable path")?;
-    let args: Vec<String> = if child_args.is_empty() {
-        vec!["start".to_string()]
-    } else {
-        child_args.to_vec()
-    };
+    let args = child_argv(child_args);
     info!(exe = %exe.display(), args = ?args, "Spawning child in sandbox");
 
     let code = sandbox.spawn_child_in_container(&exe, &args)?;
@@ -115,11 +131,7 @@ async fn run_sandbox_nono(
     }
     progress("Starting nono sandbox (fork+apply+exec)...");
     info!(sandbox_id = %sandbox_config.sandbox_id, "App sandbox started");
-    let args: Vec<String> = if child_args.is_empty() {
-        vec!["start".to_string()]
-    } else {
-        child_args.to_vec()
-    };
+    let args = child_argv(child_args);
     info!(exe = %exe.display(), args = ?args, "Spawning child in nono sandbox");
 
     let pid = match unsafe { fork() } {

@@ -1,4 +1,4 @@
-﻿---
+---
 title: Basic Configuration Example
 description: A simple configuration to get started with Synbot
 ---
@@ -338,8 +338,8 @@ jq . ~/.synbot/config.json
 # Start Synbot
 synbot start
 
-# Or with specific config
-synbot start --config ~/.synbot/config.json
+# Or with a specific workspace root
+synbot --root-dir ~/.synbot start
 ```
 
 ## Configuration Breakdown
