@@ -1,8 +1,8 @@
 //! Agent registry — runtime agents that reference a role.
 //!
 //! Each agent has a name, references one role (for system prompt), and has
-//! workspace_dir and resolved params. Main agent uses global workspace root;
-//! others use workspace/agents/{name}/.
+//! workspace_dir and resolved params. All agents share the same workspace root
+//! (user documents only); memory and skills live under ~/.synbot, not under workspace.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -88,8 +88,8 @@ impl AgentRegistry {
     }
 
     /// Load and register all agents from config.
-    /// The main agent is implicit (role "main", from main_agent settings). Additional agents from main_agent.agents;
-    /// all use the same workspace root; main uses it as-is, others use workspace/agents/{name}/.
+    /// The main agent is implicit (role "main", from main_agent settings). Additional agents from main_agent.agents.
+    /// All agents share the same workspace root (for user documents only); memory is under ~/.synbot/memory/{id}, skills under ~/.synbot/skills/.
     pub fn load_from_config(
         &mut self,
         main_agent: &MainAgent,
@@ -101,13 +101,6 @@ impl AgentRegistry {
             "main agent requires role 'main' (add ~/.synbot/roles/main/ with AGENTS.md, SOUL.md, TOOLS.md)"
         })?;
         let system_prompt = role_ctx.system_prompt.clone();
-        let subdirs = ["memory", "skills"];
-        for sub in &subdirs {
-            let dir = workspace.join(sub);
-            std::fs::create_dir_all(&dir).with_context(|| {
-                format!("failed to create workspace directory '{}' for main agent", dir.display())
-            })?;
-        }
         let params = ResolvedAgentParams::from_main_defaults(main_agent);
         let ctx = AgentContext {
             name: "main".to_string(),
@@ -129,17 +122,6 @@ impl AgentRegistry {
                 format!("agent '{}' references unknown role '{}' (add a subdir under ~/.synbot/roles/ for this role)", agent.name, agent.role)
             })?;
             let system_prompt = role_ctx.system_prompt.clone();
-            let workspace_dir = workspace.join("agents").join(&agent.name);
-            for sub in &subdirs {
-                let dir = workspace_dir.join(sub);
-                std::fs::create_dir_all(&dir).with_context(|| {
-                    format!(
-                        "failed to create workspace directory '{}' for agent '{}'",
-                        dir.display(),
-                        agent.name
-                    )
-                })?;
-            }
             let params = ResolvedAgentParams::from_config(agent, main_agent);
             let ctx = AgentContext {
                 name: agent.name.clone(),
@@ -148,7 +130,7 @@ impl AgentRegistry {
                 skills: agent.skills.clone(),
                 tools: agent.tools.clone(),
                 params,
-                workspace_dir,
+                workspace_dir: workspace.to_path_buf(),
             };
             self.agents.insert(agent.name.clone(), ctx);
         }
@@ -227,7 +209,7 @@ mod tests {
     }
 
     #[test]
-    fn non_main_agent_uses_workspace_agents_name() {
+    fn non_main_agent_shares_workspace_root() {
         let tmp = TempDir::new().unwrap();
         let roles_dir = TempDir::new().unwrap();
         for (ref_name, content) in &[("main", ""), ("dev", "# Dev")] {
@@ -249,8 +231,7 @@ mod tests {
             .unwrap();
 
         let ctx = agent_reg.get("dev").unwrap();
-        assert_eq!(ctx.workspace_dir, tmp.path().join("agents").join("dev"));
-        assert!(ctx.workspace_dir.join("memory").is_dir());
-        assert!(ctx.workspace_dir.join("skills").is_dir());
+        // All agents share the same workspace root (no agents/dev, memory, or skills under workspace).
+        assert_eq!(ctx.workspace_dir, tmp.path());
     }
 }

@@ -1,7 +1,7 @@
 //! File-system tools: read_file, write_file, edit_file, list_dir.
 //!
 //! When an agent runs, paths are restricted to that agent's workspace and memory dir
-//! via the tool execution context (~/.synbot/memory/{agent_id} and workspace or workspace/agents/{name}).
+//! via the tool execution context (~/.synbot/memory/{agent_id} and the shared workspace root).
 
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
