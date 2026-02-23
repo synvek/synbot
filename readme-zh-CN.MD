@@ -119,6 +119,8 @@ synbot sandbox start
 
 - Discord
 
+- Slack
+
 - 飞书 (Feishu)
 
 - 更多渠道开发中

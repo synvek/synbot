@@ -120,6 +120,8 @@ On Windows, run `synbot sandbox setup` once as Administrator to add network rule
 
 - Discord
 
+- Slack
+
 - Feishu(飞书)
 
 - More are still in progress
