@@ -4,6 +4,8 @@
 //! Sends messages via Slack Web API (chat.postMessage) with the Bot token.
 //! Supports allowlist, group @-mention stripping, and tool progress forwarding.
 //! Incoming file attachments are saved to workspace; outbound files are sent one per message.
+//! File upload uses Slack's replacement API (files.getUploadURLExternal + files.completeUploadExternal)
+//! because files.upload is deprecated and returns method_deprecated.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -17,7 +19,6 @@ use tracing::{error, info, warn};
 use crate::bus::{InboundMessage, OutboundMessage};
 use crate::channels::{Channel, approval_formatter};
 use crate::config::{AllowlistEntry, SlackConfig};
-use slack_morphism::api::SlackApiFilesUploadRequest;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -43,6 +44,88 @@ fn slack_channel_id_raw(chat_id: &str) -> String {
         }
     }
     s.to_string()
+}
+
+/// Upload a file to Slack using the replacement API (files.getUploadURLExternal + POST to URL + files.completeUploadExternal).
+/// files.upload is deprecated and returns method_deprecated for many apps.
+async fn slack_upload_file_v2(
+    token: &str,
+    channel_id: &str,
+    filename: &str,
+    file_data: Vec<u8>,
+) -> Result<(), String> {
+    let len = file_data.len();
+    let client = reqwest::Client::builder()
+        .build()
+        .map_err(|e: reqwest::Error| e.to_string())?;
+
+    // 1) Get upload URL — Slack expects application/x-www-form-urlencoded, not JSON
+    let get_url = "https://slack.com/api/files.getUploadURLExternal";
+    let len_str = len.to_string();
+    let params = [("filename", filename), ("length", len_str.as_str())];
+    let resp = client
+        .post(get_url)
+        .header("Authorization", format!("Bearer {}", token))
+        .form(&params)
+        .send()
+        .await
+        .map_err(|e: reqwest::Error| e.to_string())?;
+    let status = resp.status();
+    let json: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e: reqwest::Error| e.to_string())?;
+    if !status.is_success() || json.get("ok").and_then(|v| v.as_bool()) != Some(true) {
+        let err = json.get("error").and_then(|v| v.as_str()).unwrap_or("unknown");
+        return Err(format!("Slack getUploadURLExternal: {} ({})", status, err));
+    }
+    let upload_url = json
+        .get("upload_url")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing upload_url in response".to_string())?;
+    let file_id = json
+        .get("file_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "missing file_id in response".to_string())?;
+
+    // 2) POST file to upload URL (multipart with filename)
+    let part = reqwest::multipart::Part::bytes(file_data).file_name(filename.to_string());
+    let form = reqwest::multipart::Form::new().part("filename", part);
+    let resp = client
+        .post(upload_url)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e: reqwest::Error| e.to_string())?;
+    let status = resp.status();
+    if !status.is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Slack upload URL returned {}: {}", status, body));
+    }
+
+    // 3) Complete upload and share to channel
+    let complete_url = "https://slack.com/api/files.completeUploadExternal";
+    let body = serde_json::json!({
+        "files": [{"id": file_id}],
+        "channel_id": channel_id
+    });
+    let resp = client
+        .post(complete_url)
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e: reqwest::Error| e.to_string())?;
+    let status = resp.status();
+    let json: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e: reqwest::Error| e.to_string())?;
+    if !status.is_success() || json.get("ok").and_then(|v| v.as_bool()) != Some(true) {
+        let err = json.get("error").and_then(|v| v.as_str()).unwrap_or("unknown");
+        return Err(format!("Slack completeUploadExternal: {} ({})", status, err));
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -404,6 +487,7 @@ impl Channel for SlackChannel {
 
         let mut outbound_rx = self.outbound_rx.take().unwrap();
         let bot_token = self.bot_token.clone();
+        let token_str = self.config.token.clone();
         let channel_name = self.config.name.clone();
         let show_tool_calls = self.show_tool_calls;
         let workspace_dir = self.workspace_dir.clone();
@@ -486,19 +570,14 @@ impl Channel for SlackChannel {
                                     .file_name()
                                     .map(|n| n.to_string_lossy().into_owned())
                                     .unwrap_or_else(|| "file".to_string());
-                                #[allow(deprecated)]
-                                let upload_req = SlackApiFilesUploadRequest {
-                                    channels: Some(vec![raw_channel_id.clone().into()]),
-                                    filename: Some(file_name.clone()),
-                                    binary_content: Some(file_data),
-                                    content: None,
-                                    filetype: None,
-                                    initial_comment: None,
-                                    thread_ts: None,
-                                    title: None,
-                                    file_content_type: None,
-                                };
-                                if let Err(e) = session.files_upload(&upload_req).await {
+                                if let Err(e) = slack_upload_file_v2(
+                                    &token_str,
+                                    &raw_channel_id,
+                                    &file_name,
+                                    file_data,
+                                )
+                                .await
+                                {
                                     error!("Slack file upload error: {e:#}");
                                 }
                             }
@@ -574,19 +653,13 @@ impl Channel for SlackChannel {
                             .file_name()
                             .map(|n| n.to_string_lossy().into_owned())
                             .unwrap_or_else(|| "file".to_string());
-                        #[allow(deprecated)]
-                        let upload_req = SlackApiFilesUploadRequest {
-                            channels: Some(vec![raw_channel_id.clone().into()]),
-                            filename: Some(file_name),
-                            binary_content: Some(file_data),
-                            content: None,
-                            filetype: None,
-                            initial_comment: None,
-                            thread_ts: None,
-                            title: None,
-                            file_content_type: None,
-                        };
-                        let _ = session.files_upload(&upload_req).await;
+                        let _ = slack_upload_file_v2(
+                            &self.config.token,
+                            &raw_channel_id,
+                            &file_name,
+                            file_data,
+                        )
+                        .await;
                     }
                 }
             }
