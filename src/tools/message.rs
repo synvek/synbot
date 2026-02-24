@@ -1,4 +1,8 @@
-//! Message tool — send outbound messages to channels.
+//! Message tool — send outbound messages to channels (text and optional files).
+//!
+//! When the user asks the agent to send files (e.g. on Feishu), the agent can call
+//! this tool with both `content` and `files` (paths relative to workspace). No separate
+//! "send_file" tool is needed.
 
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -16,12 +20,19 @@ pub struct MessageTool {
 #[async_trait::async_trait]
 impl DynTool for MessageTool {
     fn name(&self) -> &str { "message" }
-    fn description(&self) -> &str { "Send a message to the user on a chat channel." }
+    fn description(&self) -> &str {
+        "Send a message to the user on the current chat channel. Optional: pass 'files' (array of file paths relative to workspace) to attach files to the message (e.g. Feishu/Discord/Slack will send them). Use when the user asks you to send or share a file."
+    }
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "content": { "type": "string" },
+                "content": { "type": "string", "description": "Text to send" },
+                "files": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Optional: paths of files to attach (relative to workspace), e.g. [\"report.pdf\", \"image.png\"]"
+                },
                 "channel": { "type": "string" },
                 "chat_id": { "type": "string" }
             },
@@ -38,15 +49,29 @@ impl DynTool for MessageTool {
             .as_str()
             .unwrap_or(&self.default_chat_id)
             .to_string();
+        let media: Vec<String> = args["files"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
 
+        let media_len = media.len();
+        let empty_media = media.is_empty();
         let msg = OutboundMessage::chat(
             channel,
             chat_id,
             content,
-            vec![],
+            media,
             None,
         );
         let _ = self.outbound_tx.send(msg);
-        Ok("Message sent.".into())
+        if empty_media{
+            Ok("Message sent.".into())
+        } else {
+            Ok(format!("Message sent with {} file(s).", media_len))
+        }
     }
 }

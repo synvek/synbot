@@ -65,7 +65,10 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
         tracing::warn!(error = %e, "Failed to load persisted sessions");
     }
 
-    // Build tools (pass subagent manager, approval manager, permission policy, and session state)
+    // Bus is needed for MessageTool's outbound_tx; create before building tools
+    let mut bus = crate::bus::MessageBus::new();
+
+    // Build tools (pass subagent manager, approval manager, permission policy, session state, and outbound_tx for message tool)
     let tools = build_default_tools(
         &cfg,
         &ws,
@@ -75,11 +78,10 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
         None, // no heartbeat/cron tools in CLI agent mode
         &None, // no sandbox in CLI agent mode
         shared_session_state.clone(),
+        bus.outbound_tx_clone(),
     );
     let tools = std::sync::Arc::new(tools);
 
-    // Set up bus
-    let mut bus = crate::bus::MessageBus::new();
     let inbound_tx = bus.inbound_sender();
     let inbound_rx = bus.take_inbound_receiver().unwrap();
 

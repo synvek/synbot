@@ -20,11 +20,9 @@ impl MultipartBuilder {
 
         let mut form = multipart::Form::new();
 
-        // 处理文件部分
-        form = Self::add_file_part(form, form_obj, file_data)?;
-
-        // 处理其他表单字段
+        // 先添加表单字段（file_type, file_name），再添加文件 part，部分服务要求顺序
         form = Self::add_form_fields(form, form_obj)?;
+        form = Self::add_file_part(form, form_obj, file_data)?;
 
         // 设置编码
         form = form.percent_encode_noop();
@@ -50,14 +48,14 @@ impl MultipartBuilder {
         Ok(form)
     }
 
-    /// 添加普通表单字段
+    /// 添加普通表单字段（含 file_name，飞书 IM 上传需要 file_name 作为 form 字段）
     fn add_form_fields(
         mut form: multipart::Form,
         form_obj: &serde_json::Map<String, Value>,
     ) -> Result<multipart::Form, LarkAPIError> {
         for (key, value) in form_obj.iter() {
-            // 跳过 file_name 字段和 null 值
-            if key == "file_name" || value == &Value::Null {
+            // 跳过 null 值
+            if value == &Value::Null {
                 continue;
             }
 

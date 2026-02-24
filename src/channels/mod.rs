@@ -1,5 +1,6 @@
 pub mod approval_classifier;
 pub mod approval_formatter;
+pub mod file_handler;
 pub mod discord;
 pub mod feishu;
 pub mod slack;

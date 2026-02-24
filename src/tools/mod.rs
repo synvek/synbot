@@ -41,6 +41,11 @@ fn sanitize_args_for_log(tool_name: &str, args: &Value) -> String {
             .get("content")
             .and_then(|v| v.as_str())
             .map(|s| format!("content_len={}", s.len())),
+        "message" => {
+            let content_len = obj.get("content").and_then(|v| v.as_str()).map(|s| s.len()).unwrap_or(0);
+            let files_count = obj.get("files").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+            Some(format!("content_len={}, files={}", content_len, files_count))
+        }
         "list_memory" => obj
             .get("agent_id")
             .and_then(|v| v.as_str())
@@ -161,6 +166,12 @@ impl ToolRegistry {
                     obj.insert("_channel".into(), serde_json::Value::String(channel.to_string()));
                     obj.insert("_chat_id".into(), serde_json::Value::String(chat_id.to_string()));
                     obj.insert("_session_id".into(), serde_json::Value::String(session_id.to_string()));
+                }
+            }
+            if name == "message" {
+                if let Some(obj) = args.as_object_mut() {
+                    obj.insert("channel".into(), serde_json::Value::String(channel.to_string()));
+                    obj.insert("chat_id".into(), serde_json::Value::String(chat_id.to_string()));
                 }
             }
         }

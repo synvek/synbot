@@ -3,18 +3,21 @@
 //! Uses Slack Socket Mode (WebSocket) to receive events without a public HTTP endpoint.
 //! Sends messages via Slack Web API (chat.postMessage) with the Bot token.
 //! Supports allowlist, group @-mention stripping, and tool progress forwarding.
+//! Incoming file attachments are saved to workspace; outbound files are sent one per message.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
 use async_trait::async_trait;
 use slack_morphism::prelude::*;
 use tokio::sync::{broadcast, mpsc};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 use crate::bus::{InboundMessage, OutboundMessage};
 use crate::channels::{Channel, approval_formatter};
 use crate::config::{AllowlistEntry, SlackConfig};
+use slack_morphism::api::SlackApiFilesUploadRequest;
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -97,9 +100,10 @@ pub struct SlackChannel {
     show_tool_calls: bool,
     inbound_tx: mpsc::Sender<InboundMessage>,
     outbound_rx: Option<broadcast::Receiver<OutboundMessage>>,
-    /// Bot token for Web API (chat.postMessage).
     bot_token: SlackApiToken,
     running: bool,
+    /// Workspace directory for resolving outbound file paths. Slack does not support multiple files in one message; we send one file per message.
+    workspace_dir: Option<PathBuf>,
 }
 
 impl SlackChannel {
@@ -108,6 +112,7 @@ impl SlackChannel {
         inbound_tx: mpsc::Sender<InboundMessage>,
         outbound_rx: broadcast::Receiver<OutboundMessage>,
         show_tool_calls: bool,
+        workspace_dir: Option<PathBuf>,
     ) -> Result<Self> {
         // Warn if tokens look swapped (common cause of not_allowed_token_type)
         let token_trim = config.token.trim();
@@ -135,6 +140,7 @@ impl SlackChannel {
             outbound_rx: Some(outbound_rx),
             bot_token,
             running: false,
+            workspace_dir,
         })
     }
 
@@ -400,14 +406,17 @@ impl Channel for SlackChannel {
         let bot_token = self.bot_token.clone();
         let channel_name = self.config.name.clone();
         let show_tool_calls = self.show_tool_calls;
+        let workspace_dir = self.workspace_dir.clone();
 
         tokio::spawn(async move {
             while let Ok(msg) = outbound_rx.recv().await {
                 if msg.channel != channel_name {
                     continue;
                 }
-                let content = match &msg.message_type {
-                    crate::bus::OutboundMessageType::Chat { content, .. } => content.clone(),
+                let (content, media_paths) = match &msg.message_type {
+                    crate::bus::OutboundMessageType::Chat { content, media } => {
+                        (content.clone(), media.clone())
+                    }
                     crate::bus::OutboundMessageType::ToolProgress {
                         tool_name,
                         status,
@@ -423,18 +432,20 @@ impl Channel for SlackChannel {
                         } else {
                             result_preview.clone()
                         };
-                        if preview.is_empty() {
+                        let content = if preview.is_empty() {
                             format!("🔧 {} — {}", tool_name, status)
                         } else {
                             format!("🔧 {} — {}\n{}", tool_name, status, preview)
-                        }
+                        };
+                        (content, vec![])
                     }
                     crate::bus::OutboundMessageType::ApprovalRequest { request } => {
-                        request
+                        let content = request
                             .display_message
                             .clone()
                             .filter(|s| !s.is_empty())
-                            .unwrap_or_else(|| approval_formatter::format_approval_request(request))
+                            .unwrap_or_else(|| approval_formatter::format_approval_request(request));
+                        (content, vec![])
                     }
                 };
                 let client = match SlackClientHyperConnector::new() {
@@ -445,15 +456,53 @@ impl Channel for SlackChannel {
                     }
                 };
                 let session = client.open_session(&bot_token);
-                let chunks = split_message(&content, SLACK_MAX_MESSAGE_LEN);
                 let raw_channel_id = slack_channel_id_raw(&msg.chat_id);
-                for chunk in &chunks {
-                    let req = SlackApiChatPostMessageRequest::new(
-                        raw_channel_id.clone().into(),
-                        SlackMessageContent::new().with_text(chunk.clone().into()),
-                    );
-                    if let Err(e) = session.chat_post_message(&req).await {
-                        error!("Slack outbound send error: {e:#}");
+
+                if !content.is_empty() {
+                    let chunks = split_message(&content, SLACK_MAX_MESSAGE_LEN);
+                    for chunk in &chunks {
+                        let req = SlackApiChatPostMessageRequest::new(
+                            raw_channel_id.clone().into(),
+                            SlackMessageContent::new().with_text(chunk.clone().into()),
+                        );
+                        if let Err(e) = session.chat_post_message(&req).await {
+                            error!("Slack outbound send error: {e:#}");
+                        }
+                    }
+                }
+                // Slack does not support multiple files in one message; send one file per message
+                if !media_paths.is_empty() && workspace_dir.is_some() {
+                    let ws = workspace_dir.as_ref().unwrap();
+                    for path_str in &media_paths {
+                        let path = std::path::Path::new(path_str);
+                        let abs = if path.is_absolute() {
+                            path.to_path_buf()
+                        } else {
+                            ws.join(path_str)
+                        };
+                        if abs.exists() {
+                            if let Ok(file_data) = std::fs::read(&abs) {
+                                let file_name = abs
+                                    .file_name()
+                                    .map(|n| n.to_string_lossy().into_owned())
+                                    .unwrap_or_else(|| "file".to_string());
+                                #[allow(deprecated)]
+                                let upload_req = SlackApiFilesUploadRequest {
+                                    channels: Some(vec![raw_channel_id.clone().into()]),
+                                    filename: Some(file_name.clone()),
+                                    binary_content: Some(file_data),
+                                    content: None,
+                                    filetype: None,
+                                    initial_comment: None,
+                                    thread_ts: None,
+                                    title: None,
+                                    file_content_type: None,
+                                };
+                                if let Err(e) = session.files_upload(&upload_req).await {
+                                    error!("Slack file upload error: {e:#}");
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -469,13 +518,18 @@ impl Channel for SlackChannel {
     }
 
     async fn send(&self, msg: &OutboundMessage) -> Result<()> {
-        let content = match &msg.message_type {
-            crate::bus::OutboundMessageType::Chat { content, .. } => content.clone(),
-            crate::bus::OutboundMessageType::ApprovalRequest { request } => request
-                .display_message
-                .clone()
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| approval_formatter::format_approval_request(request)),
+        let (content, media) = match &msg.message_type {
+            crate::bus::OutboundMessageType::Chat { content, media } => {
+                (content.clone(), media.clone())
+            }
+            crate::bus::OutboundMessageType::ApprovalRequest { request } => (
+                request
+                    .display_message
+                    .clone()
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| approval_formatter::format_approval_request(request)),
+                vec![],
+            ),
             crate::bus::OutboundMessageType::ToolProgress {
                 tool_name,
                 status,
@@ -491,13 +545,52 @@ impl Channel for SlackChannel {
                 } else {
                     result_preview.clone()
                 };
-                if preview.is_empty() {
+                let content = if preview.is_empty() {
                     format!("🔧 {} — {}", tool_name, status)
                 } else {
                     format!("🔧 {} — {}\n{}", tool_name, status, preview)
-                }
+                };
+                return self.send_message(&msg.chat_id, &content).await;
             }
         };
-        self.send_message(&msg.chat_id, &content).await
+        if !content.is_empty() {
+            self.send_message(&msg.chat_id, &content).await?;
+        }
+        if !media.is_empty() && self.workspace_dir.is_some() {
+            let client = SlackClient::new(SlackClientHyperConnector::new()?);
+            let session = client.open_session(&self.bot_token);
+            let raw_channel_id = slack_channel_id_raw(&msg.chat_id);
+            let ws = self.workspace_dir.as_ref().unwrap();
+            for path_str in &media {
+                let path = std::path::Path::new(path_str);
+                let abs = if path.is_absolute() {
+                    path.to_path_buf()
+                } else {
+                    ws.join(path_str)
+                };
+                if abs.exists() {
+                    if let Ok(file_data) = std::fs::read(&abs) {
+                        let file_name = abs
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| "file".to_string());
+                        #[allow(deprecated)]
+                        let upload_req = SlackApiFilesUploadRequest {
+                            channels: Some(vec![raw_channel_id.clone().into()]),
+                            filename: Some(file_name),
+                            binary_content: Some(file_data),
+                            content: None,
+                            filetype: None,
+                            initial_comment: None,
+                            thread_ts: None,
+                            title: None,
+                            file_content_type: None,
+                        };
+                        let _ = session.files_upload(&upload_req).await;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }

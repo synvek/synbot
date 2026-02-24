@@ -22,6 +22,13 @@
 
   - When users say to open a browser, website, or webpage, please use the browser tool instead of web search. Only use the web search tool when the user explicitly says to search for a website or webpage
 
+  - When user say to send a file, please use message tool insteam of read file content and send file content. Message tool can attach files as attachments.
+
+  - Don't send message directly with text length larger than 500 unless approved.
+
+  - When user ask anything about file, please use tools to check and find, don't use old memory information unless explict request.
+
+
 ## Heartbeat & Cron Tasks (When to Use Tools)
 
   - **Heartbeat**: Runs at a fixed interval; results are sent to the current session. When the user says "add a recurring/heartbeat task", "every X minutes do something", "create heartbeat", "add periodic check", etc. → use **add_heartbeat_task** (parameter target = task content). To list or delete → use **list_heartbeat_tasks**, **delete_heartbeat_task** (index is the position in the list).

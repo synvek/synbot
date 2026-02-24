@@ -12,6 +12,7 @@
 //! split into sequential messages.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,6 +23,7 @@ use tokio::sync::{broadcast, mpsc, RwLock};
 use tracing::{error, info, warn};
 
 use crate::bus::{InboundMessage, OutboundMessage};
+use crate::channels::file_handler;
 use crate::channels::{approval_formatter, Channel, RetryPolicy, RetryState};
 use crate::config::{AllowlistEntry, DiscordConfig};
 use crate::tools::approval::ApprovalManager;
@@ -140,11 +142,10 @@ pub fn split_message(content: &str, max_len: usize) -> Vec<String> {
 // Discord message conversion
 // ---------------------------------------------------------------------------
 
-/// Convert a Discord MESSAGE_CREATE event payload into an InboundMessage.
-///
-/// Returns `None` if the message is from a bot, has no text content,
-/// or required fields are missing. Allowlist is checked by the caller.
-fn discord_event_to_inbound(data: &serde_json::Value) -> Option<InboundMessage> {
+/// Result of converting MESSAGE_CREATE: optional inbound message and list of (url, filename) to download.
+fn discord_event_to_inbound_with_attachments(
+    data: &serde_json::Value,
+) -> Option<(InboundMessage, Vec<(String, String)>)> {
     let author = match data.get("author") {
         Some(a) => a,
         None => {
@@ -152,7 +153,6 @@ fn discord_event_to_inbound(data: &serde_json::Value) -> Option<InboundMessage> 
             return None;
         }
     };
-    // Ignore bot messages
     if author.get("bot").and_then(|b| b.as_bool()).unwrap_or(false) {
         info!("Discord: Ignoring bot message");
         return None;
@@ -171,18 +171,41 @@ fn discord_event_to_inbound(data: &serde_json::Value) -> Option<InboundMessage> 
             return None;
         }
     };
-    let content = match data.get("content").and_then(|v| v.as_str()) {
-        Some(s) => s.to_string(),
-        None => {
-            warn!("Discord MESSAGE_CREATE: missing 'content' field (enable Message Content Intent in Developer Portal if needed), ignoring");
-            return None;
-        }
-    };
+    let content = data
+        .get("content")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
 
-    if content.is_empty() {
-        info!("Discord: Ignoring empty content");
+    let attachments: Vec<(String, String)> = data
+        .get("attachments")
+        .and_then(|a| a.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|att| {
+                    let url = att.get("url").and_then(|v| v.as_str())?;
+                    let filename = att
+                        .get("filename")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("file");
+                    Some((url.to_string(), filename.to_string()))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let has_content = !content.trim().is_empty();
+    let has_attachments = !attachments.is_empty();
+    if !has_content && !has_attachments {
+        info!("Discord: Ignoring message with no content and no attachments");
         return None;
     }
+
+    let content = if has_content {
+        content
+    } else {
+        "[附件]".to_string()
+    };
 
     let message_id = data
         .get("id")
@@ -199,10 +222,11 @@ fn discord_event_to_inbound(data: &serde_json::Value) -> Option<InboundMessage> 
         sender_id = %sender_id,
         chat_id = %chat_id,
         content_len = content.len(),
+        attachments = attachments.len(),
         "Discord: Converting event to inbound message"
     );
 
-    Some(InboundMessage {
+    let msg = InboundMessage {
         channel: "discord".into(),
         sender_id,
         chat_id,
@@ -213,7 +237,13 @@ fn discord_event_to_inbound(data: &serde_json::Value) -> Option<InboundMessage> 
             "message_id": message_id,
             "guild_id": guild_id,
         }),
-    })
+    };
+    Some((msg, attachments))
+}
+
+/// Legacy helper: convert event to inbound only (no attachment download). Used when workspace not set.
+fn discord_event_to_inbound(data: &serde_json::Value) -> Option<InboundMessage> {
+    discord_event_to_inbound_with_attachments(data).map(|(msg, _)| msg)
 }
 
 // ---------------------------------------------------------------------------
@@ -222,15 +252,15 @@ fn discord_event_to_inbound(data: &serde_json::Value) -> Option<InboundMessage> 
 
 pub struct DiscordChannel {
     config: DiscordConfig,
-    /// When true, forward tool execution progress to this channel (global && channel show_tool_calls).
     show_tool_calls: bool,
     inbound_tx: mpsc::Sender<InboundMessage>,
     outbound_rx: Option<broadcast::Receiver<OutboundMessage>>,
     client: reqwest::Client,
     running: bool,
     approval_manager: Option<Arc<ApprovalManager>>,
-    /// Map of user's pending approval requests: user_id -> (request_id, chat_id)
     pending_approvals: Arc<RwLock<HashMap<String, (String, String)>>>,
+    /// Workspace directory for saving incoming files; when set, attachments are downloaded and paths added to InboundMessage.media.
+    workspace_dir: Option<PathBuf>,
 }
 
 impl DiscordChannel {
@@ -239,6 +269,7 @@ impl DiscordChannel {
         inbound_tx: mpsc::Sender<InboundMessage>,
         outbound_rx: broadcast::Receiver<OutboundMessage>,
         show_tool_calls: bool,
+        workspace_dir: Option<PathBuf>,
     ) -> Self {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))
@@ -253,6 +284,7 @@ impl DiscordChannel {
             running: false,
             approval_manager: None,
             pending_approvals: Arc::new(RwLock::new(HashMap::new())),
+            workspace_dir,
         }
     }
 
@@ -406,6 +438,7 @@ impl DiscordChannel {
         approval_manager: &Option<Arc<ApprovalManager>>,
         pending_approvals: &Arc<RwLock<HashMap<String, (String, String)>>>,
         client: &reqwest::Client,
+        workspace_dir: Option<&PathBuf>,
     ) -> std::result::Result<(), DiscordGatewayError> {
         // Choose URL: use resume_gateway_url if we have one, else default.
         let ws_url = resume
@@ -586,8 +619,49 @@ impl DiscordChannel {
                                 "MESSAGE_CREATE" => {
                                     if let Some(d) = payload.get("d") {
                                         info!("Discord MESSAGE_CREATE event received");
-                                        if let Some(mut inbound) = discord_event_to_inbound(d) {
+                                        if let Some((mut inbound, attachments)) =
+                                            discord_event_to_inbound_with_attachments(d)
+                                        {
                                             inbound.channel = channel_name.to_string();
+                                            // Download attachments to workspace when configured
+                                            if let Some(ws) = workspace_dir {
+                                                for (url, filename) in attachments {
+                                                    match client
+                                                        .get(&url)
+                                                        .header("Authorization", format!("Bot {}", token))
+                                                        .send()
+                                                        .await
+                                                    {
+                                                        Ok(resp) if resp.status().is_success() => {
+                                                            match resp.bytes().await {
+                                                                Ok(bytes) => {
+                                                                    if let Ok(path) =
+                                                                        file_handler::save_incoming_file(
+                                                                            ws, &filename, &bytes,
+                                                                        )
+                                                                    {
+                                                                        inbound.media.push(
+                                                                            path.to_string_lossy().into_owned(),
+                                                                        );
+                                                                    }
+                                                                }
+                                                                Err(e) => {
+                                                                    warn!("Discord attachment download body error: {e}");
+                                                                }
+                                                            }
+                                                        }
+                                                        Ok(resp) => {
+                                                            warn!(
+                                                                "Discord attachment download failed: {}",
+                                                                resp.status()
+                                                            );
+                                                        }
+                                                        Err(e) => {
+                                                            warn!("Discord attachment download error: {e}");
+                                                        }
+                                                    }
+                                                }
+                                            }
                                             let is_group = !inbound
                                                 .metadata
                                                 .get("guild_id")
@@ -791,13 +865,16 @@ impl Channel for DiscordChannel {
         let outbound_channel_name = self.config.name.clone();
         let pending_approvals_clone = self.pending_approvals.clone();
         let show_tool_calls = self.show_tool_calls;
+        let workspace_dir = self.workspace_dir.clone();
         tokio::spawn(async move {
             while let Ok(msg) = outbound_rx.recv().await {
                 if msg.channel != outbound_channel_name {
                     continue;
                 }
-                let content = match msg.message_type {
-                    crate::bus::OutboundMessageType::Chat { content, .. } => content,
+                let (content, media_paths) = match &msg.message_type {
+                    crate::bus::OutboundMessageType::Chat { content, media } => {
+                        (content.clone(), media.clone())
+                    }
                     crate::bus::OutboundMessageType::ToolProgress {
                         tool_name,
                         status,
@@ -811,37 +888,81 @@ impl Channel for DiscordChannel {
                         } else if result_preview.len() > 100 {
                             format!("{}...", result_preview.chars().take(100).collect::<String>())
                         } else {
-                            result_preview
+                            result_preview.clone()
                         };
-                        if preview.is_empty() {
+                        let content = if preview.is_empty() {
                             format!("🔧 {} — {}", tool_name, status)
                         } else {
                             format!("🔧 {} — {}\n{}", tool_name, status, preview)
-                        }
+                        };
+                        (content, vec![])
                     }
                     crate::bus::OutboundMessageType::ApprovalRequest { request } => {
                         // Register the pending approval request
-                        // Extract user_id from session_id (format: agent:role:channel:type:user_id)
                         let user_id = request.session_id.split(':').last().unwrap_or("").to_string();
                         if !user_id.is_empty() {
                             let mut pending = pending_approvals_clone.write().await;
                             pending.insert(user_id, (request.id.clone(), msg.chat_id.clone()));
                         }
-                        // Prefer Agent-generated display message for the user's language
-                        request
+                        let content = request
                             .display_message
                             .as_deref()
                             .filter(|s| !s.is_empty())
                             .map(String::from)
-                            .unwrap_or_else(|| Self::format_approval_request(&request))
+                            .unwrap_or_else(|| Self::format_approval_request(request));
+                        (content, vec![])
                     }
                 };
+                let url = format!("{}/channels/{}/messages", API_BASE, msg.chat_id);
+                // If we have file paths, send as multipart (content + files). Discord supports multiple files in one message.
+                if !media_paths.is_empty() && workspace_dir.is_some() {
+                    let ws = workspace_dir.as_ref().unwrap();
+                    let mut files_data: Vec<(String, Vec<u8>)> = Vec::new();
+                    for path_str in &media_paths {
+                        let path = std::path::Path::new(path_str);
+                        let abs = if path.is_absolute() {
+                            path.to_path_buf()
+                        } else {
+                            ws.join(path_str)
+                        };
+                        if abs.exists() {
+                            if let Ok(bytes) = std::fs::read(&abs) {
+                                let name = abs
+                                    .file_name()
+                                    .map(|n| n.to_string_lossy().into_owned())
+                                    .unwrap_or_else(|| "file".to_string());
+                                files_data.push((name, bytes));
+                            }
+                        }
+                    }
+                    if !files_data.is_empty() {
+                        use reqwest::multipart;
+                        let mut form = multipart::Form::new().text("content", content.clone());
+                        for (idx, (name, bytes)) in files_data.into_iter().enumerate() {
+                            let part = multipart::Part::bytes(bytes).file_name(name);
+                            form = form.part(format!("files[{}]", idx), part);
+                        }
+                        let resp = outbound_client
+                            .post(&url)
+                            .header("Authorization", format!("Bot {}", outbound_token))
+                            .multipart(form)
+                            .send()
+                            .await;
+                        if let Err(e) = resp {
+                            error!("Discord outbound send (with files) error: {e:#}");
+                        } else if let Ok(r) = resp {
+                            if !r.status().is_success() {
+                                let status = r.status();
+                                let body = r.text().await.unwrap_or_default();
+                                error!("Discord outbound send (with files) failed: {} {}", status, body);
+                            }
+                        }
+                        // If there was also text, we already sent it with the files; no need to send content again unless we split.
+                        continue;
+                    }
+                }
                 let chunks = split_message(&content, DISCORD_MAX_MESSAGE_LEN);
                 for chunk in &chunks {
-                    let url = format!(
-                        "{}/channels/{}/messages",
-                        API_BASE, msg.chat_id
-                    );
                     let resp = outbound_client
                         .post(&url)
                         .header(
@@ -853,6 +974,12 @@ impl Channel for DiscordChannel {
                         .await;
                     if let Err(e) = resp {
                         error!("Discord outbound send error: {e:#}");
+                    } else if let Ok(r) = resp {
+                        if !r.status().is_success() {
+                            let status = r.status();
+                            let body = r.text().await.unwrap_or_default();
+                            error!("Discord outbound send failed: {} {}", status, body);
+                        }
                     }
                 }
             }
@@ -875,6 +1002,7 @@ impl Channel for DiscordChannel {
                 &self.approval_manager,
                 &self.pending_approvals,
                 &self.client,
+                self.workspace_dir.as_ref(),
             )
             .await;
 
@@ -958,14 +1086,19 @@ impl Channel for DiscordChannel {
     }
 
     async fn send(&self, msg: &OutboundMessage) -> Result<()> {
-        let content = match &msg.message_type {
-            crate::bus::OutboundMessageType::Chat { content, .. } => content.clone(),
-                    crate::bus::OutboundMessageType::ApprovalRequest { request } => request
-                .display_message
-                .as_deref()
-                .filter(|s| !s.is_empty())
-                .map(String::from)
-                .unwrap_or_else(|| approval_formatter::format_approval_request(request)),
+        let (content, media) = match &msg.message_type {
+            crate::bus::OutboundMessageType::Chat { content, media } => {
+                (content.clone(), media.clone())
+            }
+            crate::bus::OutboundMessageType::ApprovalRequest { request } => (
+                request
+                    .display_message
+                    .as_deref()
+                    .filter(|s| !s.is_empty())
+                    .map(String::from)
+                    .unwrap_or_else(|| approval_formatter::format_approval_request(request)),
+                vec![],
+            ),
             crate::bus::OutboundMessageType::ToolProgress {
                 tool_name,
                 status,
@@ -981,13 +1114,57 @@ impl Channel for DiscordChannel {
                 } else {
                     result_preview.clone()
                 };
-                if preview.is_empty() {
+                let content = if preview.is_empty() {
                     format!("🔧 {} — {}", tool_name, status)
                 } else {
                     format!("🔧 {} — {}\n{}", tool_name, status, preview)
-                }
+                };
+                return self.send_message(&msg.chat_id, &content).await;
             }
         };
+        if !media.is_empty() && self.workspace_dir.is_some() {
+            let ws = self.workspace_dir.as_ref().unwrap();
+            let mut files_data: Vec<(String, Vec<u8>)> = Vec::new();
+            for path_str in &media {
+                let path = std::path::Path::new(path_str);
+                let abs = if path.is_absolute() {
+                    path.to_path_buf()
+                } else {
+                    ws.join(path_str)
+                };
+                if abs.exists() {
+                    if let Ok(bytes) = std::fs::read(&abs) {
+                        let name = abs
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| "file".to_string());
+                        files_data.push((name, bytes));
+                    }
+                }
+            }
+            if !files_data.is_empty() {
+                use reqwest::multipart;
+                let mut form = multipart::Form::new().text("content", content);
+                for (idx, (name, bytes)) in files_data.into_iter().enumerate() {
+                    let part = multipart::Part::bytes(bytes).file_name(name);
+                    form = form.part(format!("files[{}]", idx), part);
+                }
+                let url = format!("{}/channels/{}/messages", API_BASE, msg.chat_id);
+                let resp = self
+                    .client
+                    .post(&url)
+                    .header("Authorization", format!("Bot {}", self.config.token))
+                    .multipart(form)
+                    .send()
+                    .await?;
+                if !resp.status().is_success() {
+                    let status = resp.status();
+                    let body = resp.text().await.unwrap_or_default();
+                    anyhow::bail!("Discord send failed: HTTP {status}: {body}");
+                }
+                return Ok(());
+            }
+        }
         self.send_message(&msg.chat_id, &content).await
     }
 }

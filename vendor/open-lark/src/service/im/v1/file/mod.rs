@@ -1,6 +1,5 @@
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 use crate::core::{
     api_req::ApiRequest,
@@ -56,6 +55,7 @@ impl FileService {
     }
 
     /// 上传文件
+    /// 飞书要求 multipart/form-data，因此使用 body（JSON 描述表单字段）+ file（文件二进制），不再使用 query 传参。
     pub async fn create(
         &self,
         file_type: &str,
@@ -63,16 +63,18 @@ impl FileService {
         file_data: Vec<u8>,
         option: Option<RequestOption>,
     ) -> SDKResult<CreateFileResponse> {
-        let mut query_params = HashMap::new();
-        query_params.insert("file_type", file_type.to_string());
-        query_params.insert("file_name", file_name.to_string());
+        let body = serde_json::to_vec(&serde_json::json!({
+            "file_type": file_type,
+            "file_name": file_name,
+        }))
+        .map_err(|e| crate::core::error::LarkAPIError::DataError(e.to_string()))?;
 
         let api_req = ApiRequest {
             http_method: Method::POST,
             api_path: crate::core::endpoints::im::IM_V1_FILES.to_string(),
             supported_access_token_types: vec![AccessTokenType::Tenant, AccessTokenType::User],
-            query_params,
-            body: file_data,
+            body,
+            file: file_data,
             ..Default::default()
         };
 

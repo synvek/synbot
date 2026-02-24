@@ -162,6 +162,7 @@ pub async fn cmd_start() -> Result<()> {
         heartbeat_cron_ctx,
         &sandbox_context,
         shared_session_state.clone(),
+        bus.outbound_tx_clone(),
     ));
 
     let roles_dir = config::roles_dir();
@@ -269,13 +270,20 @@ pub async fn cmd_start() -> Result<()> {
         let feishu_cfg = feishu_cfg.clone();
         let feishu_inbound = inbound_tx.clone();
         let feishu_outbound = bus.subscribe_outbound();
+        let feishu_outbound_tx = bus.outbound_tx_clone();
         let show_tool_calls = cfg.show_tool_calls && feishu_cfg.show_tool_calls;
         let feishu_approval = std::sync::Arc::clone(&approval_manager);
         let feishu_classifier = std::sync::Arc::clone(&completion_model);
+        let feishu_workspace = Some(ws.clone());
         tokio::spawn(async move {
             let mut ch = crate::channels::feishu::FeishuChannel::new(
-                feishu_cfg, feishu_inbound, feishu_outbound, show_tool_calls,
+                feishu_cfg,
+                feishu_inbound,
+                feishu_outbound,
+                show_tool_calls,
+                feishu_workspace,
             )
+            .with_outbound_tx(feishu_outbound_tx)
             .with_approval_manager(feishu_approval)
             .with_approval_classifier(feishu_classifier);
             if let Err(e) = ch.start().await {
@@ -292,9 +300,14 @@ pub async fn cmd_start() -> Result<()> {
         let dc_inbound = inbound_tx.clone();
         let dc_outbound = bus.subscribe_outbound();
         let show_tool_calls = cfg.show_tool_calls && dc_cfg.show_tool_calls;
+        let dc_workspace = Some(ws.clone());
         tokio::spawn(async move {
             let mut ch = crate::channels::discord::DiscordChannel::new(
-                dc_cfg, dc_inbound, dc_outbound, show_tool_calls,
+                dc_cfg,
+                dc_inbound,
+                dc_outbound,
+                show_tool_calls,
+                dc_workspace,
             );
             if let Err(e) = ch.start().await {
                 tracing::error!("Discord channel error: {e:#}");
@@ -310,12 +323,14 @@ pub async fn cmd_start() -> Result<()> {
         let slack_inbound = inbound_tx.clone();
         let slack_outbound = bus.subscribe_outbound();
         let show_tool_calls = cfg.show_tool_calls && slack_cfg.show_tool_calls;
+        let slack_workspace = Some(ws.clone());
         tokio::spawn(async move {
             match crate::channels::slack::SlackChannel::new(
                 slack_cfg,
                 slack_inbound,
                 slack_outbound,
                 show_tool_calls,
+                slack_workspace,
             ) {
                 Ok(mut ch) => {
                     if let Err(e) = ch.start().await {

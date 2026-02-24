@@ -83,6 +83,7 @@ pub fn build_default_tools(
     heartbeat_cron: HeartbeatCronContext,
     sandbox_context: &SandboxContext,
     shared_session_state: crate::agent::session_state::SharedSessionState,
+    outbound_tx: tokio::sync::broadcast::Sender<crate::bus::OutboundMessage>,
 ) -> crate::tools::ToolRegistry {
     use crate::tools::*;
     let restrict = cfg.tools.exec.restrict_to_workspace;
@@ -139,6 +140,13 @@ pub fn build_default_tools(
         shared_session_state.clone(),
     )))
     .expect("register ResetSessionTool");
+
+    reg.register(std::sync::Arc::new(message::MessageTool {
+        outbound_tx,
+        default_channel: String::new(),
+        default_chat_id: String::new(),
+    }))
+    .expect("register MessageTool");
 
     if let Some((config, config_path)) = heartbeat_cron {
         let inner = heartbeat_cron::HeartbeatCronTools {
