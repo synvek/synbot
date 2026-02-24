@@ -17,6 +17,7 @@ use tokio::sync::{broadcast, mpsc};
 use tracing::{error, info, warn};
 
 use crate::bus::{InboundMessage, OutboundMessage};
+use crate::channels::file_handler;
 use crate::channels::{Channel, approval_formatter};
 use crate::config::{AllowlistEntry, SlackConfig};
 
@@ -128,6 +129,26 @@ async fn slack_upload_file_v2(
     Ok(())
 }
 
+/// Download a Slack file from its private download URL (requires Bearer token).
+async fn slack_download_attachment(
+    token: &str,
+    url: &url::Url,
+) -> Result<Vec<u8>, String> {
+    let client = reqwest::Client::builder()
+        .build()
+        .map_err(|e: reqwest::Error| e.to_string())?;
+    let resp = client
+        .get(url.as_str())
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await.map_err(|e: reqwest::Error| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("Slack file download: HTTP {}", resp.status()));
+    }
+    let bytes = resp.bytes().await.map_err(|e: reqwest::Error| e.to_string())?;
+    Ok(bytes.to_vec())
+}
+
 // ---------------------------------------------------------------------------
 // Message splitting (reuse pattern from Discord)
 // ---------------------------------------------------------------------------
@@ -172,6 +193,10 @@ struct SlackPushStateInner {
     allowlist: Vec<AllowlistEntry>,
     enable_allowlist: bool,
     group_my_name: Option<String>,
+    /// Workspace directory for saving incoming attachments; required to download message files.
+    workspace_dir: Option<PathBuf>,
+    /// Bot token (xoxb-...) for downloading private file URLs.
+    token: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -252,6 +277,8 @@ impl SlackChannel {
                 allowlist: self.config.allowlist.clone(),
                 enable_allowlist: self.config.enable_allowlist,
                 group_my_name: self.config.group_my_name.clone(),
+                workspace_dir: self.workspace_dir.clone(),
+                token: self.config.token.clone(),
             }),
         };
 
@@ -339,7 +366,11 @@ async fn slack_push_events_handler(
         &state_inner.allowlist,
         state_inner.enable_allowlist,
         state_inner.group_my_name.as_deref(),
-    ) {
+        state_inner.workspace_dir.as_deref(),
+        Some(state_inner.token.as_str()),
+    )
+    .await
+    {
         info!(
             channel = %inbound.channel,
             chat_id = %inbound.chat_id,
@@ -367,17 +398,20 @@ fn slack_push_event_type_name(event: &SlackPushEventCallback) -> &'static str {
 }
 
 /// Convert Slack push event (Message or AppMention) to InboundMessage.
-/// Returns None if from bot, no text, or not allowed.
-fn slack_push_to_inbound(
+/// When the message has file attachments and workspace_dir + token are set, downloads each file to workspace (using file_handler naming) and sets media.
+/// Returns None if from bot, no text/files, or not allowed.
+async fn slack_push_to_inbound(
     event: &SlackPushEventCallback,
     channel_name: &str,
     allowlist: &[AllowlistEntry],
     enable_allowlist: bool,
     group_my_name: Option<&str>,
+    workspace_dir: Option<&std::path::Path>,
+    token: Option<&str>,
 ) -> Option<InboundMessage> {
     use slack_morphism::events::SlackEventCallbackBody;
 
-    let (chat_id, sender_id, mut content, is_group) = match &event.event {
+    let (chat_id, sender_id, mut content, is_group, files_opt) = match &event.event {
         SlackEventCallbackBody::Message(msg) => {
             if msg.sender.bot_id.is_some() || msg.hidden == Some(true) {
                 info!("Slack: ignoring message (from bot or hidden)");
@@ -396,18 +430,39 @@ fn slack_push_to_inbound(
                 .map(String::as_str)
                 .unwrap_or("")
                 .trim();
-            if text.is_empty() {
-                info!("Slack: ignoring message (empty text)");
+            let has_files = msg
+                .content
+                .as_ref()
+                .and_then(|c| c.files.as_ref())
+                .map(|f| !f.is_empty())
+                .unwrap_or(false);
+            if text.is_empty() && !has_files {
+                info!("Slack: ignoring message (empty text and no attachments)");
                 return None;
             }
+            let content = if text.is_empty() {
+                let n = msg
+                    .content
+                    .as_ref()
+                    .and_then(|c| c.files.as_ref())
+                    .map(|f| f.len())
+                    .unwrap_or(0);
+                format!("[User sent {} attachment(s)]", n)
+            } else {
+                text.to_string()
+            };
             let channel_id = msg
                 .origin
                 .channel
                 .as_ref()
                 .map(|c| slack_channel_id_raw(&c.to_slack_format()))
                 .unwrap_or_default();
-            let is_group = channel_id.starts_with('C'); // public channel
-            (channel_id, sender_id, text.to_string(), is_group)
+            let is_group = channel_id.starts_with('C');
+            let files = msg
+                .content
+                .as_ref()
+                .and_then(|c| c.files.as_ref());
+            (channel_id, sender_id, content, is_group, files)
         }
         SlackEventCallbackBody::AppMention(mention) => {
             let sender_id = mention.user.to_slack_format();
@@ -421,7 +476,13 @@ fn slack_push_to_inbound(
                 return None;
             }
             let channel_id = slack_channel_id_raw(&mention.channel.to_slack_format());
-            (channel_id, sender_id, text.to_string(), true)
+            (
+                channel_id,
+                sender_id,
+                text.to_string(),
+                true,
+                None::<&Vec<SlackFile>>,
+            )
         }
         _ => {
             info!(
@@ -430,6 +491,46 @@ fn slack_push_to_inbound(
             return None;
         }
     };
+
+    // Download attachments to workspace when possible
+    let mut media = Vec::new();
+    if let (Some(ws), Some(tok), Some(files)) = (workspace_dir, token, files_opt) {
+        for file in files.iter() {
+            let url = match &file.url_private_download {
+                Some(u) => u,
+                None => {
+                    warn!(file_id = %file.id.0, "Slack: file has no url_private_download, skipping");
+                    continue;
+                }
+            };
+            let bytes = match slack_download_attachment(tok, url).await {
+                Ok(b) => b,
+                Err(e) => {
+                    warn!(file_id = %file.id.0, error = %e, "Slack: failed to download attachment");
+                    continue;
+                }
+            };
+            let name: String = file
+                .name
+                .as_deref()
+                .or(file.title.as_deref())
+                .map(String::from)
+                .unwrap_or_else(|| format!("file_{}", file.id.0));
+            match file_handler::save_incoming_file(ws, &name, &bytes) {
+                Ok(path) => {
+                    let rel = path
+                        .strip_prefix(ws)
+                        .unwrap_or(&path)
+                        .to_string_lossy()
+                        .into_owned();
+                    media.push(rel);
+                }
+                Err(e) => {
+                    warn!(file_id = %file.id.0, error = %e, "Slack: failed to save attachment to workspace");
+                }
+            }
+        }
+    }
 
     // Allowlist check
     if enable_allowlist && !allowlist.is_empty() {
@@ -463,7 +564,7 @@ fn slack_push_to_inbound(
         chat_id,
         content,
         timestamp: chrono::Utc::now(),
-        media: vec![],
+        media,
         metadata: serde_json::json!({
             "event_id": format!("{}", event.event_id.0),
             "team_id": format!("{}", event.team_id.0),
