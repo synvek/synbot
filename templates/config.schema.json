@@ -18,6 +18,7 @@
     "channels": {
       "default": {
         "discord": [],
+        "email": [],
         "feishu": [],
         "telegram": []
       },
@@ -470,6 +471,13 @@
           "items": {
             "$ref": "#/definitions/SlackConfig"
           }
+        },
+        "email": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/EmailConfig"
+          }
         }
       }
     },
@@ -572,6 +580,55 @@
           "default": "",
           "type": "string"
         }
+      }
+    },
+    "EmailConfig": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "fromSender": {
+          "description": "Only treat emails FROM this address as chat (e.g. user@example.com).",
+          "default": "",
+          "type": "string"
+        },
+        "imap": {
+          "$ref": "#/definitions/EmailServerConfig"
+        },
+        "name": {
+          "description": "Unique channel name (default \"email\").",
+          "default": "email",
+          "type": "string"
+        },
+        "pollIntervalSecs": {
+          "description": "Poll interval in seconds (default 120 = 2 minutes).",
+          "default": 120,
+          "type": "integer"
+        },
+        "showToolCalls": {
+          "default": true,
+          "type": "boolean"
+        },
+        "smtp": {
+          "$ref": "#/definitions/EmailServerConfig"
+        },
+        "startTime": {
+          "description": "Only process emails received after this time (RFC3339 or YYYY-MM-DD).",
+          "default": "",
+          "type": "string"
+        }
+      }
+    },
+    "EmailServerConfig": {
+      "type": "object",
+      "properties": {
+        "host": { "default": "", "type": "string" },
+        "password": { "default": "", "type": "string" },
+        "port": { "default": 0, "type": "integer" },
+        "useTls": { "default": true, "type": "boolean" },
+        "username": { "default": "", "type": "string" }
       }
     },
     "SlackConfig": {

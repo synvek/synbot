@@ -137,6 +137,61 @@ fn default_slack_name() -> String {
     "slack".into()
 }
 
+/// Email account and transport settings (IMAP receive, SMTP send).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct EmailServerConfig {
+    #[serde(default)]
+    pub host: String,
+    #[serde(default)]
+    pub port: u16,
+    #[serde(default)]
+    pub username: String,
+    #[serde(default)]
+    pub password: String,
+    /// Use TLS (e.g. IMAPS 993, SMTPS 465). When false, use STARTTLS on plain port.
+    #[serde(default = "default_true")]
+    pub use_tls: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct EmailConfig {
+    /// Unique channel name (default "email").
+    #[serde(default = "default_email_name")]
+    pub name: String,
+    #[serde(default)]
+    pub enabled: bool,
+    /// IMAP receive server (host, port, username, password).
+    #[serde(default)]
+    pub imap: EmailServerConfig,
+    /// SMTP send server (host, port, username, password).
+    #[serde(default)]
+    pub smtp: EmailServerConfig,
+    /// Only treat emails FROM this address as chat (e.g. "user@example.com").
+    #[serde(default)]
+    pub from_sender: String,
+    /// Only process emails received after this time (RFC3339 or date-only "YYYY-MM-DD").
+    #[serde(default)]
+    pub start_time: String,
+    /// Poll interval in seconds (default 120 = 2 minutes).
+    #[serde(default = "default_email_poll_interval_secs")]
+    pub poll_interval_secs: u64,
+    /// When true (default), push tool execution progress to this channel.
+    #[serde(default = "default_true")]
+    pub show_tool_calls: bool,
+}
+
+fn default_email_name() -> String {
+    "email".into()
+}
+
+fn default_email_poll_interval_secs() -> u64 {
+    120
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
@@ -149,6 +204,8 @@ pub struct ChannelsConfig {
     pub feishu: Vec<FeishuConfig>,
     #[serde(default)]
     pub slack: Vec<SlackConfig>,
+    #[serde(default)]
+    pub email: Vec<EmailConfig>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1464,6 +1521,45 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
             });
         }
     }
+    for (i, c) in config.channels.email.iter().enumerate() {
+        if c.enabled {
+            if c.imap.host.is_empty() || c.imap.username.is_empty() || c.imap.password.is_empty() {
+                errors.push(ValidationError {
+                    field: format!("channels.email[{}].imap", i),
+                    value: String::new(),
+                    constraint: "host, username, password must be non-empty when enabled".into(),
+                });
+            }
+            if c.smtp.host.is_empty() || c.smtp.username.is_empty() || c.smtp.password.is_empty() {
+                errors.push(ValidationError {
+                    field: format!("channels.email[{}].smtp", i),
+                    value: String::new(),
+                    constraint: "host, username, password must be non-empty when enabled".into(),
+                });
+            }
+            if c.from_sender.is_empty() {
+                errors.push(ValidationError {
+                    field: format!("channels.email[{}].fromSender", i),
+                    value: String::new(),
+                    constraint: "must be non-empty when enabled (only emails from this address are processed)".into(),
+                });
+            }
+            if c.poll_interval_secs == 0 {
+                errors.push(ValidationError {
+                    field: format!("channels.email[{}].pollIntervalSecs", i),
+                    value: c.poll_interval_secs.to_string(),
+                    constraint: "must be greater than 0".into(),
+                });
+            }
+        }
+        if !c.name.is_empty() && !all_channel_names.insert(c.name.clone()) {
+            errors.push(ValidationError {
+                field: format!("channels.email[{}].name", i),
+                value: c.name.clone(),
+                constraint: "channel name must be globally unique".into(),
+            });
+        }
+    }
 
     // --- Collect enabled channel names for main_channel validation ---
     let enabled_channels: Vec<String> = {
@@ -1484,6 +1580,11 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
             }
         }
         for c in &config.channels.slack {
+            if c.enabled && !c.name.is_empty() {
+                ch.push(c.name.clone());
+            }
+        }
+        for c in &config.channels.email {
             if c.enabled && !c.name.is_empty() {
                 ch.push(c.name.clone());
             }

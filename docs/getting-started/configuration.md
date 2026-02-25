@@ -168,6 +168,45 @@ Channels are configured as **arrays**: you can run multiple bots per platform (e
 - **appId** / **appSecret**: Your Feishu app credentials
 - **allowlist**: Same structure; use Feishu user or chat IDs
 
+### Email
+
+```json
+{
+  "channels": {
+    "email": [
+      {
+        "name": "email",
+        "enabled": true,
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "username": "bot@example.com",
+          "password": "APP_PASSWORD",
+          "useTls": true
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "username": "bot@example.com",
+          "password": "APP_PASSWORD",
+          "useTls": true
+        },
+        "fromSender": "user@example.com",
+        "startTime": "2025-01-01T00:00:00Z",
+        "pollIntervalSecs": 120,
+        "showToolCalls": true
+      }
+    ]
+  }
+}
+```
+
+- **imap** / **smtp**: Receive (IMAP) and send (SMTP) server: host, port, username, password, useTls. Default ports: 993/465 when useTls is true, 143/587 when false.
+- **fromSender**: Only emails from this address are treated as chat (e.g. the user's address).
+- **startTime**: Only process emails received after this time (RFC3339 or `YYYY-MM-DD`). Omit or leave empty to process all.
+- **pollIntervalSecs**: Poll interval in seconds (default 120 = 2 minutes).
+- Messages are processed oldest-first; each is replied to, then marked read, then the next.
+
 ## Provider Configuration
 
 ### Anthropic

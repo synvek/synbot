@@ -16,13 +16,13 @@ Synbot supports multiple messaging channels, allowing you to interact with the A
 ### Currently Supported
 - **Telegram**: Popular messaging platform with bot API
 - **Discord**: Community chat platform with rich features
-- **Feishu (椋炰功)**: Enterprise messaging platform popular in China
+- **Feishu**: Enterprise messaging platform popular in China
 - **Slack**: Team chat with **Socket Mode** (no public URL required)
+- **Email**: Poll IMAP for unread messages from a configured sender, reply via SMTP, and mark as read (configurable start time and poll interval; messages processed oldest-first).
 
 ### Planned Support
-- WeChat (寰俊)
+- WeChat
 - Matrix
-- Email
 
 ## Channel Configuration
 

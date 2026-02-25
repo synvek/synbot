@@ -165,6 +165,45 @@ cargo run --example generate_config_schema --features schema -- -o config.schema
 - **appId** / **appSecret**: 飞书应用 ID 与密钥
 - **allowlist**: 结构同上；使用飞书用户或会话 ID
 
+### 电子邮件 (Email)
+
+```json
+{
+  "channels": {
+    "email": [
+      {
+        "name": "email",
+        "enabled": true,
+        "imap": {
+          "host": "imap.example.com",
+          "port": 993,
+          "username": "bot@example.com",
+          "password": "APP_PASSWORD",
+          "useTls": true
+        },
+        "smtp": {
+          "host": "smtp.example.com",
+          "port": 465,
+          "username": "bot@example.com",
+          "password": "APP_PASSWORD",
+          "useTls": true
+        },
+        "fromSender": "user@example.com",
+        "startTime": "2025-01-01T00:00:00Z",
+        "pollIntervalSecs": 120,
+        "showToolCalls": true
+      }
+    ]
+  }
+}
+```
+
+- **imap** / **smtp**: 收信（IMAP）与发信（SMTP）服务器：host、port、username、password、useTls。useTls 为 true 时默认端口 993/465，为 false 时为 143/587。
+- **fromSender**: 仅把来自该地址的邮件当作聊天（例如用户邮箱）。
+- **startTime**: 只处理此时间之后收到的邮件（RFC3339 或 `YYYY-MM-DD`）。留空则处理全部。
+- **pollIntervalSecs**: 轮询间隔秒数（默认 120 = 2 分钟）。
+- 邮件按从旧到新顺序处理；每条回复后标为已读再处理下一条。
+
 ## 提供商配置
 
 ### Anthropic

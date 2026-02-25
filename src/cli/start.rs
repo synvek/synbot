@@ -342,6 +342,27 @@ pub async fn cmd_start() -> Result<()> {
         });
     }
 
+    for email_cfg in &cfg.channels.email {
+        if !email_cfg.enabled {
+            continue;
+        }
+        let email_cfg = email_cfg.clone();
+        let email_inbound = inbound_tx.clone();
+        let email_outbound = bus.subscribe_outbound();
+        let show_tool_calls = cfg.show_tool_calls && email_cfg.show_tool_calls;
+        tokio::spawn(async move {
+            let mut ch = crate::channels::email::EmailChannel::new(
+                email_cfg,
+                email_inbound,
+                email_outbound,
+                show_tool_calls,
+            );
+            if let Err(e) = ch.start().await {
+                tracing::error!("Email channel error: {e:#}");
+            }
+        });
+    }
+
     // Start web server if enabled
     if cfg.web.enabled {
         let mut web_config = cfg.web.clone();

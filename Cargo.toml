@@ -57,6 +57,14 @@ open-lark = { version =  "0.14", features = ["bot", "im", "websocket"] }
 # Slack (Socket Mode)
 slack-morphism = { version = "2.18", features = ["hyper"] }
 
+# Email channel (IMAP + SMTP)
+async-imap = { version = "0.11", default-features = false, features = ["runtime-tokio"] }
+imap-proto = "0.16"
+native-tls = "0.2"
+tokio-native-tls = "0.3"
+lettre = { version = "0.11", default-features = false, features = ["builder", "smtp-transport", "tokio1", "tokio1-native-tls"] }
+mail-parser = "0.9"
+
 # Time
 chrono = { version = "0.4", features = ["serde"] }
 
