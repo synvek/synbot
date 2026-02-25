@@ -1,0 +1,192 @@
+name: Sync Artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release Tag (Leave blank for latest)'
+        required: false
+        default: 'v0.4.1'
+      asset_pattern:
+        description: 'Asset name pattern (e.g., *.zip, *cuda*) - Leave blank for ALL assets'
+        required: false
+        default: ''
+        
+jobs:
+  sync_artifacts:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: read 
+
+    steps:      
+      - name: Set Variables
+        run: |
+          echo "REPO=synvek/synbot" >> $GITHUB_ENV
+          echo "DOWNLOAD_DIR=./artifacts" >> $GITHUB_ENV
+
+      - name: Set Directory
+        run: |
+          mkdir -p ${{ env.DOWNLOAD_DIR }}
+
+      - name: Convert Asset Pattern to Regex
+        id: pattern_convert
+        shell: bash
+        run: |
+          INPUT_PATTERN="${{ github.event.inputs.asset_pattern }}"
+          
+          if [ -z "$INPUT_PATTERN" ]; then
+            REGEX_PATTERN=".*"
+          else
+            ESCAPED_DOTS=$(echo "$INPUT_PATTERN" | sed 's/\./\\\./g')
+            
+            REGEX_PATTERN=$(echo "$ESCAPED_DOTS" | sed 's/*/.\*/g')
+          fi
+          
+          echo "Input Pattern: $INPUT_PATTERN"
+          echo "Regex Pattern: $REGEX_PATTERN"
+          
+          echo "regex_pattern=$REGEX_PATTERN" >> $GITHUB_OUTPUT
+
+      - name: Get Release Assets Data
+        id: get_assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag }}
+        run: |
+          echo "Fetching Release Assets for tag: $TAG with pattern: ${{ steps.pattern_convert.outputs.regex_pattern }}"
+          
+          if [ "$TAG" == "latest" ]; then
+            RELEASE_JSON=$(gh api /repos/${{ env.REPO }}/releases/latest)
+          else
+            RELEASE_JSON=$(gh api /repos/${{ env.REPO }}/releases/tags/${TAG})
+          fi
+          
+          ASSET_DATA=$(echo "${RELEASE_JSON}" | \
+            jq -r --arg regex "${{ steps.pattern_convert.outputs.regex_pattern }}" '.assets[] | 
+              select(.name | test($regex)) |
+              
+              (.name + "|" + .browser_download_url + "|" + (.digest | ltrimstr("sha256:")))'
+          )
+          
+          if [ -z "$ASSET_DATA" ]; then
+              echo "::warning::No assets found matching the pattern or the release."
+              exit 0 
+          fi
+          
+          ASSET_DATA_OUTPUT=$(echo "$ASSET_DATA" | sed ':a;N;$!ba;s/\n/%NL%/g')
+          echo "asset_list=$ASSET_DATA_OUTPUT" >> $GITHUB_OUTPUT
+
+      - name: Download and Verify Assets
+        env:
+          ASSET_LIST: ${{ steps.get_assets.outputs.asset_list }}
+          DOWNLOAD_DIR: ${{ env.DOWNLOAD_DIR }}
+        run: |
+          if [ -z "$ASSET_LIST" ]; then
+            echo "No assets to download."
+            exit 0
+          fi
+          
+          echo "$ASSET_LIST" | sed 's/%NL%/\n/g' | while IFS="|" read -r ASSET_NAME DOWNLOAD_URL SHA256_DIGEST; do
+              
+              if [ -z "$ASSET_NAME" ]; then
+                  continue
+              fi
+              
+              LOCAL_PATH="$DOWNLOAD_DIR/$ASSET_NAME"
+              
+              echo "---"
+              echo "Processing: $ASSET_NAME"
+              
+              curl -L -sS "$DOWNLOAD_URL" -o "$LOCAL_PATH"
+              
+              VERIFY_STRING="${SHA256_DIGEST}  ${LOCAL_PATH}"
+              
+              echo "Verifying SHA256 checksum..."
+              
+              echo "$VERIFY_STRING" | shasum -a 256 --check -
+              
+              echo "✅ $ASSET_NAME verification successful!"             
+          done
+          echo "---"
+          echo "✅ All required assets downloaded and verified."
+
+      - name: Create or update GitCode Release
+        run: |          
+          API_RESPONSE=$(curl -s -w "%{http_code}" \
+                -H "Authorization: token ${{ secrets.GITCODE_TOKEN }}" \
+                -H "Accept: application/json" \
+                "https://gitcode.com/api/v5/repos/synvek/synbot/releases/tags/${{ github.event.inputs.tag }}")
+
+          HTTP_STATUS="${API_RESPONSE: -3}"
+          RESPONSE_CONTENT="${API_RESPONSE%???}"
+          
+          echo "HTTP Status: $HTTP_STATUS"
+          echo "HTTP Content: $RESPONSE_CONTENT"
+          
+          if [ "$HTTP_STATUS" -eq 200 ]; then
+            EXISTING_RELEASE=$(echo "$RESPONSE_CONTENT" | jq -r '.id')
+            echo "::set-output name=exists::true"
+            echo "::set-output name=release_id::$RELEASE_ID"
+            echo "Found existing release with ID: $RELEASE_ID"
+          else
+            EXISTING_RELEASE="not_found"
+            echo "::set-output name=exists::false"
+            echo "Release does not exist, will create new one"
+          fi                
+
+          if [[ "$EXISTING_RELEASE" == *"not_found"* ]]; then
+            curl -X POST \
+              -H "Authorization: ${{ secrets.GIT_ACCESS_TOKEN }}" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "tag_name": "${{ github.event.inputs.tag }}",
+                "name": "${{ github.event.inputs.tag }}",
+                "body": "${{ github.event.inputs.tag }}"
+              }' \
+              "https://gitcode.com/api/v5/repos/synvek/synbot/releases"
+            echo "New GitCode release created"
+          else
+            # 更新现有Release
+            RELEASE_ID=$(echo "$EXISTING_RELEASE" | jq -r '.id')
+            curl -X PATCH \
+              -H "Authorization: ${{ secrets.GIT_ACCESS_TOKEN }}" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "name": "${{ github.event.inputs.tag }}",
+                "body": "${{ github.event.inputs.tag }}"
+              }' \
+              "https://gitcode.com/api/v5/repos/synvek/synbot/releases/$RELEASE_ID"
+            echo "Existing GitCode release updated"
+          fi
+
+      - name: Upload assets to GitCode Release
+        run: |
+          # 获取Release ID
+          RELEASE_INFO=$(curl -s \
+            -H "Authorization: ${{ secrets.GIT_ACCESS_TOKEN }}" \
+            -H "Accept: application/json" \
+            "https://gitcode.com/api/v5/repos/synvek/synbot/releases/tags/${{ github.event.inputs.tag }}")
+          
+          RELEASE_ID=$(echo "$RELEASE_INFO" | jq -r '.id')
+          UPLOAD_URL="https://gitcode.com/api/v5/repos/synvek/synbot/releases/$RELEASE_ID/assets"
+          
+          # 上传所有资源文件
+          for asset_file in ${{ env.DOWNLOAD_DIR }}/*; do
+            if [ -f "$asset_file" ]; then
+              ASSET_NAME=$(basename "$asset_file")
+              echo "Uploading $ASSET_NAME to GitCode..."
+              
+              curl -X POST \
+                -H "Authorization: token ${{ secrets.GIT_ACCESS_TOKEN }}" \
+                -H "Content-Type: multipart/form-data" \
+                -F "name=$ASSET_NAME" \
+                -F "attachment=@$asset_file" \
+                "$UPLOAD_URL"
+            fi
+          done
+
+      - name: Verify sync completion
+        run: |
+          echo "✅ Release synchronization completed"
+          echo "GitCode Release URL: https://gitcode.net/synvek/synbot/releases/tag/${{ github.event.inputs.tag }}"          
