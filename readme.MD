@@ -123,6 +123,8 @@ On Windows, run `synbot sandbox setup` once as Administrator to add network rule
 
 - Feishu(飞书)
 
+- Email
+
 - More are still in progress
 
 ## Providers

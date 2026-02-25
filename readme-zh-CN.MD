@@ -122,6 +122,8 @@ synbot sandbox start
 
 - 飞书 (Feishu)
 
+- Email
+
 - 更多渠道开发中
 
 ## 模型提供商
