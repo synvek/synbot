@@ -24,24 +24,31 @@ pub fn resolve_provider(cfg: &config::Config, provider_name: &str) -> (String, O
     };
 
     let name = provider_name.trim().to_lowercase();
-    let (key, base) = if name.contains("openrouter") {
-        (cfg.providers.openrouter.api_key.clone(), &cfg.providers.openrouter.api_base)
+    let (key, base) = if let Some(entry) = cfg
+        .providers
+        .extra
+        .get(provider_name.trim())
+        .or_else(|| cfg.providers.extra.get(&name))
+    {
+        (entry.api_key.clone(), normalize_base(&entry.api_base))
+    } else if name.contains("openrouter") {
+        (cfg.providers.openrouter.api_key.clone(), normalize_base(&cfg.providers.openrouter.api_base))
     } else if name.contains("anthropic") || name.contains("claude") {
-        (cfg.providers.anthropic.api_key.clone(), &cfg.providers.anthropic.api_base)
+        (cfg.providers.anthropic.api_key.clone(), normalize_base(&cfg.providers.anthropic.api_base))
     } else if name.contains("openai") {
-        (cfg.providers.openai.api_key.clone(), &cfg.providers.openai.api_base)
+        (cfg.providers.openai.api_key.clone(), normalize_base(&cfg.providers.openai.api_base))
     } else if name.contains("deepseek") {
-        (cfg.providers.deepseek.api_key.clone(), &cfg.providers.deepseek.api_base)
+        (cfg.providers.deepseek.api_key.clone(), normalize_base(&cfg.providers.deepseek.api_base))
     } else if name.contains("moonshot") {
-        (cfg.providers.moonshot.api_key.clone(), &cfg.providers.moonshot.api_base)
+        (cfg.providers.moonshot.api_key.clone(), normalize_base(&cfg.providers.moonshot.api_base))
     } else if name.contains("kimi") {
-        (cfg.providers.kimi_code.api_key.clone(), &cfg.providers.kimi_code.api_base)
+        (cfg.providers.kimi_code.api_key.clone(), normalize_base(&cfg.providers.kimi_code.api_base))
     } else if name.contains("ollama") {
-        (cfg.providers.ollama.api_key.clone(), &cfg.providers.ollama.api_base)
+        (cfg.providers.ollama.api_key.clone(), normalize_base(&cfg.providers.ollama.api_base))
     } else {
-        (String::new(), &None)
+        (String::new(), normalize_base(&None))
     };
-    (key, normalize_base(base))
+    (key, base)
 }
 
 /// Build a rig completion model using rig-core (no rig-dyn). Returns Arc<dyn SynbotCompletionModel>.

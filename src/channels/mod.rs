@@ -4,16 +4,21 @@ pub mod file_handler;
 pub mod discord;
 pub mod email;
 pub mod feishu;
+pub mod factory;
 pub mod slack;
 pub mod telegram;
 
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
+use tokio::sync::{broadcast, mpsc};
 use tracing::{info, warn};
 
-use crate::bus::OutboundMessage;
+use crate::bus::{InboundMessage, OutboundMessage};
 
 // ---------------------------------------------------------------------------
 // Retry policy & state
@@ -168,6 +173,64 @@ pub trait Channel: Send + Sync {
             return true;
         }
         allow_list.iter().any(|a| a == sender_id)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Channel factory and registry (for plugins)
+// ---------------------------------------------------------------------------
+
+/// Context passed to channel factories when creating a channel instance.
+/// Not Clone because [broadcast::Receiver] is not cloneable; create one context per channel.
+pub struct ChannelStartContext {
+    pub inbound_tx: mpsc::Sender<InboundMessage>,
+    pub outbound_rx: broadcast::Receiver<OutboundMessage>,
+    pub show_tool_calls: bool,
+    pub workspace: Option<PathBuf>,
+    pub approval_manager: Option<Arc<crate::tools::approval::ApprovalManager>>,
+    pub completion_model: Option<Arc<dyn crate::rig_provider::SynbotCompletionModel>>,
+    pub outbound_tx: Option<broadcast::Sender<OutboundMessage>>,
+}
+
+/// Factory that builds a [Channel] from config JSON and start context.
+/// Plugins implement this and register with [ChannelRegistry].
+pub trait ChannelFactory: Send + Sync {
+    fn create(
+        &self,
+        config: serde_json::Value,
+        ctx: ChannelStartContext,
+    ) -> Result<Box<dyn Channel>>;
+}
+
+/// Registry of channel type name to factory. Built-ins are registered via [factory::register_builtin_channels].
+pub struct ChannelRegistry {
+    factories: HashMap<String, Arc<dyn ChannelFactory>>,
+}
+
+impl ChannelRegistry {
+    pub fn new() -> Self {
+        Self {
+            factories: HashMap::new(),
+        }
+    }
+
+    pub fn register(&mut self, name: &str, factory: Arc<dyn ChannelFactory>) {
+        self.factories.insert(name.to_string(), factory);
+    }
+
+    pub fn get(&self, name: &str) -> Option<Arc<dyn ChannelFactory>> {
+        self.factories.get(name).cloned()
+    }
+
+    /// Return all registered channel type names.
+    pub fn type_names(&self) -> Vec<String> {
+        self.factories.keys().cloned().collect()
+    }
+}
+
+impl Default for ChannelRegistry {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

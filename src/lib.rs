@@ -41,11 +41,14 @@
 //!
 //! - [`sandbox`] - Multi-layer sandbox security solution
 //! - [`agent`] - AI agent management and execution
-//! - [`channels`] - Communication channel integrations
-//! - [`config`] - Configuration management
-//! - [`tools`] - Tool execution and management
+//! - [`channels`] - Communication channel integrations (with [channels::ChannelRegistry] for plugins)
+//! - [`config`] - Configuration management (supports `config.plugins` and `providers.extra` for plugins)
+//! - [`tools`] - Tool execution and management ([tools::DynTool], [tools::ToolRegistry], [tools::ToolRegistrationContext])
 //! - [`web`] - Web server and API
 //! - [`cron`] - Scheduled task execution
+//! - [`hooks`] - Lifecycle hooks (message/tool/agent events) for plugins
+//! - [`background`] - Background service trait and registry for plugins
+//! - [`rig_provider`] - LLM provider trait and [rig_provider::ProviderRegistry] for plugins
 //!
 //! ## Sandbox Architecture
 //!
@@ -105,8 +108,10 @@
 
 pub mod agent;
 pub mod appcontainer_dns;
+pub mod background;
 pub mod bus;
 pub mod channels;
+pub mod hooks;
 pub mod cli;
 pub mod config;
 pub mod cron;

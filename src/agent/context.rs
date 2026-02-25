@@ -4,7 +4,7 @@ use chrono::Local;
 use std::path::{Path, PathBuf};
 
 use crate::agent::memory::MemoryStore;
-use crate::agent::skills::SkillsLoader;
+use crate::agent::skills::{CompositeSkillProvider, SkillProvider};
 
 const BOOTSTRAP_FILES: &[&str] = &["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"];
 
@@ -14,7 +14,7 @@ pub struct ContextBuilder {
     #[allow(dead_code)]
     agent_id: String,
     memory: MemoryStore,
-    skills: SkillsLoader,
+    skills: CompositeSkillProvider,
     /// When true, exec runs in tool sandbox (Docker); workspace is mounted at /workspace. Used to add workspace hints in identity_section.
     tool_sandbox_enabled: bool,
 }
@@ -38,7 +38,7 @@ impl ContextBuilder {
         Self {
             workspace: workspace.to_path_buf(),
             memory: MemoryStore::new(&agent_id),
-            skills: SkillsLoader::new(skills_dir),
+            skills: CompositeSkillProvider::default_with_fs(skills_dir),
             agent_id,
             tool_sandbox_enabled,
         }

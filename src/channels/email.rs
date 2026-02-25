@@ -26,6 +26,7 @@ use tokio_native_tls::TlsStream;
 use tracing::{debug, error, info, warn};
 
 use crate::bus::{InboundMessage, OutboundMessage, OutboundMessageType};
+use crate::channels::Channel;
 use crate::config::EmailConfig;
 
 /// Chat id format: "from_addr:uid" so we can reply and mark the right message read.
@@ -521,6 +522,83 @@ impl EmailChannel {
             }
             if let Err(e) = self.mark_read(&mut session, uid).await {
                 warn!(uid, error = %e, "Mark email as read failed");
+            }
+        }
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl Channel for EmailChannel {
+    fn name(&self) -> &str {
+        &self.config.name
+    }
+
+    async fn start(&mut self) -> Result<()> {
+        let channel_name = self.config.name.clone();
+        let outbound_rx = self.outbound_rx.take().expect("start once");
+        let pending = Arc::clone(&self.pending);
+        let config = self.config.clone();
+        let show_tool_calls = self.show_tool_calls;
+        tokio::spawn(async move {
+            Self::run_outbound_listener(channel_name, outbound_rx, pending, config, show_tool_calls).await;
+        });
+
+        let poll_interval = std::time::Duration::from_secs(self.config.poll_interval_secs);
+        let from_sender = self.config.from_sender.trim().to_lowercase();
+        info!(
+            channel = %self.config.name,
+            from_sender = %from_sender,
+            poll_secs = self.config.poll_interval_secs,
+            "Email channel started"
+        );
+
+        loop {
+            debug!(channel = %self.config.name, "Email channel poll cycle start");
+            match self.poll_and_process().await {
+                Ok(()) => {}
+                Err(e) => {
+                    warn!(error = %e, "Email channel poll error");
+                }
+            }
+            tokio::time::sleep(poll_interval).await;
+        }
+    }
+
+    async fn stop(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    async fn send(&self, msg: &OutboundMessage) -> Result<()> {
+        if msg.channel != self.config.name {
+            return Ok(());
+        }
+        let (content, _is_chat) = match &msg.message_type {
+            OutboundMessageType::Chat { content, .. } => (content.clone(), true),
+            OutboundMessageType::ToolProgress {
+                tool_name,
+                status,
+                result_preview,
+            } if self.show_tool_calls => {
+                let preview = if result_preview.len() > 100 {
+                    format!("{}...", &result_preview[..100])
+                } else {
+                    result_preview.clone()
+                };
+                (format!("🔧 {} — {}\n{}", tool_name, status, preview), false)
+            }
+            _ => return Ok(()),
+        };
+        let entry = {
+            let mut guard = self.pending.write().await;
+            guard.remove(&msg.chat_id)
+        };
+        if let Some((from_addr, _uid, _)) = entry {
+            if let Err(e) =
+                Self::send_reply_static(&self.config, &from_addr, "Reply", &content, None).await
+            {
+                tracing::error!(error = %e, "Email channel: send failed");
+                return Err(e.into());
             }
         }
         Ok(())

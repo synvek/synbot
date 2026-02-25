@@ -1,6 +1,7 @@
 use actix_web::{error::ResponseError, http::StatusCode, web, HttpResponse, Result};
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use crate::agent::skills::SkillProvider;
 use crate::web::state::AppState;
 use chrono::{DateTime, Utc};
 

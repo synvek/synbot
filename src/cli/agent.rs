@@ -114,6 +114,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
         shared_session_state,
         agent_registry,
         false,
+        None, // hooks
     )
     .await;
 

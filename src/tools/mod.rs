@@ -1,3 +1,20 @@
+//! Tools — agent-callable tools and registry.
+//!
+//! # Plugin contract
+//!
+//! To extend synbot with custom tools:
+//!
+//! 1. Implement the [DynTool] trait (name, description, parameters_schema, call).
+//! 2. Register your tool with [ToolRegistry::register] during startup.
+//! 3. If you need runtime context (workspace, approval manager, session state, etc.), use
+//!    [ToolRegistrationContext] when it is provided to plugin loading; otherwise construct
+//!    your tool with the same dependencies that [crate::cli::helpers::build_default_tools]
+//!    receives.
+//!
+//! For dynamic loading (e.g. cdylib), the convention is to export a function such as
+//! `register_tools(registry: &mut ToolRegistry, context: &ToolRegistrationContext)` that
+//! registers all tools provided by the plugin.
+
 pub mod approval;
 pub mod approval_store;
 pub mod approval_tool;
@@ -17,10 +34,26 @@ pub mod web;
 use anyhow::Result;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{info, debug};
 
 pub use context::{scope, ToolContext};
+
+/// Context passed when building or extending the tool registry (e.g. for plugins).
+/// Holds references to config, workspace, approval manager, session state, and other
+/// dependencies that tools may need.
+#[derive(Clone)]
+pub struct ToolRegistrationContext {
+    pub workspace: PathBuf,
+    pub approval_manager: Arc<crate::tools::approval::ApprovalManager>,
+    pub session_state: crate::agent::session_state::SharedSessionState,
+    pub outbound_tx: tokio::sync::broadcast::Sender<crate::bus::OutboundMessage>,
+    pub config: Arc<tokio::sync::RwLock<crate::config::Config>>,
+    pub subagent_manager: Arc<tokio::sync::Mutex<crate::agent::subagent::SubagentManager>>,
+    pub tool_sandbox_enabled: bool,
+    pub sandbox_context: Option<(Arc<crate::sandbox::SandboxManager>, String)>,
+}
 
 /// Build a short string for logging tool args (path, command, etc.) without leaking full content.
 fn sanitize_args_for_log(tool_name: &str, args: &Value) -> String {

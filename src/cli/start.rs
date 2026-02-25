@@ -5,7 +5,6 @@ use std::io::Write;
 use tracing::{info, warn};
 use crate::config;
 use crate::logging;
-use crate::channels::Channel;
 use super::helpers::{resolve_provider, build_rig_completion_model, build_default_tools};
 
 pub async fn cmd_start() -> Result<()> {
@@ -219,6 +218,7 @@ pub async fn cmd_start() -> Result<()> {
         shared_session_state.clone(),
         std::sync::Arc::clone(&agent_registry),
         tool_sandbox_enabled,
+        None, // hooks: plugins can register via HookRegistry and pass Some(registry)
     )
     .await;
     tokio::spawn(async move {
@@ -227,140 +227,73 @@ pub async fn cmd_start() -> Result<()> {
         }
     });
 
-    // Start heartbeat (reads config.heartbeat.tasks each interval)
-    let hb = crate::heartbeat::HeartbeatService::new(std::sync::Arc::clone(&shared_config));
-    let hb_tx = inbound_tx.clone();
-    tokio::spawn(async move {
-        if let Err(e) = hb.run(hb_tx).await {
-            tracing::error!("Heartbeat error: {e:#}");
-        }
-    });
-
-    // Start config-based cron runner (reads config.cron.tasks, fires due jobs)
-    let cron_runner = crate::cron::config_runner::ConfigCronRunner::new(std::sync::Arc::clone(&shared_config));
-    let cron_inbound = inbound_tx.clone();
-    tokio::spawn(async move {
-        if let Err(e) = cron_runner.run(cron_inbound).await {
-            tracing::error!("Config cron runner error: {e:#}");
-        }
-    });
-
-    for tg_cfg in &cfg.channels.telegram {
-        if !tg_cfg.enabled {
-            continue;
-        }
-        let tg_cfg = tg_cfg.clone();
-        let tg_inbound = inbound_tx.clone();
-        let tg_outbound = bus.subscribe_outbound();
-        let show_tool_calls = cfg.show_tool_calls && tg_cfg.show_tool_calls;
+    // Start background services (heartbeat, config cron, and any plugin-registered services)
+    let mut background_registry = crate::background::BackgroundServiceRegistry::new();
+    background_registry.register(std::sync::Arc::new(
+        crate::background::HeartbeatBackgroundService::new(std::sync::Arc::clone(&shared_config)),
+    ));
+    background_registry.register(std::sync::Arc::new(
+        crate::background::CronBackgroundService::new(std::sync::Arc::clone(&shared_config)),
+    ));
+    let bg_ctx = crate::background::BackgroundContext {
+        inbound_tx: inbound_tx.clone(),
+        config: std::sync::Arc::clone(&shared_config),
+    };
+    for service in background_registry.services() {
+        let ctx = bg_ctx.clone();
+        let service = std::sync::Arc::clone(service);
         tokio::spawn(async move {
-            let mut ch = crate::channels::telegram::TelegramChannel::new(
-                tg_cfg, tg_inbound, tg_outbound, show_tool_calls,
-            );
-            if let Err(e) = ch.start().await {
-                tracing::error!("Telegram channel error: {e:#}");
+            if let Err(e) = service.run(ctx).await {
+                tracing::error!(service = service.name(), "Background service error: {e:#}");
             }
         });
     }
 
-    for feishu_cfg in &cfg.channels.feishu {
-        if !feishu_cfg.enabled {
-            continue;
-        }
-        let feishu_cfg = feishu_cfg.clone();
-        let feishu_inbound = inbound_tx.clone();
-        let feishu_outbound = bus.subscribe_outbound();
-        let feishu_outbound_tx = bus.outbound_tx_clone();
-        let show_tool_calls = cfg.show_tool_calls && feishu_cfg.show_tool_calls;
-        let feishu_approval = std::sync::Arc::clone(&approval_manager);
-        let feishu_classifier = std::sync::Arc::clone(&completion_model);
-        let feishu_workspace = Some(ws.clone());
-        tokio::spawn(async move {
-            let mut ch = crate::channels::feishu::FeishuChannel::new(
-                feishu_cfg,
-                feishu_inbound,
-                feishu_outbound,
-                show_tool_calls,
-                feishu_workspace,
-            )
-            .with_outbound_tx(feishu_outbound_tx)
-            .with_approval_manager(feishu_approval)
-            .with_approval_classifier(feishu_classifier);
-            if let Err(e) = ch.start().await {
-                tracing::error!("Feishu channel error: {e:#}");
+    // Start channels via registry (built-in + any plugin-registered channel types)
+    let mut channel_registry = crate::channels::ChannelRegistry::new();
+    crate::channels::factory::register_builtin_channels(&mut channel_registry);
+    for (type_name, configs) in cfg.channels.channel_entries() {
+        let factory = match channel_registry.get(&type_name) {
+            Some(f) => f,
+            None => continue,
+        };
+        for config_value in configs {
+            let enabled = config_value
+                .get("enabled")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if !enabled {
+                continue;
             }
-        });
-    }
-
-    for dc_cfg in &cfg.channels.discord {
-        if !dc_cfg.enabled {
-            continue;
-        }
-        let dc_cfg = dc_cfg.clone();
-        let dc_inbound = inbound_tx.clone();
-        let dc_outbound = bus.subscribe_outbound();
-        let show_tool_calls = cfg.show_tool_calls && dc_cfg.show_tool_calls;
-        let dc_workspace = Some(ws.clone());
-        tokio::spawn(async move {
-            let mut ch = crate::channels::discord::DiscordChannel::new(
-                dc_cfg,
-                dc_inbound,
-                dc_outbound,
+            let channel_show_tool_calls = config_value
+                .get("showToolCalls")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            let show_tool_calls = cfg.show_tool_calls && channel_show_tool_calls;
+            let inbound_tx_ch = inbound_tx.clone();
+            let outbound_rx = bus.subscribe_outbound();
+            let ctx = crate::channels::ChannelStartContext {
+                inbound_tx: inbound_tx_ch,
+                outbound_rx,
                 show_tool_calls,
-                dc_workspace,
-            );
-            if let Err(e) = ch.start().await {
-                tracing::error!("Discord channel error: {e:#}");
-            }
-        });
-    }
-
-    for slack_cfg in &cfg.channels.slack {
-        if !slack_cfg.enabled {
-            continue;
-        }
-        let slack_cfg = slack_cfg.clone();
-        let slack_inbound = inbound_tx.clone();
-        let slack_outbound = bus.subscribe_outbound();
-        let show_tool_calls = cfg.show_tool_calls && slack_cfg.show_tool_calls;
-        let slack_workspace = Some(ws.clone());
-        tokio::spawn(async move {
-            match crate::channels::slack::SlackChannel::new(
-                slack_cfg,
-                slack_inbound,
-                slack_outbound,
-                show_tool_calls,
-                slack_workspace,
-            ) {
+                workspace: Some(ws.clone()),
+                approval_manager: Some(std::sync::Arc::clone(&approval_manager)),
+                completion_model: Some(std::sync::Arc::clone(&completion_model)),
+                outbound_tx: Some(bus.outbound_tx_clone()),
+            };
+            let factory = std::sync::Arc::clone(&factory);
+            let type_name = type_name.clone();
+            match factory.create(config_value, ctx) {
                 Ok(mut ch) => {
-                    if let Err(e) = ch.start().await {
-                        tracing::error!("Slack channel error: {e:#}");
-                    }
+                    tokio::spawn(async move {
+                        if let Err(e) = ch.start().await {
+                            tracing::error!(channel = %type_name, "Channel error: {e:#}");
+                        }
+                    });
                 }
-                Err(e) => tracing::error!("Slack channel init error: {e:#}"),
+                Err(e) => tracing::error!(channel = %type_name, "Channel init error: {e:#}"),
             }
-        });
-    }
-
-    for email_cfg in &cfg.channels.email {
-        if !email_cfg.enabled {
-            continue;
         }
-        let email_cfg = email_cfg.clone();
-        let email_inbound = inbound_tx.clone();
-        let email_outbound = bus.subscribe_outbound();
-        let show_tool_calls = cfg.show_tool_calls && email_cfg.show_tool_calls;
-        tokio::spawn(async move {
-            let mut ch = crate::channels::email::EmailChannel::new(
-                email_cfg,
-                email_inbound,
-                email_outbound,
-                show_tool_calls,
-            );
-            if let Err(e) = ch.start().await {
-                tracing::error!("Email channel error: {e:#}");
-            }
-        });
     }
 
     // Start web server if enabled

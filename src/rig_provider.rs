@@ -10,7 +10,7 @@
 //! inject a `reqwest::Client` with an explicit Google DNS resolver (8.8.8.8) when running inside
 //! the sandbox. Outside AppContainer the default reqwest client is used unchanged.
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use rig::client::CompletionClient;
 use rig::client::Nothing;
 use rig::completion::request::{
@@ -19,6 +19,7 @@ use rig::completion::request::{
 use rig::completion::CompletionModel;
 use rig::message::{AssistantContent, UserContent};
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -35,8 +36,132 @@ pub trait SynbotCompletionModel: Send + Sync {
     >;
 }
 
+// ---------------------------------------------------------------------------
+// Provider factory and registry (for plugins)
+// ---------------------------------------------------------------------------
+
+/// Factory that builds a completion model from provider name and credentials.
+/// Plugins implement this trait and register with [ProviderRegistry].
+pub trait ProviderFactory: Send + Sync {
+    fn build(
+        &self,
+        provider_name: &str,
+        model_name: &str,
+        api_key: &str,
+        api_base: Option<&str>,
+    ) -> Result<Arc<dyn SynbotCompletionModel>>;
+}
+
+/// Registry of provider names to factories. Built-in providers are registered at first use;
+/// plugins can register additional providers via [default_registry].
+pub struct ProviderRegistry {
+    factories: HashMap<String, Arc<dyn ProviderFactory>>,
+}
+
+impl ProviderRegistry {
+    pub fn new() -> Self {
+        Self {
+            factories: HashMap::new(),
+        }
+    }
+
+    /// Register a factory for the given provider name(s). Names are matched case-insensitively at build time.
+    pub fn register(&mut self, name: &str, factory: Arc<dyn ProviderFactory>) {
+        self.factories.insert(name.to_lowercase(), factory);
+    }
+
+    /// Build a completion model using the registered factory for this provider name.
+    pub fn build(
+        &self,
+        provider_name: &str,
+        model_name: &str,
+        api_key: &str,
+        api_base: Option<&str>,
+    ) -> Result<Arc<dyn SynbotCompletionModel>> {
+        let key = provider_name.trim().to_lowercase();
+        let factory = self
+            .factories
+            .get(&key)
+            .or_else(|| {
+                // Match substrings for backward compatibility (e.g. "claude" -> anthropic)
+                self.factories
+                    .iter()
+                    .find(|(k, _)| key.contains(k.as_str()))
+                    .map(|(_, v)| v)
+            })
+            .ok_or_else(|| anyhow!("Unknown provider: {}", provider_name))?;
+        factory.build(provider_name, model_name, api_key, api_base)
+    }
+}
+
+impl Default for ProviderRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Returns the default global registry, with built-in providers registered on first use.
+/// Plugins can call `default_registry().write().unwrap().register("name", factory)` to add providers.
+pub fn default_registry() -> &'static std::sync::RwLock<ProviderRegistry> {
+    static R: std::sync::OnceLock<std::sync::RwLock<ProviderRegistry>> = std::sync::OnceLock::new();
+    R.get_or_init(|| {
+        let mut reg = ProviderRegistry::new();
+        reg.register_builtins();
+        std::sync::RwLock::new(reg)
+    })
+}
+
+/// Built-in provider factory: implements the original if-else dispatch logic.
+struct BuiltinProviderFactory;
+
+impl ProviderFactory for BuiltinProviderFactory {
+    fn build(
+        &self,
+        provider_name: &str,
+        model_name: &str,
+        api_key: &str,
+        api_base: Option<&str>,
+    ) -> Result<Arc<dyn SynbotCompletionModel>> {
+        build_completion_model_builtin(provider_name, model_name, api_key, api_base)
+    }
+}
+
+impl ProviderRegistry {
+    /// Register all built-in providers (OpenAI, Anthropic, DeepSeek, etc.).
+    pub fn register_builtins(&mut self) {
+        let factory: Arc<dyn ProviderFactory> = Arc::new(BuiltinProviderFactory);
+        for name in &[
+            "openai",
+            "anthropic",
+            "claude",
+            "deepseek",
+            "moonshot",
+            "ollama",
+            "kimi",
+            "kimi_code",
+            "openrouter",
+        ] {
+            self.register(name, Arc::clone(&factory));
+        }
+    }
+}
+
 /// Build an Arc<dyn SynbotCompletionModel> from provider name, model name, API key and optional base URL.
+/// Uses the default provider registry (built-ins + any plugin-registered providers).
 pub fn build_completion_model(
+    provider_name: &str,
+    model_name: &str,
+    api_key: &str,
+    api_base: Option<&str>,
+) -> Result<Arc<dyn SynbotCompletionModel>> {
+    default_registry()
+        .read()
+        .map_err(|e| anyhow!("provider registry lock: {}", e))?
+        .build(provider_name, model_name, api_key, api_base)
+}
+
+/// Internal: built-in provider dispatch (used by BuiltinProviderFactory).
+fn build_completion_model_builtin(
     provider_name: &str,
     model_name: &str,
     api_key: &str,

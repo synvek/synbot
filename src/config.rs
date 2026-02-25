@@ -208,6 +208,55 @@ pub struct ChannelsConfig {
     pub email: Vec<EmailConfig>,
 }
 
+impl ChannelsConfig {
+    /// Return channel entries for the registry: (type_name, list of config as Value).
+    /// Used by [crate::channels::ChannelRegistry] to spawn channels from config.
+    pub fn channel_entries(&self) -> Vec<(String, Vec<serde_json::Value>)> {
+        let mut out = Vec::new();
+        let telegram: Vec<serde_json::Value> = self
+            .telegram
+            .iter()
+            .map(|c| serde_json::to_value(c).unwrap_or_default())
+            .collect();
+        if !telegram.is_empty() {
+            out.push(("telegram".to_string(), telegram));
+        }
+        let feishu: Vec<serde_json::Value> = self
+            .feishu
+            .iter()
+            .map(|c| serde_json::to_value(c).unwrap_or_default())
+            .collect();
+        if !feishu.is_empty() {
+            out.push(("feishu".to_string(), feishu));
+        }
+        let discord: Vec<serde_json::Value> = self
+            .discord
+            .iter()
+            .map(|c| serde_json::to_value(c).unwrap_or_default())
+            .collect();
+        if !discord.is_empty() {
+            out.push(("discord".to_string(), discord));
+        }
+        let slack: Vec<serde_json::Value> = self
+            .slack
+            .iter()
+            .map(|c| serde_json::to_value(c).unwrap_or_default())
+            .collect();
+        if !slack.is_empty() {
+            out.push(("slack".to_string(), slack));
+        }
+        let email: Vec<serde_json::Value> = self
+            .email
+            .iter()
+            .map(|c| serde_json::to_value(c).unwrap_or_default())
+            .collect();
+        if !email.is_empty() {
+            out.push(("email".to_string(), email));
+        }
+        out
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Provider configs
 // ---------------------------------------------------------------------------
@@ -240,6 +289,9 @@ pub struct ProvidersConfig {
     pub kimi_code: ProviderEntry,
     #[serde(default)]
     pub ollama: ProviderEntry,
+    /// Extra provider entries for plugin-registered providers. Key = provider name as used in config (e.g. mainAgent.provider).
+    #[serde(default)]
+    pub extra: std::collections::HashMap<String, ProviderEntry>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1085,6 +1137,9 @@ pub struct Config {
     /// Optional sandbox monitoring (log_level, log_output for sandbox audit).
     #[serde(default)]
     pub sandbox_monitoring: Option<SandboxMonitoringConfig>,
+    /// Plugin-specific configuration. Keys are plugin names; values are arbitrary JSON for each plugin.
+    #[serde(default)]
+    pub plugins: std::collections::HashMap<String, serde_json::Value>,
 }
 
 /// Generates the JSON Schema for the root config. Available only when the `schema` feature is enabled.

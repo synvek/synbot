@@ -18,6 +18,7 @@ use crate::agent::subagent::SubagentManager;
 use crate::bus::{InboundMessage, OutboundMessage};
 use crate::config::Config;
 use crate::config;
+use crate::hooks::{HookEvent, HookRegistry};
 use crate::tools::{scope, ToolContext, ToolRegistry};
 
 pub struct AgentLoop {
@@ -31,6 +32,7 @@ pub struct AgentLoop {
     agent_registry: Arc<AgentRegistry>,
     subagent_manager: Arc<Mutex<SubagentManager>>,
     tool_sandbox_enabled: bool,
+    hooks: Option<Arc<HookRegistry>>,
 }
 
 impl AgentLoop {
@@ -45,6 +47,7 @@ impl AgentLoop {
         session_state: SharedSessionState,
         agent_registry: Arc<AgentRegistry>,
         tool_sandbox_enabled: bool,
+        hooks: Option<Arc<HookRegistry>>,
     ) -> Self {
         let subagent_manager = SubagentManager::new(config.main_agent.max_concurrent_subagents);
         Self {
@@ -58,6 +61,7 @@ impl AgentLoop {
             agent_registry,
             subagent_manager: Arc::new(Mutex::new(subagent_manager)),
             tool_sandbox_enabled,
+            hooks,
         }
     }
 
@@ -91,6 +95,9 @@ impl AgentLoop {
             }
 
             let start = std::time::Instant::now();
+            if let Some(ref h) = self.hooks {
+                h.dispatch(HookEvent::MessageReceived(msg.clone())).await;
+            }
             info!(chat = %msg.chat_id, "Processing message");
             let directives = DirectiveParser::parse(&msg.content);
             if directives.len() <= 1 {
@@ -236,6 +243,18 @@ impl AgentLoop {
             let mut history_guard = session_messages.lock().await;
             tracing::debug!("History check: {:?}", *history_guard);
             self.session_state.set_active(&session_key, "processing").await;
+            if let Some(ref h) = self.hooks {
+                let directive_preview = if directive.content.len() > 200 {
+                    format!("{}...", &directive.content[..200])
+                } else {
+                    directive.content.clone()
+                };
+                h.dispatch(HookEvent::AgentRunStart {
+                    agent_id: agent_id.clone(),
+                    directive_preview,
+                })
+                .await;
+            }
             let run_result = scope(tool_ctx, async {
                 run_completion_loop(
                     &*self.model,
@@ -250,10 +269,20 @@ impl AgentLoop {
                     &msg.sender_id,
                     &session_key,
                     &self.outbound_tx,
+                    self.hooks.clone(),
                 )
                 .await
             })
             .await;
+            if let Some(ref h) = self.hooks {
+                let iterations = run_result.as_ref().copied().unwrap_or(0);
+                h.dispatch(HookEvent::AgentRunEnd {
+                    agent_id: agent_id.clone(),
+                    iteration_count: iterations,
+                    duration_ms: start.elapsed().as_millis() as u64,
+                })
+                .await;
+            }
             if let Err(ref e) = run_result {
                 self.session_state.clear_active(&session_key).await;
                 return Err(anyhow::anyhow!("{}", e));
@@ -376,6 +405,7 @@ impl AgentLoop {
             let tools = Arc::clone(&self.tools);
             let session_state = self.session_state.clone();
             let outbound_tx = self.outbound_tx.clone();
+            let hooks = self.hooks.clone();
             let channel = msg.channel.clone();
             let channel_for_meta = channel.clone();
             let chat_id = msg.chat_id.clone();
@@ -410,6 +440,7 @@ impl AgentLoop {
                         &sender_id_for_loop,
                         &session_id_str,
                         &outbound_tx,
+                        hooks.clone(),
                     )
                     .await?;
                     let messages = history_guard.clone();
@@ -545,6 +576,7 @@ async fn run_completion_loop(
     sender_id: &str,
     session_id: &str,
     outbound_tx: &broadcast::Sender<OutboundMessage>,
+    hooks: Option<Arc<HookRegistry>>,
 ) -> Result<u32> {
     let message_ctx = Some((channel, chat_id, sender_id, session_id));
     let mut iterations = 0u32;
@@ -600,6 +632,26 @@ async fn run_completion_loop(
                     has_tool_calls = true;
                     assistant_contents.push(content.clone());
                     let args = tc.function.arguments.clone();
+                    let args_str = serde_json::to_string(&args).unwrap_or_else(|_| "{}".to_string());
+                    let args_preview = if args_str.len() > 200 {
+                        let mut end = 200;
+                        while end > 0 && !args_str.is_char_boundary(end) {
+                            end -= 1;
+                        }
+                        format!("{}...", &args_str[..end])
+                    } else {
+                        args_str
+                    };
+                    if let Some(ref h) = hooks {
+                        h.dispatch(HookEvent::ToolRunStart {
+                            tool_name: tc.function.name.clone(),
+                            args_preview,
+                            channel: channel.to_string(),
+                            chat_id: chat_id.to_string(),
+                            session_id: session_id.to_string(),
+                        })
+                        .await;
+                    }
                     let result = tools.execute(&tc.function.name, args, message_ctx).await;
                     let result_str = match &result {
                         Ok(s) => s.clone(),
@@ -619,6 +671,14 @@ async fn run_completion_loop(
                     } else {
                         result_str.clone()
                     };
+                    if let Some(ref h) = hooks {
+                        h.dispatch(HookEvent::ToolRunEnd {
+                            tool_name: tc.function.name.clone(),
+                            result_preview: preview.clone(),
+                            success: result.is_ok(),
+                        })
+                        .await;
+                    }
                     let _ = outbound_tx.send(OutboundMessage::tool_progress(
                         channel.to_string(),
                         chat_id.to_string(),
@@ -654,13 +714,17 @@ async fn run_completion_loop(
             let reply = text_parts.join("");
             if !reply.is_empty() {
                 history.push(Message::assistant(&reply));
-                let _ = outbound_tx.send(OutboundMessage::chat(
+                let out_msg = OutboundMessage::chat(
                     channel.to_string(),
                     chat_id.to_string(),
-                    reply,
+                    reply.clone(),
                     vec![],
                     None,
-                ));
+                );
+                if let Some(ref h) = hooks {
+                    h.dispatch(HookEvent::MessageSent(out_msg.clone())).await;
+                }
+                let _ = outbound_tx.send(out_msg);
             }
             break;
         }

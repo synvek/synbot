@@ -1,12 +1,14 @@
 use anyhow::Result;
 
 mod agent;
+mod background;
 mod bus;
 mod channels;
 mod cli;
 mod config;
 mod cron;
 mod heartbeat;
+mod hooks;
 mod logging;
 mod rig_provider;
 mod tools;
