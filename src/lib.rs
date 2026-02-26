@@ -117,6 +117,7 @@ pub mod config;
 pub mod cron;
 pub mod heartbeat;
 pub mod logging;
+pub mod plugin;
 pub mod rig_provider;
 pub mod sandbox;
 pub mod tools;

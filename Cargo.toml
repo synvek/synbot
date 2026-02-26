@@ -105,6 +105,9 @@ sqlite-vec = { version = "0.1", optional = true }
 # Encoding (Windows console output decoding)
 encoding_rs = "0.8"
 
+# Extism: load external Wasm plugins (tools, hooks, skills, background, provider)
+extism = "1.13"
+
 # Sandbox dependencies
 num_cpus = "1"
 bollard = "0.18"

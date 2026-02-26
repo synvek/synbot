@@ -93,23 +93,6 @@ pub async fn cmd_start() -> Result<()> {
 
     let ws = config::workspace_path(&cfg);
 
-    let model = cfg.main_agent.model.clone();
-    let provider_name = cfg.main_agent.provider.clone();
-    let (api_key, api_base) = resolve_provider(&cfg, &provider_name);
-    if api_key.is_empty() {
-        anyhow::bail!(
-            "No API key configured for provider '{}'. Set the corresponding [providers] entry in config.",
-            provider_name,
-        );
-    }
-
-    let completion_model = build_rig_completion_model(
-        &provider_name,
-        &model,
-        &api_key,
-        api_base.as_deref(),
-    )?;
-
     // Subagent manager (shared via Arc<Mutex<>>)
     let subagent_mgr = std::sync::Arc::new(
         tokio::sync::Mutex::new(
@@ -152,7 +135,7 @@ pub async fn cmd_start() -> Result<()> {
         tracing::warn!(error = %e, "Failed to load persisted sessions");
     }
 
-    let tools = std::sync::Arc::new(build_default_tools(
+    let mut tool_reg = build_default_tools(
         &cfg,
         &ws,
         std::sync::Arc::clone(&subagent_mgr),
@@ -162,7 +145,48 @@ pub async fn cmd_start() -> Result<()> {
         &sandbox_context,
         shared_session_state.clone(),
         bus.outbound_tx_clone(),
+    );
+
+    let hook_registry = crate::hooks::HookRegistry::new();
+    let mut background_registry = crate::background::BackgroundServiceRegistry::new();
+    background_registry.register(std::sync::Arc::new(
+        crate::background::HeartbeatBackgroundService::new(std::sync::Arc::clone(&shared_config)),
     ));
+    background_registry.register(std::sync::Arc::new(
+        crate::background::CronBackgroundService::new(std::sync::Arc::clone(&shared_config)),
+    ));
+    let skills_dir = config::skills_dir();
+    if let Err(e) = std::fs::create_dir_all(&skills_dir) {
+        tracing::warn!(path = %skills_dir.display(), error = %e, "Could not create skills dir");
+    }
+    let mut skills_composite = crate::agent::skills::CompositeSkillProvider::default_with_fs(&skills_dir);
+
+    crate::plugin::load_extism_plugins(
+        &cfg,
+        &mut tool_reg,
+        &hook_registry,
+        &mut background_registry,
+        &mut skills_composite,
+    )
+    .await;
+
+    let model = cfg.main_agent.model.clone();
+    let provider_name = cfg.main_agent.provider.clone();
+    let (api_key, api_base) = resolve_provider(&cfg, &provider_name);
+    if api_key.is_empty() {
+        anyhow::bail!(
+            "No API key configured for provider '{}'. Set the corresponding [providers] entry in config.",
+            provider_name,
+        );
+    }
+    let completion_model = build_rig_completion_model(
+        &provider_name,
+        &model,
+        &api_key,
+        api_base.as_deref(),
+    )?;
+
+    let tools = std::sync::Arc::new(tool_reg);
 
     let roles_dir = config::roles_dir();
     let mut role_registry = crate::agent::role_registry::RoleRegistry::new();
@@ -190,11 +214,7 @@ pub async fn cmd_start() -> Result<()> {
         let _ = crate::agent::memory_index::open_index("main");
     }
 
-    let skills_dir = config::skills_dir();
-    if let Err(e) = std::fs::create_dir_all(&skills_dir) {
-        tracing::warn!(path = %skills_dir.display(), error = %e, "Could not create skills dir");
-    }
-    let skills_loader = std::sync::Arc::new(crate::agent::skills::SkillsLoader::new(&skills_dir));
+    let skills_loader = std::sync::Arc::new(skills_composite);
 
     let cron_store_path = config::config_dir().join("cron").join("jobs.json");
     let cron_service = std::sync::Arc::new(tokio::sync::RwLock::new(
@@ -218,7 +238,7 @@ pub async fn cmd_start() -> Result<()> {
         shared_session_state.clone(),
         std::sync::Arc::clone(&agent_registry),
         tool_sandbox_enabled,
-        None, // hooks: plugins can register via HookRegistry and pass Some(registry)
+        Some(std::sync::Arc::new(hook_registry)),
     )
     .await;
     tokio::spawn(async move {
@@ -227,14 +247,7 @@ pub async fn cmd_start() -> Result<()> {
         }
     });
 
-    // Start background services (heartbeat, config cron, and any plugin-registered services)
-    let mut background_registry = crate::background::BackgroundServiceRegistry::new();
-    background_registry.register(std::sync::Arc::new(
-        crate::background::HeartbeatBackgroundService::new(std::sync::Arc::clone(&shared_config)),
-    ));
-    background_registry.register(std::sync::Arc::new(
-        crate::background::CronBackgroundService::new(std::sync::Arc::clone(&shared_config)),
-    ));
+    // Start background services (heartbeat, cron, and any Extism plugin-registered services)
     let bg_ctx = crate::background::BackgroundContext {
         inbound_tx: inbound_tx.clone(),
         config: std::sync::Arc::clone(&shared_config),

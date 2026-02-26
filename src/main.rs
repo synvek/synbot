@@ -10,6 +10,7 @@ mod cron;
 mod heartbeat;
 mod hooks;
 mod logging;
+mod plugin;
 mod rig_provider;
 mod tools;
 mod web;

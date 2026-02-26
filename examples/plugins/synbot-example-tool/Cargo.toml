@@ -1,0 +1,12 @@
+[package]
+name = "synbot-example-tool"
+version = "0.1.0"
+edition = "2021"
+description = "Minimal Synbot Extism plugin: one tool (example_echo)"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+extism-pdk = "1.4"
+serde_json = "1.0"

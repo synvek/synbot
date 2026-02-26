@@ -6,6 +6,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 
 use crate::bus::{InboundMessage, OutboundMessage};
 use crate::tools::approval::{ApprovalRequest, ApprovalResponse};
@@ -14,7 +15,7 @@ use crate::tools::approval::{ApprovalRequest, ApprovalResponse};
 // Hook events
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum HookEvent {
     /// User message received (before agent processing).
     MessageReceived(InboundMessage),
