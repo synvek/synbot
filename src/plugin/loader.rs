@@ -72,10 +72,12 @@ pub async fn load_extism_plugins(
             continue;
         };
         let plugin_config = plugin_value.clone();
+        let workspace = Some(config::workspace_path(cfg));
         let host_data = PluginHostData {
             plugin_id: plugin_id.clone(),
             plugin_config: plugin_config.clone(),
             http_client: Arc::clone(&http_client),
+            workspace,
         };
         let has_completion = true;
         let imports = host_fns::host_functions(host_data, has_completion);

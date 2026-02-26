@@ -8,4 +8,7 @@
 /docs/.vitepress/cache
 /docs/.vitepress/dist
 /docs/node_modules
+/plugins/base_tools_plugin/target
+.DS_Store
+
 

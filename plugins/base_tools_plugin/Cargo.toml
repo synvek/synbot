@@ -1,0 +1,12 @@
+[package]
+name = "base_tools_plugin"
+version = "0.1.0"
+edition = "2021"
+description = "Synbot BaseToolsPlugin: filesystem tool, hook, background service (Wasm)"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+extism-pdk = "1.4"
+serde_json = "1.0"

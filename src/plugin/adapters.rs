@@ -137,6 +137,7 @@ impl ExtismHook {
 impl Hook for ExtismHook {
     async fn on_event(&self, event: HookEvent) {
         let plugin = Arc::clone(&self.plugin);
+        let plugin_id = self.plugin_id.clone();
         let input = match serde_json::to_string(&event) {
             Ok(s) => s,
             Err(e) => {
@@ -144,12 +145,17 @@ impl Hook for ExtismHook {
                 return;
             }
         };
+        // Run plugin in blocking thread without awaiting, so hook dispatch doesn't block and we avoid
+        // potential deadlock (e.g. blocking pool waiting on plugin lock held by another blocking call).
         let _ = task::spawn_blocking(move || {
-            if let Err(e) = plugin.lock().map_err(|_| anyhow::anyhow!("lock")).and_then(|mut p| p.call::<&str, String>(abi::FN_HOOK_EVENT, &input)) {
-                tracing::warn!(error = %e, "extism hook_event");
+            if let Err(e) = plugin
+                .lock()
+                .map_err(|_| anyhow::anyhow!("lock"))
+                .and_then(|mut p| p.call::<&str, String>(abi::FN_HOOK_EVENT, &input))
+            {
+                tracing::warn!(plugin = %plugin_id, error = %e, "extism hook_event failed");
             }
-        })
-        .await;
+        });
     }
 }
 
@@ -204,20 +210,23 @@ impl BackgroundService for ExtismBackgroundService {
     }
 
     async fn run(&self, ctx: BackgroundContext) -> Result<()> {
-        let plugin = Arc::clone(&self.plugin);
-        let config_json = {
-            let cfg = ctx.config.read().await;
-            serde_json::to_string(&*cfg).unwrap_or_else(|_| "{}".to_string())
-        };
-        let input = serde_json::json!({ "config": config_json }).to_string();
-        task::spawn_blocking(move || {
-            plugin
-                .lock()
-                .map_err(|_| anyhow::anyhow!("lock plugin"))?
-                .call::<&str, String>(abi::FN_BACKGROUND_RUN, &input)
-        })
-        .await??;
-        Ok(())
+        /// Interval between background ticks (plugin is invoked once per tick, then we release the lock).
+        const TICK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(3 * 60);
+        loop {
+            let plugin = Arc::clone(&self.plugin);
+            let input = {
+                let cfg = ctx.config.read().await;
+                serde_json::json!({ "config": serde_json::to_string(&*cfg).unwrap_or_else(|_| "{}".to_string()) }).to_string()
+            };
+            let _ = task::spawn_blocking(move || {
+                plugin
+                    .lock()
+                    .map_err(|_| anyhow::anyhow!("lock plugin"))
+                    .and_then(|mut p| p.call::<&str, String>(abi::FN_BACKGROUND_RUN, &input))
+            })
+            .await;
+            tokio::time::sleep(TICK_INTERVAL).await;
+        }
     }
 }
 

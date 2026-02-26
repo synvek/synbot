@@ -69,7 +69,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
     let mut bus = crate::bus::MessageBus::new();
 
     // Build tools (pass subagent manager, approval manager, permission policy, session state, and outbound_tx for message tool)
-    let tools = build_default_tools(
+    let mut tool_reg = build_default_tools(
         &cfg,
         &ws,
         std::sync::Arc::clone(&subagent_mgr),
@@ -80,7 +80,25 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
         shared_session_state.clone(),
         bus.outbound_tx_clone(),
     );
-    let tools = std::sync::Arc::new(tools);
+
+    // Load Extism plugins (tools, hooks, background, skills) so hook events fire in agent mode too
+    let hook_registry = crate::hooks::HookRegistry::new();
+    let mut background_registry = crate::background::BackgroundServiceRegistry::new();
+    let skills_dir = config::skills_dir();
+    if let Err(e) = std::fs::create_dir_all(&skills_dir) {
+        tracing::warn!(path = %skills_dir.display(), error = %e, "Could not create skills dir");
+    }
+    let mut skills_composite = crate::agent::skills::CompositeSkillProvider::default_with_fs(&skills_dir);
+    crate::plugin::load_extism_plugins(
+        &cfg,
+        &mut tool_reg,
+        &hook_registry,
+        &mut background_registry,
+        &mut skills_composite,
+    )
+    .await;
+
+    let tools = std::sync::Arc::new(tool_reg);
 
     let inbound_tx = bus.inbound_sender();
     let inbound_rx = bus.take_inbound_receiver().unwrap();
@@ -102,7 +120,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
     }
     let agent_registry = std::sync::Arc::new(agent_registry);
 
-    // Agent loop (CLI agent has no tool sandbox)
+    // Agent loop (CLI agent has no tool sandbox; hooks from plugins are used when configured)
     let mut agent_loop = crate::agent::r#loop::AgentLoop::new(
         completion_model,
         ws,
@@ -114,7 +132,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
         shared_session_state,
         agent_registry,
         false,
-        None, // hooks
+        Some(std::sync::Arc::new(hook_registry)),
     )
     .await;
 
