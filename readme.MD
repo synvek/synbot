@@ -24,6 +24,8 @@
 
 - Tool execution with approval
 
+- Plugin support(Use wasm as plugin created by rust, c/c++, go and so on)
+
 - Memory: Daily memory & Long term memory & Sqlite vec & FTS5 & Auto compression 
 
 - Sandbox support 
@@ -124,6 +126,8 @@ On Windows, run `synbot sandbox setup` once as Administrator to add network rule
 - Feishu(飞书)
 
 - Email
+
+- Matrix
 
 - More are still in progress
 

@@ -24,6 +24,8 @@
 
 - 工具执行需经审批
 
+- 插件支持(支持使用Rust, C/C++, Go等开发wasm作为插件运行)
+
 - 记忆：每日记忆 & 长期记忆 & 向量 Sqlite vec & 关键词 FTS5 & 记忆自动压缩
 
 - 沙箱支持
@@ -123,6 +125,8 @@ synbot sandbox start
 - 飞书 (Feishu)
 
 - Email
+
+- Matrix
 
 - 更多渠道开发中
 
