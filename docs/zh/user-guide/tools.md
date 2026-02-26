@@ -170,7 +170,7 @@ fetch_url {
 向渠道发送消息。
 
 **参数**：
-- `channel` (字符串)：发送到的渠道（telegram, discord, feishu）
+- `channel` (字符串)：发送到的渠道（telegram, discord, feishu, matrix）
 - `recipient` (字符串)：接收者标识符
 - `content` (字符串)：消息内容
 - `format` (字符串，可选)：消息格式（text, markdown, html）

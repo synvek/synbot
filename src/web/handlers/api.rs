@@ -438,6 +438,39 @@ pub async fn get_channels(state: web::Data<AppState>) -> Result<HttpResponse> {
             },
         });
     }
+    for c in &state.config.channels.slack {
+        channels.push(ChannelInfo {
+            name: c.name.clone(),
+            enabled: c.enabled,
+            status: if c.enabled {
+                ChannelStatus::Connected
+            } else {
+                ChannelStatus::Disabled
+            },
+        });
+    }
+    for c in &state.config.channels.email {
+        channels.push(ChannelInfo {
+            name: c.name.clone(),
+            enabled: c.enabled,
+            status: if c.enabled {
+                ChannelStatus::Connected
+            } else {
+                ChannelStatus::Disabled
+            },
+        });
+    }
+    for c in &state.config.channels.matrix {
+        channels.push(ChannelInfo {
+            name: c.name.clone(),
+            enabled: c.enabled,
+            status: if c.enabled {
+                ChannelStatus::Connected
+            } else {
+                ChannelStatus::Disabled
+            },
+        });
+    }
     Ok(HttpResponse::Ok().json(ApiResponse::success(channels)))
 }
 

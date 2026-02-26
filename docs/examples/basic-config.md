@@ -32,7 +32,18 @@ This example shows a minimal but functional Synbot configuration that you can us
       "appId": "",
       "appSecret": "",
       "allowFrom": []
-    }
+    },
+    "matrix": [
+      {
+        "name": "matrix",
+        "enabled": false,
+        "homeserverUrl": "https://matrix.example.org",
+        "username": "",
+        "password": "",
+        "allowlist": [],
+        "enableAllowlist": true
+      }
+    ]
   },
   "providers": {
     "anthropic": {

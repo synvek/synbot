@@ -19,10 +19,10 @@ Synbot supports multiple messaging channels, allowing you to interact with the A
 - **Feishu**: Enterprise messaging platform popular in China
 - **Slack**: Team chat with **Socket Mode** (no public URL required)
 - **Email**: Poll IMAP for unread messages from a configured sender, reply via SMTP, and mark as read (configurable start time and poll interval; messages processed oldest-first).
+- **Matrix**: Decentralized real-time communication via the Matrix protocol (homeserver + username/password or access token).
 
 ### Planned Support
 - WeChat
-- Matrix
 
 ## Channel Configuration
 
@@ -49,7 +49,18 @@ All channels share a common configuration structure:
       "appId": "",
       "appSecret": "",
       "allowFrom": []
-    }
+    },
+    "matrix": [
+      {
+        "name": "matrix",
+        "enabled": false,
+        "homeserverUrl": "https://matrix.example.org",
+        "username": "",
+        "password": "",
+        "allowlist": [],
+        "enableAllowlist": true
+      }
+    ]
   }
 }
 ```
@@ -384,6 +395,65 @@ Synbot uses **Slack Socket Mode**, so you do not need a public URL or ngrok. The
 - Ensure **Socket Mode** is enabled in the Slack app (Settings → Socket Mode).
 - Under **Event Subscriptions**, enable **Subscribe to bot events** and add at least: `message.channels`, `message.im`, `app_mention`.
 - Run with debug logs: `RUST_LOG=synbot::channels::slack=info,slack_morphism=debug synbot start` to see connection and incoming events.
+
+## Matrix
+
+Synbot connects to a Matrix homeserver as a bot user, syncs room messages, and replies in the same room. You can use username/password login or an access token (e.g. from Element Settings → Help & About → Access Token).
+
+### Getting Started with Matrix
+
+1. **Create a bot user** on your homeserver (e.g. register `@synbot:example.org` with a password), or use an existing account.
+2. **Get your homeserver URL** (e.g. `https://matrix.example.org`). For Matrix.org use `https://matrix.org`.
+3. **Configure Synbot** with either password or access token:
+
+   **Option A — Username and password:**
+   ```json
+   {
+     "channels": {
+       "matrix": [
+         {
+           "name": "matrix",
+           "enabled": true,
+           "homeserverUrl": "https://matrix.example.org",
+           "username": "@synbot:example.org",
+           "password": "YOUR_PASSWORD",
+           "allowlist": [],
+           "enableAllowlist": false
+         }
+       ]
+     }
+   }
+   ```
+
+   **Option B — Access token (no password):**
+   ```json
+   {
+     "channels": {
+       "matrix": [
+         {
+           "name": "matrix",
+           "enabled": true,
+           "homeserverUrl": "https://matrix.example.org",
+           "username": "@synbot:example.org",
+           "accessToken": "syt_...",
+           "allowlist": [],
+           "enableAllowlist": false
+         }
+       ]
+     }
+   }
+   ```
+
+4. **Start Synbot**: `synbot start`. Invite the bot to a room or open a DM; it will sync and reply to messages in joined rooms.
+
+- **homeserverUrl**: Your Matrix homeserver URL (required when enabled).
+- **username**: Full user ID (e.g. `@bot:example.org`) or localpart; if localpart, the server is taken from the homeserver URL.
+- **password**: Used when `accessToken` is not set.
+- **accessToken**: Optional. When set, login is skipped and this token is used.
+- **allowlist**: When `enableAllowlist` is true, only rooms or users whose IDs are in `allowlist` (as `chatId`) are accepted. Use room ID or user ID.
+- **groupMyName**: When set, in group rooms only messages that start with this mention (e.g. `@bot:example.org` or localpart) are processed; the mention is stripped before sending to the agent.
+
+**Note:** End-to-end encrypted (E2EE) rooms are supported for plain-text messages; the bot does not participate in E2EE by default.
 
 ## Multi-Channel Configuration
 

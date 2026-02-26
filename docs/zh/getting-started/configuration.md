@@ -204,6 +204,35 @@ cargo run --example generate_config_schema --features schema -- -o config.schema
 - **pollIntervalSecs**: 轮询间隔秒数（默认 120 = 2 分钟）。
 - 邮件按从旧到新顺序处理；每条回复后标为已读再处理下一条。
 
+### Matrix
+
+可选渠道，用于 Matrix 协议（分布式实时聊天）。需配置 homeserver URL，以及用户名/密码或 access token。
+
+```json
+{
+  "channels": {
+    "matrix": [
+      {
+        "name": "matrix",
+        "enabled": true,
+        "homeserverUrl": "https://matrix.example.org",
+        "username": "@synbot:example.org",
+        "password": "YOUR_PASSWORD",
+        "allowlist": [],
+        "enableAllowlist": false,
+        "showToolCalls": true
+      }
+    ]
+  }
+}
+```
+
+- **homeserverUrl**：Matrix homeserver 地址（启用时必填）。
+- **username**：完整用户 ID（如 `@bot:example.org`）或本地部分。
+- **password**：登录密码；若设置了 **accessToken** 则忽略。
+- **accessToken**：可选；设置后跳过登录。
+- **allowlist** / **enableAllowlist**：与其他渠道相同；`chatId` 可为 room ID 或 user ID。
+
 ## 提供商配置
 
 ### Anthropic

@@ -57,6 +57,9 @@ open-lark = { version =  "0.14", features = ["bot", "im", "websocket"] }
 # Slack (Socket Mode)
 slack-morphism = { version = "2.18", features = ["hyper"] }
 
+# Matrix channel (matrix-sdk; minimal features, no E2EE/sqlite by default)
+matrix-sdk = { version = "0.16", default-features = false, features = ["rustls-tls"] }
+
 # Email channel (IMAP + SMTP)
 async-imap = { version = "0.11", default-features = false, features = ["runtime-tokio"] }
 imap-proto = "0.16"

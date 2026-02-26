@@ -137,6 +137,42 @@ fn default_slack_name() -> String {
     "slack".into()
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct MatrixConfig {
+    /// Unique channel name (default "matrix").
+    #[serde(default = "default_matrix_name")]
+    pub name: String,
+    #[serde(default)]
+    pub enabled: bool,
+    /// Matrix homeserver URL (e.g. "https://matrix.example.org"). Required when enabled.
+    #[serde(default)]
+    pub homeserver_url: String,
+    /// Bot user ID (e.g. "@bot:example.org") or localpart for login.
+    #[serde(default)]
+    pub username: String,
+    /// Password for login. Ignored if access_token is set.
+    #[serde(default)]
+    pub password: String,
+    /// Access token (optional). When set, login is skipped and this token is used.
+    #[serde(default)]
+    pub access_token: Option<String>,
+    #[serde(default)]
+    pub allowlist: Vec<AllowlistEntry>,
+    #[serde(default = "default_true")]
+    pub enable_allowlist: bool,
+    /// When enable_allowlist is false, bot user id for @mention check in rooms (optional).
+    #[serde(default)]
+    pub group_my_name: Option<String>,
+    #[serde(default = "default_true")]
+    pub show_tool_calls: bool,
+}
+
+fn default_matrix_name() -> String {
+    "matrix".into()
+}
+
 /// Email account and transport settings (IMAP receive, SMTP send).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -206,6 +242,8 @@ pub struct ChannelsConfig {
     pub slack: Vec<SlackConfig>,
     #[serde(default)]
     pub email: Vec<EmailConfig>,
+    #[serde(default)]
+    pub matrix: Vec<MatrixConfig>,
 }
 
 impl ChannelsConfig {
@@ -252,6 +290,14 @@ impl ChannelsConfig {
             .collect();
         if !email.is_empty() {
             out.push(("email".to_string(), email));
+        }
+        let matrix: Vec<serde_json::Value> = self
+            .matrix
+            .iter()
+            .map(|c| serde_json::to_value(c).unwrap_or_default())
+            .collect();
+        if !matrix.is_empty() {
+            out.push(("matrix".to_string(), matrix));
         }
         out
     }
@@ -1615,6 +1661,32 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
             });
         }
     }
+    for (i, c) in config.channels.matrix.iter().enumerate() {
+        if c.enabled {
+            if c.homeserver_url.trim().is_empty() {
+                errors.push(ValidationError {
+                    field: format!("channels.matrix[{}].homeserverUrl", i),
+                    value: String::new(),
+                    constraint: "must be non-empty when enabled".into(),
+                });
+            }
+            let has_token = c.access_token.as_deref().map(|s| !s.trim().is_empty()).unwrap_or(false);
+            if !has_token && c.password.is_empty() && c.username.trim().is_empty() {
+                errors.push(ValidationError {
+                    field: format!("channels.matrix[{}]", i),
+                    value: String::new(),
+                    constraint: "when enabled, set accessToken or both username and password".into(),
+                });
+            }
+        }
+        if !c.name.is_empty() && !all_channel_names.insert(c.name.clone()) {
+            errors.push(ValidationError {
+                field: format!("channels.matrix[{}].name", i),
+                value: c.name.clone(),
+                constraint: "channel name must be globally unique".into(),
+            });
+        }
+    }
 
     // --- Collect enabled channel names for main_channel validation ---
     let enabled_channels: Vec<String> = {
@@ -1640,6 +1712,11 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
             }
         }
         for c in &config.channels.email {
+            if c.enabled && !c.name.is_empty() {
+                ch.push(c.name.clone());
+            }
+        }
+        for c in &config.channels.matrix {
             if c.enabled && !c.name.is_empty() {
                 ch.push(c.name.clone());
             }

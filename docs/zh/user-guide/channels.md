@@ -13,11 +13,12 @@ Synbot 支持多种消息渠道，允许您通过不同平台与 AI 助手交互
 - **Telegram**: 流行的消息平台，支持机器人 API
 - **Discord**: 社区聊天平台，功能丰富
 - **飞书 (Feishu)**: 企业级消息平台
+- **Slack**: 团队聊天，支持 **Socket Mode**（无需公网 URL）
 - **电子邮件(Email)** 通过 IMAP 收信、SMTP 发信，仅处理来自指定发件人的未读邮件（可配置起始时间），按时间从旧到新逐条回复后标为已读。
+- **Matrix**: 基于 Matrix 协议的分布式实时通信（需 homeserver 地址及用户名/密码或 access token）。
 
 ### 计划支持
 - 微信
-- Matrix
 
 ## 渠道配置
 
@@ -44,7 +45,18 @@ Synbot 支持多种消息渠道，允许您通过不同平台与 AI 助手交互
       "appId": "",
       "appSecret": "",
       "allowFrom": []
-    }
+    },
+    "matrix": [
+      {
+        "name": "matrix",
+        "enabled": false,
+        "homeserverUrl": "https://matrix.example.org",
+        "username": "",
+        "password": "",
+        "allowlist": [],
+        "enableAllowlist": true
+      }
+    ]
   }
 }
 ```
@@ -325,6 +337,65 @@ Discord 支持富文本消息嵌入：
 2. **速率限制**: 飞书有速率限制（每个应用每 10 秒 100 个请求）
 3. **错误处理**: 处理网络错误和重试逻辑
 4. **日志记录**: 记录所有传入事件以进行调试
+
+## Matrix
+
+Synbot 以机器人用户身份连接 Matrix homeserver，同步房间消息并在同一房间内回复。可使用用户名/密码登录，或使用 access token（例如在 Element 设置 → 帮助与关于 → Access Token 中获取）。
+
+### 开始使用 Matrix
+
+1. 在您的 homeserver 上**创建机器人用户**（例如注册 `@synbot:example.org` 并设置密码），或使用已有账号。
+2. **获取 homeserver URL**（例如 `https://matrix.example.org`）。使用 Matrix.org 则为 `https://matrix.org`。
+3. **配置 Synbot**，可选择密码或 access token：
+
+   **方式 A — 用户名与密码：**
+   ```json
+   {
+     "channels": {
+       "matrix": [
+         {
+           "name": "matrix",
+           "enabled": true,
+           "homeserverUrl": "https://matrix.example.org",
+           "username": "@synbot:example.org",
+           "password": "YOUR_PASSWORD",
+           "allowlist": [],
+           "enableAllowlist": false
+         }
+       ]
+     }
+   }
+   ```
+
+   **方式 B — Access token（无需密码）：**
+   ```json
+   {
+     "channels": {
+       "matrix": [
+         {
+           "name": "matrix",
+           "enabled": true,
+           "homeserverUrl": "https://matrix.example.org",
+           "username": "@synbot:example.org",
+           "accessToken": "syt_...",
+           "allowlist": [],
+           "enableAllowlist": false
+         }
+       ]
+     }
+   }
+   ```
+
+4. **启动 Synbot**：`synbot start`。将机器人邀请到房间或发起 DM，机器人会同步并回复已加入房间中的消息。
+
+- **homeserverUrl**：Matrix homeserver 地址（启用时必填）。
+- **username**：完整用户 ID（如 `@bot:example.org`）或本地部分；若为本地部分，服务器从 homeserver URL 解析。
+- **password**：未设置 `accessToken` 时使用。
+- **accessToken**：可选。设置后将跳过登录，直接使用该 token。
+- **allowlist**：当 `enableAllowlist` 为 true 时，仅接受 `chatId` 在 allowlist 中的房间或用户（可填 room ID 或 user ID）。
+- **groupMyName**：设置后，在群组房间中仅处理以此提及开头（如 `@bot:example.org` 或本地部分）的消息，提及内容会在发给 agent 前被去掉。
+
+**说明：** 端到端加密（E2EE）房间支持明文消息；默认情况下机器人不参与 E2EE。
 
 ## 多渠道配置
 

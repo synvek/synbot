@@ -220,7 +220,7 @@ sudo systemctl status synbot
 tail -f ~/.synbot/logs/synbot.log
 
 # View specific channel logs
-grep -E "(telegram|discord)" ~/.synbot/logs/synbot.log
+grep -E "(telegram|discord|matrix)" ~/.synbot/logs/synbot.log
 
 # View errors only
 grep ERROR ~/.synbot/logs/synbot.log
@@ -337,6 +337,7 @@ curl http://localhost:18888/api/health
 
 # Channel-specific health
 curl http://localhost:18888/api/health/telegram
+curl http://localhost:18888/api/health/matrix
 ```
 
 ### Metrics

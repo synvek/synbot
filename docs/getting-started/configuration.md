@@ -207,6 +207,35 @@ Channels are configured as **arrays**: you can run multiple bots per platform (e
 - **pollIntervalSecs**: Poll interval in seconds (default 120 = 2 minutes).
 - Messages are processed oldest-first; each is replied to, then marked read, then the next.
 
+### Matrix
+
+Optional channel for Matrix protocol (decentralized real-time chat). Configure with homeserver URL and either username/password or access token.
+
+```json
+{
+  "channels": {
+    "matrix": [
+      {
+        "name": "matrix",
+        "enabled": true,
+        "homeserverUrl": "https://matrix.example.org",
+        "username": "@synbot:example.org",
+        "password": "YOUR_PASSWORD",
+        "allowlist": [],
+        "enableAllowlist": false,
+        "showToolCalls": true
+      }
+    ]
+  }
+}
+```
+
+- **homeserverUrl**: Matrix homeserver URL (required when enabled).
+- **username**: Full user ID (e.g. `@bot:example.org`) or localpart.
+- **password**: Login password; ignored if **accessToken** is set.
+- **accessToken**: Optional; when set, login is skipped.
+- **allowlist** / **enableAllowlist**: Same pattern as other channels; `chatId` can be room ID or user ID.
+
 ## Provider Configuration
 
 ### Anthropic

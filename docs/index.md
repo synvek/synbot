@@ -18,7 +18,7 @@ hero:
 
 features:
   - title: Multi-channel Support
-    details: Connect with Telegram, Discord, and Feishu (飞书) for seamless communication across platforms.
+    details: Connect with Telegram, Discord, Feishu (飞书), Matrix, Slack, and Email for seamless communication across platforms.
     icon: 🗨️
   - title: Powerful Tool System
     details: Extensible tool framework with built-in tools for filesystem, shell, web, and more.
@@ -176,7 +176,7 @@ Synbot is a personal AI assistant written in Rust, originally inspired by [nanob
 
 ### Key Features
 
-- **Multi-channel Support**: Discord, Feishu (飞书)
+- **Multi-channel Support**: Telegram, Discord, Feishu (飞书), Matrix, Slack, Email
 - **Tool System**: Extensible tool framework with built-in tools
 - **Permission Control**: Fine-grained permission system with approval workflows
 - **Web Dashboard**: Built-in web interface for monitoring and management

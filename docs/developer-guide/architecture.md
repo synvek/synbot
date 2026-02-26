@@ -81,6 +81,7 @@ The channel system handles communication with external messaging platforms.
 - **`channels/telegram.rs`**: Telegram integration
 - **`channels/discord.rs`**: Discord integration  
 - **`channels/feishu.rs`**: Feishu integration
+- **`channels/matrix.rs`**: Matrix integration
 - **`channels/approval_formatter.rs`**: Format approval messages
 - **`channels/approval_classifier.rs`**: Classify approval responses
 

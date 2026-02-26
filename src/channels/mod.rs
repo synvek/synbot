@@ -5,6 +5,7 @@ pub mod discord;
 pub mod email;
 pub mod feishu;
 pub mod factory;
+pub mod matrix;
 pub mod slack;
 pub mod telegram;
 

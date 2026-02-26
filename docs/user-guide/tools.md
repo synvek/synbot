@@ -174,7 +174,7 @@ fetch_url {
 Send a message to a channel.
 
 **Parameters**:
-- `channel` (string): Channel to send to (telegram, discord, feishu)
+- `channel` (string): Channel to send to (telegram, discord, feishu, matrix)
 - `recipient` (string): Recipient identifier
 - `content` (string): Message content
 - `format` (string, optional): Message format (text, markdown, html)

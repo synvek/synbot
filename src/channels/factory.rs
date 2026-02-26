@@ -5,19 +5,20 @@ use std::sync::Arc;
 use anyhow::Result;
 
 use crate::channels::{
-    discord, email, feishu, slack, telegram, Channel, ChannelRegistry, ChannelStartContext,
+    discord, email, feishu, matrix, slack, telegram, Channel, ChannelRegistry, ChannelStartContext,
 };
 use crate::config::{
-    DiscordConfig, EmailConfig, FeishuConfig, SlackConfig, TelegramConfig,
+    DiscordConfig, EmailConfig, FeishuConfig, MatrixConfig, SlackConfig, TelegramConfig,
 };
 
-/// Register all built-in channel factories (telegram, feishu, discord, slack, email).
+/// Register all built-in channel factories (telegram, feishu, discord, slack, email, matrix).
 pub fn register_builtin_channels(registry: &mut ChannelRegistry) {
     registry.register("telegram", Arc::new(TelegramChannelFactory));
     registry.register("feishu", Arc::new(FeishuChannelFactory));
     registry.register("discord", Arc::new(DiscordChannelFactory));
     registry.register("slack", Arc::new(SlackChannelFactory));
     registry.register("email", Arc::new(EmailChannelFactory));
+    registry.register("matrix", Arc::new(MatrixChannelFactory));
 }
 
 struct TelegramChannelFactory;
@@ -123,6 +124,26 @@ impl crate::channels::ChannelFactory for EmailChannelFactory {
             ctx.outbound_rx,
             ctx.show_tool_calls,
         );
+        Ok(Box::new(ch))
+    }
+}
+
+struct MatrixChannelFactory;
+
+impl crate::channels::ChannelFactory for MatrixChannelFactory {
+    fn create(
+        &self,
+        config: serde_json::Value,
+        ctx: ChannelStartContext,
+    ) -> Result<Box<dyn Channel>> {
+        let cfg: MatrixConfig = serde_json::from_value(config)?;
+        let ch = matrix::MatrixChannel::new(
+            cfg,
+            ctx.inbound_tx,
+            ctx.outbound_rx,
+            ctx.show_tool_calls,
+            ctx.workspace,
+        )?;
         Ok(Box::new(ch))
     }
 }

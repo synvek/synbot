@@ -216,7 +216,7 @@ sudo systemctl status synbot
 tail -f ~/.synbot/logs/synbot.log
 
 # 查看特定渠道日志
-grep -E "(telegram|discord)" ~/.synbot/logs/synbot.log
+grep -E "(telegram|discord|matrix)" ~/.synbot/logs/synbot.log
 
 # 仅查看错误
 grep ERROR ~/.synbot/logs/synbot.log
@@ -333,6 +333,7 @@ curl http://localhost:18888/api/health
 
 # 渠道特定健康检查
 curl http://localhost:18888/api/health/telegram
+curl http://localhost:18888/api/health/matrix
 ```
 
 ### 指标

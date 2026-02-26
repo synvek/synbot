@@ -77,6 +77,7 @@ description: 理解 Synbot 的架构和设计原则
 - **`channels/telegram.rs`**：Telegram 集成
 - **`channels/discord.rs`**：Discord 集成  
 - **`channels/feishu.rs`**：Feishu 集成
+- **`channels/matrix.rs`**：Matrix 集成
 - **`channels/approval_formatter.rs`**：格式化审批消息
 - **`channels/approval_classifier.rs`**：审批响应分类
 

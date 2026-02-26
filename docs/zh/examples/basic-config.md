@@ -28,7 +28,18 @@ description: 一个简单的配置，用于开始使用 Synbot
       "appId": "",
       "appSecret": "",
       "allowFrom": []
-    }
+    },
+    "matrix": [
+      {
+        "name": "matrix",
+        "enabled": false,
+        "homeserverUrl": "https://matrix.example.org",
+        "username": "",
+        "password": "",
+        "allowlist": [],
+        "enableAllowlist": true
+      }
+    ]
   },
   "providers": {
     "anthropic": {
