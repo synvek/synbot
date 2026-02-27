@@ -252,13 +252,14 @@ impl ToolRegistry {
     }
 
     /// Return rig-compatible ToolDefinition list for the LLM.
+    /// Schemas are normalized so all providers (e.g. OpenAI) accept them (type, properties, additionalProperties).
     pub fn rig_definitions(&self) -> Vec<rig::completion::ToolDefinition> {
         self.tools
             .values()
             .map(|t| rig::completion::ToolDefinition {
                 name: t.name().to_string(),
                 description: t.description().to_string(),
-                parameters: t.parameters_schema(),
+                parameters: normalize_tool_parameters_schema(t.parameters_schema()),
             })
             .collect()
     }
@@ -268,6 +269,32 @@ impl ToolRegistry {
     }
 }
 
+/// Normalize a tool's parameters JSON Schema for LLM providers (OpenAI requires `properties` and
+/// `additionalProperties: false`; DeepSeek etc. require `type: "object"`). Use when building
+/// tool definitions for completion requests or when registering tools from external sources (e.g. MCP).
+pub fn normalize_tool_parameters_schema(schema: Value) -> Value {
+    let mut obj = match schema {
+        Value::Object(m) => m,
+        _ => return default_object_schema(),
+    };
+    if obj.is_empty() {
+        return default_object_schema();
+    }
+    obj.insert("type".into(), Value::String("object".into()));
+    if !obj.contains_key("properties") {
+        obj.insert("properties".into(), serde_json::json!({}));
+    }
+    obj.insert("additionalProperties".into(), serde_json::json!(false));
+    Value::Object(obj)
+}
+
+fn default_object_schema() -> Value {
+    serde_json::json!({
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+    })
+}
 
 #[cfg(test)]
 mod tests {

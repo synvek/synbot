@@ -175,10 +175,17 @@ fn build_completion_model_builtin(
     // Turbofish `<reqwest::Client>` pins H so the compiler knows the initial http client type
     // before .http_client(mk_http()) swaps it in.
     type RC = reqwest::Client;
+    const ANTHROPIC_API_BASE: &str = "https://api.anthropic.com";
+    const OPENAI_API_BASE: &str = "https://api.openai.com/v1";
     let model = if lower.contains("anthropic") || lower.contains("claude") {
+        let base = api_base
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| s.trim().trim_end_matches('/').to_string())
+            .unwrap_or_else(|| ANTHROPIC_API_BASE.to_string());
         let client = rig::providers::anthropic::Client::<RC>::builder()
             .api_key(api_key.to_string())
             .http_client(mk_http())
+            .base_url(&base)
             .build()
             .map_err(|e| anyhow::anyhow!("{}", e))?;
         let m = client.completion_model(model_name.to_string());
@@ -226,18 +233,34 @@ fn build_completion_model_builtin(
         let m = OpenRouterDirectModel::new(mk_http(), api_key.to_string(), model_name.to_string(), base);
         Arc::new(m) as Arc<dyn SynbotCompletionModel>
     } else {
-        // OpenAI or default.
-        let mut builder = rig::providers::openai::Client::<RC>::builder()
-            .api_key(api_key.to_string())
-            .http_client(mk_http());
-        if let Some(base) = api_base {
-            if !base.is_empty() {
-                builder = builder.base_url(base);
-            }
+        // OpenAI or default: use Responses API (/v1/responses) for official OpenAI;
+        // use Chat Completions API (/v1/chat/completions) for custom base (proxy/compatible).
+        let base = api_base
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| s.trim().trim_end_matches('/').to_string())
+            .unwrap_or_else(|| OPENAI_API_BASE.to_string());
+        let use_responses_api = api_base
+            .map(|b| b.trim().trim_end_matches('/') == OPENAI_API_BASE)
+            .unwrap_or(true);
+        if use_responses_api {
+            let client = rig::providers::openai::Client::<RC>::builder()
+                .api_key(api_key.to_string())
+                .http_client(mk_http())
+                .base_url(&base)
+                .build()
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            let m = client.completion_model(model_name.to_string());
+            Arc::new(OpenAiModel(client, m)) as Arc<dyn SynbotCompletionModel>
+        } else {
+            let client = rig::providers::openai::CompletionsClient::<RC>::builder()
+                .api_key(api_key.to_string())
+                .http_client(mk_http())
+                .base_url(&base)
+                .build()
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            let m = client.completion_model(model_name.to_string());
+            Arc::new(OpenAiCompletionsModel(client, m)) as Arc<dyn SynbotCompletionModel>
         }
-        let client = builder.build().map_err(|e| anyhow::anyhow!("{}", e))?;
-        let m = client.completion_model(model_name.to_string());
-        Arc::new(OpenAiModel(client, m)) as Arc<dyn SynbotCompletionModel>
     };
     Ok(model)
 }
@@ -275,6 +298,7 @@ macro_rules! impl_model {
 }
 
 impl_model!(OpenAiModel, rig::providers::openai::Client);
+impl_model!(OpenAiCompletionsModel, rig::providers::openai::CompletionsClient);
 impl_model!(AnthropicModel, rig::providers::anthropic::Client);
 impl_model!(MoonshotModel, rig::providers::moonshot::Client);
 impl_model!(OllamaModel, rig::providers::ollama::Client);

@@ -123,7 +123,7 @@ fn register_mcp_tools(
             );
             continue;
         }
-        let parameters_schema = normalize_parameters_schema(t.input_schema);
+        let parameters_schema = crate::tools::normalize_tool_parameters_schema(t.input_schema);
         let adapter = McpToolAdapter {
             client: Arc::clone(&client),
             server_id: server.id.clone(),
@@ -196,25 +196,3 @@ fn content_to_string(content: &[Content]) -> String {
         .join("\n")
 }
 
-/// Ensure parameters_schema is a valid JSON Schema object for LLM providers (e.g. DeepSeek
-/// requires `type: "object"`). MCP servers may return null or incomplete schema.
-fn normalize_parameters_schema(schema: Value) -> Value {
-    let mut obj = match schema {
-        Value::Object(m) => m,
-        _ => return default_object_schema(),
-    };
-    if obj.is_empty() {
-        return default_object_schema();
-    }
-    // Require type: "object" for provider compatibility
-    obj.insert("type".into(), Value::String("object".into()));
-    Value::Object(obj)
-}
-
-fn default_object_schema() -> Value {
-    serde_json::json!({
-        "type": "object",
-        "properties": {},
-        "additionalProperties": true
-    })
-}
