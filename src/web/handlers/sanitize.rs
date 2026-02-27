@@ -63,6 +63,7 @@ pub struct SanitizedFeishuConfig {
 pub struct SanitizedProvidersConfig {
     pub anthropic: SanitizedProviderEntry,
     pub openai: SanitizedProviderEntry,
+    pub gemini: SanitizedProviderEntry,
     pub openrouter: SanitizedProviderEntry,
     pub deepseek: SanitizedProviderEntry,
     pub kimi_code: SanitizedProviderEntry,
@@ -149,6 +150,7 @@ fn sanitize_providers(providers: &ProvidersConfig) -> SanitizedProvidersConfig {
     SanitizedProvidersConfig {
         anthropic: sanitize_provider_entry(&providers.anthropic),
         openai: sanitize_provider_entry(&providers.openai),
+        gemini: sanitize_provider_entry(&providers.gemini),
         openrouter: sanitize_provider_entry(&providers.openrouter),
         deepseek: sanitize_provider_entry(&providers.deepseek),
         kimi_code: sanitize_provider_entry(&providers.kimi_code),
@@ -319,6 +321,10 @@ mod tests {
                     api_key: "openai_key".to_string(),
                     api_base: None,
                 },
+                gemini: ProviderEntry {
+                    api_key: "".to_string(),
+                    api_base: None,
+                },
                 openrouter: ProviderEntry {
                     api_key: "".to_string(),
                     api_base: None,
@@ -339,6 +345,7 @@ mod tests {
                     api_key: "".to_string(),
                     api_base: Some("http://localhost:11434".to_string()),
                 },
+                extra: std::collections::HashMap::new(),
             },
             web: WebConfig {
                 enabled: true,

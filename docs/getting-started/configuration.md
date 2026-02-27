@@ -264,6 +264,19 @@ Optional channel for Matrix protocol (decentralized real-time chat). Configure w
 }
 ```
 
+### Google Gemini
+
+```json
+{
+  "providers": {
+    "openai": {
+      "apiKey": "sk-...",
+      "apiBase": "https://generativelanguage.googleapis.com"
+    }
+  }
+}
+```
+
 ### OpenRouter
 
 ```json

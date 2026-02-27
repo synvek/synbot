@@ -261,6 +261,19 @@ cargo run --example generate_config_schema --features schema -- -o config.schema
 }
 ```
 
+### Google Gemini
+
+```json
+{
+  "providers": {
+    "openai": {
+      "apiKey": "sk-...",
+      "apiBase": "https://generativelanguage.googleapis.com"
+    }
+  }
+}
+```
+
 ### OpenRouter
 
 ```json

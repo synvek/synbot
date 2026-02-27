@@ -142,6 +142,12 @@ On Windows, run `synbot sandbox setup` once as Administrator to add network rule
 
 ## Providers
 
+- Openai
+
+- Anthropic
+
+- Google Gemini
+
 - Openrouter
 
 - Deepseek

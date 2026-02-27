@@ -141,6 +141,12 @@ synbot sandbox start
 
 ## 模型提供商
 
+- Openai
+
+- Anthropic
+
+- Google Gemini
+
 - OpenRouter
 
 - Deepseek

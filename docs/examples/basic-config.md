@@ -54,6 +54,10 @@ This example shows a minimal but functional Synbot configuration that you can us
       "apiKey": "",
       "apiBase": "https://api.openai.com/v1"
     },
+    "gemini": {
+      "apiKey": "",
+      "apiBase": "https://generativelanguage.googleapis.com"
+    },
     "openrouter": {
       "apiKey": "",
       "apiBase": "https://openrouter.ai/api/v1"

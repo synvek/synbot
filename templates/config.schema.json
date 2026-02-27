@@ -162,6 +162,10 @@
           "apiBase": null,
           "apiKey": ""
         },
+        "gemini": {
+          "apiBase": null,
+          "apiKey": ""
+        },
         "openrouter": {
           "apiBase": null,
           "apiKey": ""
@@ -1331,6 +1335,17 @@
           ]
         },
         "openai": {
+          "default": {
+            "apiBase": null,
+            "apiKey": ""
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProviderEntry"
+            }
+          ]
+        },
+        "gemini": {
           "default": {
             "apiBase": null,
             "apiKey": ""

@@ -325,6 +325,8 @@ pub struct ProvidersConfig {
     #[serde(default)]
     pub openai: ProviderEntry,
     #[serde(default)]
+    pub gemini: ProviderEntry,
+    #[serde(default)]
     pub openrouter: ProviderEntry,
     #[serde(default)]
     pub deepseek: ProviderEntry,

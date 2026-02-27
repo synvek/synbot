@@ -37,6 +37,8 @@ pub fn resolve_provider(cfg: &config::Config, provider_name: &str) -> (String, O
         (cfg.providers.anthropic.api_key.clone(), normalize_base(&cfg.providers.anthropic.api_base))
     } else if name.contains("openai") {
         (cfg.providers.openai.api_key.clone(), normalize_base(&cfg.providers.openai.api_base))
+    } else if name.contains("gemini") {
+        (cfg.providers.gemini.api_key.clone(), normalize_base(&cfg.providers.gemini.api_base))
     } else if name.contains("deepseek") {
         (cfg.providers.deepseek.api_key.clone(), normalize_base(&cfg.providers.deepseek.api_base))
     } else if name.contains("moonshot") {

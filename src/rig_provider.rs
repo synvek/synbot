@@ -134,6 +134,7 @@ impl ProviderRegistry {
             "openai",
             "anthropic",
             "claude",
+            "gemini",
             "deepseek",
             "moonshot",
             "ollama",
@@ -177,6 +178,7 @@ fn build_completion_model_builtin(
     type RC = reqwest::Client;
     const ANTHROPIC_API_BASE: &str = "https://api.anthropic.com";
     const OPENAI_API_BASE: &str = "https://api.openai.com/v1";
+    const GEMINI_API_BASE: &str = "https://generativelanguage.googleapis.com";
     let model = if lower.contains("anthropic") || lower.contains("claude") {
         let base = api_base
             .filter(|s| !s.trim().is_empty())
@@ -190,6 +192,19 @@ fn build_completion_model_builtin(
             .map_err(|e| anyhow::anyhow!("{}", e))?;
         let m = client.completion_model(model_name.to_string());
         Arc::new(AnthropicModel(client, m)) as Arc<dyn SynbotCompletionModel>
+    } else if lower.contains("gemini") {
+        let base = api_base
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| s.trim().trim_end_matches('/').to_string())
+            .unwrap_or_else(|| GEMINI_API_BASE.to_string());
+        let client = rig::providers::gemini::Client::<RC>::builder()
+            .api_key(api_key.to_string())
+            .http_client(mk_http())
+            .base_url(&base)
+            .build()
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        let m = client.completion_model(model_name.to_string());
+        Arc::new(GeminiModel(client, m)) as Arc<dyn SynbotCompletionModel>
     } else if lower.contains("deepseek") {
         let base = api_base
             .filter(|s| !s.trim().is_empty())
@@ -300,6 +315,7 @@ macro_rules! impl_model {
 impl_model!(OpenAiModel, rig::providers::openai::Client);
 impl_model!(OpenAiCompletionsModel, rig::providers::openai::CompletionsClient);
 impl_model!(AnthropicModel, rig::providers::anthropic::Client);
+impl_model!(GeminiModel, rig::providers::gemini::Client);
 impl_model!(MoonshotModel, rig::providers::moonshot::Client);
 impl_model!(OllamaModel, rig::providers::ollama::Client);
 
