@@ -91,7 +91,7 @@ cargo test
 - `src/` — main application and library code
 - `tests/` — integration tests
 - `examples/` — example usage
-- `benches/` — benchmarks
+- `tools/benches/` — benchmarks; `tools/benches/scripts/` — benchmark scripts
 - `docs/` — documentation and assets
 
 ## License
