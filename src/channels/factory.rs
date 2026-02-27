@@ -35,6 +35,7 @@ impl crate::channels::ChannelFactory for TelegramChannelFactory {
             ctx.inbound_tx,
             ctx.outbound_rx,
             ctx.show_tool_calls,
+            ctx.tool_result_preview_chars,
         );
         Ok(Box::new(ch))
     }
@@ -54,6 +55,7 @@ impl crate::channels::ChannelFactory for FeishuChannelFactory {
             ctx.inbound_tx,
             ctx.outbound_rx,
             ctx.show_tool_calls,
+            ctx.tool_result_preview_chars,
             ctx.workspace,
         );
         if let Some(tx) = ctx.outbound_tx {
@@ -83,6 +85,7 @@ impl crate::channels::ChannelFactory for DiscordChannelFactory {
             ctx.inbound_tx,
             ctx.outbound_rx,
             ctx.show_tool_calls,
+            ctx.tool_result_preview_chars,
             ctx.workspace,
         );
         Ok(Box::new(ch))
@@ -103,6 +106,7 @@ impl crate::channels::ChannelFactory for SlackChannelFactory {
             ctx.inbound_tx,
             ctx.outbound_rx,
             ctx.show_tool_calls,
+            ctx.tool_result_preview_chars,
             ctx.workspace,
         )?;
         Ok(Box::new(ch))
@@ -123,6 +127,7 @@ impl crate::channels::ChannelFactory for EmailChannelFactory {
             ctx.inbound_tx,
             ctx.outbound_rx,
             ctx.show_tool_calls,
+            ctx.tool_result_preview_chars,
         );
         Ok(Box::new(ch))
     }
@@ -142,6 +147,7 @@ impl crate::channels::ChannelFactory for MatrixChannelFactory {
             ctx.inbound_tx,
             ctx.outbound_rx,
             ctx.show_tool_calls,
+            ctx.tool_result_preview_chars,
             ctx.workspace,
         )?;
         Ok(Box::new(ch))

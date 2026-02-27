@@ -294,6 +294,7 @@ pub async fn cmd_start() -> Result<()> {
                 inbound_tx: inbound_tx_ch,
                 outbound_rx,
                 show_tool_calls,
+                tool_result_preview_chars: cfg.tool_result_preview_chars as usize,
                 workspace: Some(ws.clone()),
                 approval_manager: Some(std::sync::Arc::clone(&approval_manager)),
                 completion_model: Some(std::sync::Arc::clone(&completion_model)),

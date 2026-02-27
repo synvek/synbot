@@ -187,6 +187,8 @@ pub struct ChannelStartContext {
     pub inbound_tx: mpsc::Sender<InboundMessage>,
     pub outbound_rx: broadcast::Receiver<OutboundMessage>,
     pub show_tool_calls: bool,
+    /// Max length (chars) of tool result preview when sending to user (from config.tool_result_preview_chars).
+    pub tool_result_preview_chars: usize,
     pub workspace: Option<PathBuf>,
     pub approval_manager: Option<Arc<crate::tools::approval::ApprovalManager>>,
     pub completion_model: Option<Arc<dyn crate::rig_provider::SynbotCompletionModel>>,

@@ -24,6 +24,7 @@ pub struct TelegramChannel {
     config: TelegramConfig,
     /// When true, forward tool execution progress to this channel (global && channel show_tool_calls).
     show_tool_calls: bool,
+    tool_result_preview_chars: usize,
     inbound_tx: mpsc::Sender<InboundMessage>,
     outbound_rx: Option<broadcast::Receiver<OutboundMessage>>,
     client: reqwest::Client,
@@ -80,6 +81,7 @@ impl TelegramChannel {
         inbound_tx: mpsc::Sender<InboundMessage>,
         outbound_rx: broadcast::Receiver<OutboundMessage>,
         show_tool_calls: bool,
+        tool_result_preview_chars: usize,
     ) -> Self {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(60))
@@ -88,6 +90,7 @@ impl TelegramChannel {
         Self {
             config,
             show_tool_calls,
+            tool_result_preview_chars,
             inbound_tx,
             outbound_rx: Some(outbound_rx),
             client,
@@ -254,6 +257,7 @@ impl Channel for TelegramChannel {
         let channel_name = self.config.name.clone();
         let pending_approvals = self.pending_approvals.clone();
         let show_tool_calls = self.show_tool_calls;
+        let tool_result_preview_chars = self.tool_result_preview_chars;
         tokio::spawn(async move {
             while let Ok(msg) = outbound_rx.recv().await {
                 if msg.channel != channel_name {
@@ -273,8 +277,8 @@ impl Channel for TelegramChannel {
                             }
                             let preview = if result_preview.is_empty() {
                                 String::new()
-                            } else if result_preview.len() > 100 {
-                                format!("{}...", result_preview.chars().take(100).collect::<String>())
+                            } else if result_preview.len() > tool_result_preview_chars {
+                                format!("{}...", result_preview.chars().take(tool_result_preview_chars).collect::<String>())
                             } else {
                                 result_preview.clone()
                             };
@@ -563,8 +567,8 @@ impl Channel for TelegramChannel {
                 }
                 let preview = if result_preview.is_empty() {
                     String::new()
-                } else if result_preview.len() > 100 {
-                    format!("{}...", result_preview.chars().take(100).collect::<String>())
+                } else if result_preview.len() > self.tool_result_preview_chars {
+                    format!("{}...", result_preview.chars().take(self.tool_result_preview_chars).collect::<String>())
                 } else {
                     result_preview.clone()
                 };

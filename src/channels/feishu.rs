@@ -37,6 +37,7 @@ type OutboundTx = Option<tokio::sync::broadcast::Sender<OutboundMessage>>;
 pub struct FeishuChannel {
     config: FeishuConfig,
     show_tool_calls: bool,
+    tool_result_preview_chars: usize,
     inbound_tx: mpsc::Sender<InboundMessage>,
     outbound_rx: Option<broadcast::Receiver<OutboundMessage>>,
     /// When set, used to send a user-visible message when file upload fails (e.g. permission 99991672).
@@ -308,11 +309,13 @@ impl FeishuChannel {
         inbound_tx: mpsc::Sender<InboundMessage>,
         outbound_rx: broadcast::Receiver<OutboundMessage>,
         show_tool_calls: bool,
+        tool_result_preview_chars: usize,
         workspace_dir: Option<PathBuf>,
     ) -> Self {
         Self {
             config,
             show_tool_calls,
+            tool_result_preview_chars,
             inbound_tx,
             outbound_rx: Some(outbound_rx),
             outbound_tx: None,
@@ -1010,6 +1013,7 @@ impl Channel for FeishuChannel {
         let feishu_app_secret = self.config.app_secret.clone();
         let pending_approvals_clone = self.pending_approvals.clone();
         let show_tool_calls = self.show_tool_calls;
+        let tool_result_preview_chars = self.tool_result_preview_chars;
         let workspace_dir = self.workspace_dir.clone();
         let outbound_tx_for_fail = self.outbound_tx.clone();
         tokio::spawn(async move {
@@ -1031,8 +1035,8 @@ impl Channel for FeishuChannel {
                         }
                         let preview = if result_preview.is_empty() {
                             String::new()
-                        } else if result_preview.len() > 100 {
-                            format!("{}...", result_preview.chars().take(100).collect::<String>())
+                        } else if result_preview.len() > tool_result_preview_chars {
+                            format!("{}...", result_preview.chars().take(tool_result_preview_chars).collect::<String>())
                         } else {
                             result_preview.clone()
                         };
@@ -1268,8 +1272,8 @@ impl Channel for FeishuChannel {
                 }
                 let preview = if result_preview.is_empty() {
                     String::new()
-                } else if result_preview.len() > 100 {
-                    format!("{}...", result_preview.chars().take(100).collect::<String>())
+                } else if result_preview.len() > self.tool_result_preview_chars {
+                    format!("{}...", result_preview.chars().take(self.tool_result_preview_chars).collect::<String>())
                 } else {
                     result_preview.clone()
                 };

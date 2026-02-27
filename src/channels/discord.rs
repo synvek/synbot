@@ -253,6 +253,7 @@ fn discord_event_to_inbound(data: &serde_json::Value) -> Option<InboundMessage> 
 pub struct DiscordChannel {
     config: DiscordConfig,
     show_tool_calls: bool,
+    tool_result_preview_chars: usize,
     inbound_tx: mpsc::Sender<InboundMessage>,
     outbound_rx: Option<broadcast::Receiver<OutboundMessage>>,
     client: reqwest::Client,
@@ -269,6 +270,7 @@ impl DiscordChannel {
         inbound_tx: mpsc::Sender<InboundMessage>,
         outbound_rx: broadcast::Receiver<OutboundMessage>,
         show_tool_calls: bool,
+        tool_result_preview_chars: usize,
         workspace_dir: Option<PathBuf>,
     ) -> Self {
         let client = reqwest::Client::builder()
@@ -278,6 +280,7 @@ impl DiscordChannel {
         Self {
             config,
             show_tool_calls,
+            tool_result_preview_chars,
             inbound_tx,
             outbound_rx: Some(outbound_rx),
             client,
@@ -865,6 +868,7 @@ impl Channel for DiscordChannel {
         let outbound_channel_name = self.config.name.clone();
         let pending_approvals_clone = self.pending_approvals.clone();
         let show_tool_calls = self.show_tool_calls;
+        let tool_result_preview_chars = self.tool_result_preview_chars;
         let workspace_dir = self.workspace_dir.clone();
         tokio::spawn(async move {
             while let Ok(msg) = outbound_rx.recv().await {
@@ -885,8 +889,8 @@ impl Channel for DiscordChannel {
                         }
                         let preview = if result_preview.is_empty() {
                             String::new()
-                        } else if result_preview.len() > 100 {
-                            format!("{}...", result_preview.chars().take(100).collect::<String>())
+                        } else if result_preview.len() > tool_result_preview_chars {
+                            format!("{}...", result_preview.chars().take(tool_result_preview_chars).collect::<String>())
                         } else {
                             result_preview.clone()
                         };
@@ -1109,8 +1113,8 @@ impl Channel for DiscordChannel {
                 }
                 let preview = if result_preview.is_empty() {
                     String::new()
-                } else if result_preview.len() > 100 {
-                    format!("{}...", result_preview.chars().take(100).collect::<String>())
+                } else if result_preview.len() > self.tool_result_preview_chars {
+                    format!("{}...", result_preview.chars().take(self.tool_result_preview_chars).collect::<String>())
                 } else {
                     result_preview.clone()
                 };

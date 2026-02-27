@@ -1191,6 +1191,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_tool_result_preview_chars() -> u32 {
+    512
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
@@ -1198,6 +1202,9 @@ pub struct Config {
     /// When true (default), all channels may receive tool execution progress; each channel can override via channels.*.showToolCalls.
     #[serde(default = "default_true")]
     pub show_tool_calls: bool,
+    /// Max length (chars) of tool result preview sent to users (default 512).
+    #[serde(default = "default_tool_result_preview_chars")]
+    pub tool_result_preview_chars: u32,
     #[serde(default)]
     pub channels: ChannelsConfig,
     #[serde(default)]

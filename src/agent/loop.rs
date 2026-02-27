@@ -33,6 +33,7 @@ pub struct AgentLoop {
     subagent_manager: Arc<Mutex<SubagentManager>>,
     tool_sandbox_enabled: bool,
     hooks: Option<Arc<HookRegistry>>,
+    tool_result_preview_chars: usize,
 }
 
 impl AgentLoop {
@@ -50,6 +51,7 @@ impl AgentLoop {
         hooks: Option<Arc<HookRegistry>>,
     ) -> Self {
         let subagent_manager = SubagentManager::new(config.main_agent.max_concurrent_subagents);
+        let tool_result_preview_chars = config.tool_result_preview_chars as usize;
         Self {
             workspace,
             model,
@@ -62,6 +64,7 @@ impl AgentLoop {
             subagent_manager: Arc::new(Mutex::new(subagent_manager)),
             tool_sandbox_enabled,
             hooks,
+            tool_result_preview_chars,
         }
     }
 
@@ -270,6 +273,7 @@ impl AgentLoop {
                     &session_key,
                     &self.outbound_tx,
                     self.hooks.clone(),
+                    self.tool_result_preview_chars,
                 )
                 .await
             })
@@ -420,6 +424,7 @@ impl AgentLoop {
                 workspace: agent_workspace,
                 memory_dir: agent_memory_dir,
             };
+            let tool_result_preview_chars = self.tool_result_preview_chars;
 
             let session_messages_clone = session_messages.clone();
             let task_future = Box::pin(async move {
@@ -441,6 +446,7 @@ impl AgentLoop {
                         &session_id_str,
                         &outbound_tx,
                         hooks.clone(),
+                        tool_result_preview_chars,
                     )
                     .await?;
                     let messages = history_guard.clone();
@@ -577,6 +583,7 @@ async fn run_completion_loop(
     session_id: &str,
     outbound_tx: &broadcast::Sender<OutboundMessage>,
     hooks: Option<Arc<HookRegistry>>,
+    tool_result_preview_chars: usize,
 ) -> Result<u32> {
     let message_ctx = Some((channel, chat_id, sender_id, session_id));
     let mut iterations = 0u32;
@@ -662,8 +669,8 @@ async fn run_completion_loop(
                     } else {
                         "failure"
                     };
-                    let preview = if result_str.len() > 200 {
-                        let mut end = 200;
+                    let preview = if result_str.len() > tool_result_preview_chars {
+                        let mut end = tool_result_preview_chars;
                         while end > 0 && !result_str.is_char_boundary(end) {
                             end -= 1;
                         }

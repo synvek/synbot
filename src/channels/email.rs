@@ -82,6 +82,7 @@ impl Unpin for ImapStreamKind {}
 pub struct EmailChannel {
     config: EmailConfig,
     show_tool_calls: bool,
+    tool_result_preview_chars: usize,
     inbound_tx: mpsc::Sender<InboundMessage>,
     outbound_rx: Option<broadcast::Receiver<OutboundMessage>>,
     /// chat_id -> (from_addr, uid, reply_tx). When we get the outbound reply we send email, mark read, then signal.
@@ -94,10 +95,12 @@ impl EmailChannel {
         inbound_tx: mpsc::Sender<InboundMessage>,
         outbound_rx: broadcast::Receiver<OutboundMessage>,
         show_tool_calls: bool,
+        tool_result_preview_chars: usize,
     ) -> Self {
         Self {
             config,
             show_tool_calls,
+            tool_result_preview_chars,
             inbound_tx,
             outbound_rx: Some(outbound_rx),
             pending: Arc::new(RwLock::new(HashMap::new())),
@@ -370,6 +373,7 @@ impl EmailChannel {
         pending: Arc<RwLock<HashMap<String, (String, u32, oneshot::Sender<()>)>>>,
         config: EmailConfig,
         show_tool_calls: bool,
+        tool_result_preview_chars: usize,
     ) {
         while let Ok(msg) = outbound_rx.recv().await {
             if msg.channel != channel_name {
@@ -382,8 +386,8 @@ impl EmailChannel {
                     status,
                     result_preview,
                 } if show_tool_calls => {
-                    let preview = if result_preview.len() > 100 {
-                        format!("{}...", &result_preview[..100])
+                    let preview = if result_preview.len() > tool_result_preview_chars {
+                        format!("{}...", result_preview.chars().take(tool_result_preview_chars).collect::<String>())
                     } else {
                         result_preview.clone()
                     };
@@ -447,8 +451,9 @@ impl EmailChannel {
         let pending = Arc::clone(&self.pending);
         let config = self.config.clone();
         let show_tool_calls = self.show_tool_calls;
+        let tool_result_preview_chars = self.tool_result_preview_chars;
         tokio::spawn(async move {
-            Self::run_outbound_listener(channel_name, outbound_rx, pending, config, show_tool_calls).await;
+            Self::run_outbound_listener(channel_name, outbound_rx, pending, config, show_tool_calls, tool_result_preview_chars).await;
         });
 
         let poll_interval = std::time::Duration::from_secs(self.config.poll_interval_secs);
@@ -540,8 +545,9 @@ impl Channel for EmailChannel {
         let pending = Arc::clone(&self.pending);
         let config = self.config.clone();
         let show_tool_calls = self.show_tool_calls;
+        let tool_result_preview_chars = self.tool_result_preview_chars;
         tokio::spawn(async move {
-            Self::run_outbound_listener(channel_name, outbound_rx, pending, config, show_tool_calls).await;
+            Self::run_outbound_listener(channel_name, outbound_rx, pending, config, show_tool_calls, tool_result_preview_chars).await;
         });
 
         let poll_interval = std::time::Duration::from_secs(self.config.poll_interval_secs);
@@ -580,8 +586,8 @@ impl Channel for EmailChannel {
                 status,
                 result_preview,
             } if self.show_tool_calls => {
-                let preview = if result_preview.len() > 100 {
-                    format!("{}...", &result_preview[..100])
+                let preview = if result_preview.len() > self.tool_result_preview_chars {
+                    format!("{}...", result_preview.chars().take(self.tool_result_preview_chars).collect::<String>())
                 } else {
                     result_preview.clone()
                 };

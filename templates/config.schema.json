@@ -190,6 +190,12 @@
       "default": true,
       "type": "boolean"
     },
+    "toolResultPreviewChars": {
+      "description": "Max length (chars) of tool result preview sent to users (default 512).",
+      "default": 512,
+      "type": "integer",
+      "minimum": 1
+    },
     "toolSandbox": {
       "description": "Optional tool sandbox (exec and other tools run inside this).",
       "default": null,
