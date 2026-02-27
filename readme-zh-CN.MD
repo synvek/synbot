@@ -26,6 +26,8 @@
 
 - 插件支持(支持使用Rust, C/C++, Go等开发wasm作为插件运行)
 
+- MCP（Model Context Protocol）工具：可配置多个 MCP 服务器（stdio 或 SSE），将其暴露的工具注册为 Agent 可用工具
+
 - 记忆：每日记忆 & 长期记忆 & 向量 Sqlite vec & 关键词 FTS5 & 记忆自动压缩
 
 - 沙箱支持
@@ -99,6 +101,13 @@ synbot --root-dir /path/to/workspace onboard
 ```
 
 更多配置请参阅 [文档](https://github.com/synbot/synbot/tree/main/docs)。
+
+**MCP 工具**：在配置中增加 `tools.mcp.servers` 可接入 MCP 服务器，将其工具注册为 Agent 可用工具。示例：
+
+- stdio（子进程）：`"tools": { "mcp": { "servers": [{ "id": "fs", "transport": "stdio", "command": "npx", "args": ["-y", "mcp-server-filesystem", "/tmp"] }] } }`
+- SSE（HTTP）：`"tools": { "mcp": { "servers": [{ "id": "echo", "transport": "sse", "url": "http://localhost:8000/sse" }] } }`
+
+可选字段 `toolNamePrefix`（如 `"mcp_fs_"`）用于为工具名加前缀，避免与内置工具重名。
 
 ### 基本启动（不使用沙箱）
 

@@ -170,6 +170,11 @@ pub async fn cmd_start() -> Result<()> {
     )
     .await;
 
+    #[cfg(feature = "mcp")]
+    if let Some(mcp) = &cfg.tools.mcp {
+        crate::tools::mcp::load_mcp_tools(mcp, &mut tool_reg).await;
+    }
+
     let model = cfg.main_agent.model.clone();
     let provider_name = cfg.main_agent.provider.clone();
     let (api_key, api_base) = resolve_provider(&cfg, &provider_name);

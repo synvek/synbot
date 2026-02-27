@@ -20,6 +20,8 @@
         "discord": [],
         "email": [],
         "feishu": [],
+        "matrix": [],
+        "slack": [],
         "telegram": []
       },
       "allOf": [
@@ -127,6 +129,12 @@
         }
       ]
     },
+    "plugins": {
+      "description": "Plugin-specific configuration. Keys are plugin names; values are arbitrary JSON for each plugin.",
+      "default": {},
+      "type": "object",
+      "additionalProperties": true
+    },
     "providers": {
       "default": {
         "anthropic": {
@@ -137,6 +145,7 @@
           "apiBase": null,
           "apiKey": ""
         },
+        "extra": {},
         "kimiCode": {
           "apiBase": null,
           "apiKey": ""
@@ -221,6 +230,7 @@
           "restrictToWorkspace": false,
           "timeoutSecs": 60
         },
+        "mcp": null,
         "web": {
           "braveApiKey": "",
           "searchBackend": "duckDuckGo",
@@ -451,6 +461,13 @@
             "$ref": "#/definitions/DiscordConfig"
           }
         },
+        "email": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/EmailConfig"
+          }
+        },
         "feishu": {
           "default": [],
           "type": "array",
@@ -458,11 +475,11 @@
             "$ref": "#/definitions/FeishuConfig"
           }
         },
-        "telegram": {
+        "matrix": {
           "default": [],
           "type": "array",
           "items": {
-            "$ref": "#/definitions/TelegramConfig"
+            "$ref": "#/definitions/MatrixConfig"
           }
         },
         "slack": {
@@ -472,11 +489,11 @@
             "$ref": "#/definitions/SlackConfig"
           }
         },
-        "email": {
+        "telegram": {
           "default": [],
           "type": "array",
           "items": {
-            "$ref": "#/definitions/EmailConfig"
+            "$ref": "#/definitions/TelegramConfig"
           }
         }
       }
@@ -590,12 +607,24 @@
           "type": "boolean"
         },
         "fromSender": {
-          "description": "Only treat emails FROM this address as chat (e.g. user@example.com).",
+          "description": "Only treat emails FROM this address as chat (e.g. \"user@example.com\").",
           "default": "",
           "type": "string"
         },
         "imap": {
-          "$ref": "#/definitions/EmailServerConfig"
+          "description": "IMAP receive server (host, port, username, password).",
+          "default": {
+            "host": "",
+            "password": "",
+            "port": 0,
+            "useTls": false,
+            "username": ""
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/EmailServerConfig"
+            }
+          ]
         },
         "name": {
           "description": "Unique channel name (default \"email\").",
@@ -605,76 +634,61 @@
         "pollIntervalSecs": {
           "description": "Poll interval in seconds (default 120 = 2 minutes).",
           "default": 120,
-          "type": "integer"
-        },
-        "showToolCalls": {
-          "default": true,
-          "type": "boolean"
-        },
-        "smtp": {
-          "$ref": "#/definitions/EmailServerConfig"
-        },
-        "startTime": {
-          "description": "Only process emails received after this time (RFC3339 or YYYY-MM-DD).",
-          "default": "",
-          "type": "string"
-        }
-      }
-    },
-    "EmailServerConfig": {
-      "type": "object",
-      "properties": {
-        "host": { "default": "", "type": "string" },
-        "password": { "default": "", "type": "string" },
-        "port": { "default": 0, "type": "integer" },
-        "useTls": { "default": true, "type": "boolean" },
-        "username": { "default": "", "type": "string" }
-      }
-    },
-    "SlackConfig": {
-      "type": "object",
-      "properties": {
-        "allowlist": {
-          "default": [],
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/AllowlistEntry"
-          }
-        },
-        "appToken": {
-          "description": "App-level token (xapp-...) for Socket Mode connection. Required when enabled.",
-          "default": "",
-          "type": "string"
-        },
-        "enableAllowlist": {
-          "description": "When true (default), only chats in allowlist are accepted; when false, allowlist is not checked.",
-          "default": true,
-          "type": "boolean"
-        },
-        "enabled": {
-          "default": false,
-          "type": "boolean"
-        },
-        "groupMyName": {
-          "description": "When enable_allowlist is false, bot user id used for channel @ check (optional).",
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "name": {
-          "description": "Unique channel name (default \"slack\").",
-          "default": "slack",
-          "type": "string"
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
         },
         "showToolCalls": {
           "description": "When true (default), push tool execution progress to this channel.",
           "default": true,
           "type": "boolean"
         },
-        "token": {
-          "description": "Bot token (xoxb-...) for Web API (e.g. chat.postMessage). Required when enabled.",
+        "smtp": {
+          "description": "SMTP send server (host, port, username, password).",
+          "default": {
+            "host": "",
+            "password": "",
+            "port": 0,
+            "useTls": false,
+            "username": ""
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/EmailServerConfig"
+            }
+          ]
+        },
+        "startTime": {
+          "description": "Only process emails received after this time (RFC3339 or date-only \"YYYY-MM-DD\").",
+          "default": "",
+          "type": "string"
+        }
+      }
+    },
+    "EmailServerConfig": {
+      "description": "Email account and transport settings (IMAP receive, SMTP send).",
+      "type": "object",
+      "properties": {
+        "host": {
+          "default": "",
+          "type": "string"
+        },
+        "password": {
+          "default": "",
+          "type": "string"
+        },
+        "port": {
+          "default": 0,
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "useTls": {
+          "description": "Use TLS (e.g. IMAPS 993, SMTPS 465). When false, use STARTTLS on plain port.",
+          "default": true,
+          "type": "boolean"
+        },
+        "username": {
           "default": "",
           "type": "string"
         }
@@ -977,6 +991,135 @@
         }
       }
     },
+    "MatrixConfig": {
+      "type": "object",
+      "properties": {
+        "accessToken": {
+          "description": "Access token (optional). When set, login is skipped and this token is used.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "allowlist": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AllowlistEntry"
+          }
+        },
+        "enableAllowlist": {
+          "default": true,
+          "type": "boolean"
+        },
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "groupMyName": {
+          "description": "When enable_allowlist is false, bot user id for @mention check in rooms (optional).",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "homeserverUrl": {
+          "description": "Matrix homeserver URL (e.g. \"https://matrix.example.org\"). Required when enabled.",
+          "default": "",
+          "type": "string"
+        },
+        "name": {
+          "description": "Unique channel name (default \"matrix\").",
+          "default": "matrix",
+          "type": "string"
+        },
+        "password": {
+          "description": "Password for login. Ignored if access_token is set.",
+          "default": "",
+          "type": "string"
+        },
+        "showToolCalls": {
+          "default": true,
+          "type": "boolean"
+        },
+        "username": {
+          "description": "Bot user ID (e.g. \"@bot:example.org\") or localpart for login.",
+          "default": "",
+          "type": "string"
+        }
+      }
+    },
+    "McpConfig": {
+      "description": "MCP (Model Context Protocol) tools configuration.",
+      "type": "object",
+      "properties": {
+        "servers": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/McpServerConfig"
+          }
+        }
+      }
+    },
+    "McpServerConfig": {
+      "description": "Configuration for a single MCP server.",
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "args": {
+          "description": "For stdio: arguments (e.g. [\"-y\", \"mcp-server-filesystem\"]).",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "command": {
+          "description": "For stdio: command to run (e.g. \"npx\", \"uvx\").",
+          "default": "",
+          "type": "string"
+        },
+        "id": {
+          "description": "Unique id for this server (used in logs and optional tool name prefix).",
+          "type": "string"
+        },
+        "toolNamePrefix": {
+          "description": "Optional prefix for registered tool names to avoid collisions (e.g. \"mcp_fs_\").",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "transport": {
+          "description": "Transport type: \"stdio\" or \"sse\".",
+          "default": "stdio",
+          "allOf": [
+            {
+              "$ref": "#/definitions/McpTransport"
+            }
+          ]
+        },
+        "url": {
+          "description": "For SSE: server URL (e.g. \"http://localhost:8000/sse\").",
+          "default": "",
+          "type": "string"
+        }
+      }
+    },
+    "McpTransport": {
+      "description": "MCP server transport: stdio (subprocess) or SSE (HTTP).",
+      "type": "string",
+      "enum": [
+        "stdio",
+        "sse"
+      ]
+    },
     "MemoryCompressionConfig": {
       "type": "object",
       "properties": {
@@ -1138,6 +1281,14 @@
               "$ref": "#/definitions/ProviderEntry"
             }
           ]
+        },
+        "extra": {
+          "description": "Extra provider entries for plugin-registered providers. Key = provider name as used in config (e.g. mainAgent.provider).",
+          "default": {},
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/ProviderEntry"
+          }
         },
         "kimiCode": {
           "description": "Kimi Code (月之暗面 / Moonshot coding API). Uses OpenAI-compatible chat completions; set api_base if using a custom endpoint.",
@@ -1365,6 +1516,55 @@
         }
       ]
     },
+    "SlackConfig": {
+      "type": "object",
+      "properties": {
+        "allowlist": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AllowlistEntry"
+          }
+        },
+        "appToken": {
+          "description": "App-level token (xapp-...) for Socket Mode connection. Required for receiving events.",
+          "default": "",
+          "type": "string"
+        },
+        "enableAllowlist": {
+          "description": "When true (default), only chats in allowlist are accepted; when false, allowlist is not checked.",
+          "default": true,
+          "type": "boolean"
+        },
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "groupMyName": {
+          "description": "When enable_allowlist is false, bot user id used for channel @ check (optional).",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "Unique channel name (default \"slack\").",
+          "default": "slack",
+          "type": "string"
+        },
+        "showToolCalls": {
+          "description": "When true (default), push tool execution progress to this channel.",
+          "default": true,
+          "type": "boolean"
+        },
+        "token": {
+          "description": "Bot token (xoxb-...) for Web API (e.g. chat.postMessage). Required for sending messages.",
+          "default": "",
+          "type": "string"
+        }
+      }
+    },
     "TelegramConfig": {
       "type": "object",
       "properties": {
@@ -1537,6 +1737,18 @@
             }
           ]
         },
+        "mcp": {
+          "description": "MCP servers to connect; their tools are registered as synbot tools.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/McpConfig"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "web": {
           "default": {
             "braveApiKey": "",
@@ -1549,8 +1761,41 @@
               "$ref": "#/definitions/WebToolConfig"
             }
           ]
+        },
+        "mcp": {
+          "description": "MCP (Model Context Protocol) servers; their tools are registered as synbot tools.",
+          "default": null,
+          "anyOf": [
+            { "$ref": "#/definitions/McpConfig" },
+            { "type": "null" }
+          ]
         }
       }
+    },
+    "McpConfig": {
+      "type": "object",
+      "properties": {
+        "servers": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/McpServerConfig" },
+          "default": []
+        }
+      }
+    },
+    "McpServerConfig": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique id for this server" },
+        "transport": { "$ref": "#/definitions/McpTransport", "default": "stdio" },
+        "command": { "type": "string", "description": "For stdio: command to run", "default": "" },
+        "args": { "type": "array", "items": { "type": "string" }, "description": "For stdio: arguments", "default": [] },
+        "url": { "type": "string", "description": "For SSE: server URL", "default": "" },
+        "toolNamePrefix": { "type": ["string", "null"], "description": "Optional prefix for tool names", "default": null }
+      }
+    },
+    "McpTransport": {
+      "type": "string",
+      "enum": ["stdio", "sse"]
     },
     "WebAuthConfig": {
       "type": "object",

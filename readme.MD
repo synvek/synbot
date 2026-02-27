@@ -26,6 +26,8 @@
 
 - Plugin support(Use wasm as plugin created by rust, c/c++, go and so on)
 
+- MCP (Model Context Protocol) tools: configure MCP servers (stdio or SSE) and expose their tools to the agent
+
 - Memory: Daily memory & Long term memory & Sqlite vec & FTS5 & Auto compression 
 
 - Sandbox support 
@@ -101,6 +103,13 @@ Minimal configuration example:
 ```
 
 For more options see the [documentation](https://github.com/synbot/synbot/tree/main/docs).
+
+**MCP tools**: Add `tools.mcp.servers` to connect MCP servers and register their tools for the agent. Examples:
+
+- stdio (subprocess): `"tools": { "mcp": { "servers": [{ "id": "fs", "transport": "stdio", "command": "npx", "args": ["-y", "mcp-server-filesystem", "/tmp"] }] } }`
+- SSE (HTTP): `"tools": { "mcp": { "servers": [{ "id": "echo", "transport": "sse", "url": "http://localhost:8000/sse" }] } }`
+
+Optional field `toolNamePrefix` (e.g. `"mcp_fs_"`) prefixes tool names to avoid clashes with built-in tools.
 
 ### Basic Startup (no sandbox)
 

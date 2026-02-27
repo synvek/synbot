@@ -872,6 +872,49 @@ impl Default for BrowserToolConfig {
 // Tools config
 // ---------------------------------------------------------------------------
 
+/// MCP server transport: stdio (subprocess) or SSE (HTTP).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum McpTransport {
+    #[default]
+    Stdio,
+    Sse,
+}
+
+/// Configuration for a single MCP server.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct McpServerConfig {
+    /// Unique id for this server (used in logs and optional tool name prefix).
+    pub id: String,
+    /// Transport type: "stdio" or "sse".
+    #[serde(default)]
+    pub transport: McpTransport,
+    /// For stdio: command to run (e.g. "npx", "uvx").
+    #[serde(default)]
+    pub command: String,
+    /// For stdio: arguments (e.g. ["-y", "mcp-server-filesystem"]).
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// For SSE: server URL (e.g. "http://localhost:8000/sse").
+    #[serde(default)]
+    pub url: String,
+    /// Optional prefix for registered tool names to avoid collisions (e.g. "mcp_fs_").
+    #[serde(default)]
+    pub tool_name_prefix: Option<String>,
+}
+
+/// MCP (Model Context Protocol) tools configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct McpConfig {
+    #[serde(default)]
+    pub servers: Vec<McpServerConfig>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
@@ -882,6 +925,9 @@ pub struct ToolsConfig {
     pub web: WebToolConfig,
     #[serde(default)]
     pub browser: BrowserToolConfig,
+    /// MCP servers to connect; their tools are registered as synbot tools.
+    #[serde(default)]
+    pub mcp: Option<McpConfig>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1534,6 +1580,40 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
                     value: String::new(),
                     constraint: "pattern must be non-empty".into(),
                 });
+            }
+        }
+    }
+
+    // --- MCP servers validation ---
+    if let Some(ref mcp) = config.tools.mcp {
+        for (i, server) in mcp.servers.iter().enumerate() {
+            let prefix = format!("tools.mcp.servers[{}]", i);
+            if server.id.trim().is_empty() {
+                errors.push(ValidationError {
+                    field: format!("{}.id", prefix),
+                    value: server.id.clone(),
+                    constraint: "must be non-empty".into(),
+                });
+            }
+            match server.transport {
+                McpTransport::Stdio => {
+                    if server.command.trim().is_empty() {
+                        errors.push(ValidationError {
+                            field: format!("{}.command", prefix),
+                            value: server.command.clone(),
+                            constraint: "must be non-empty for stdio transport".into(),
+                        });
+                    }
+                }
+                McpTransport::Sse => {
+                    if server.url.trim().is_empty() {
+                        errors.push(ValidationError {
+                            field: format!("{}.url", prefix),
+                            value: server.url.clone(),
+                            constraint: "must be non-empty for sse transport".into(),
+                        });
+                    }
+                }
             }
         }
     }

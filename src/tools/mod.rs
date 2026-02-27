@@ -24,6 +24,8 @@ pub mod filesystem;
 pub mod heartbeat_cron;
 pub mod memory_tool;
 pub mod message;
+#[cfg(feature = "mcp")]
+pub mod mcp;
 pub mod permission;
 pub mod session_tools;
 pub mod shell;

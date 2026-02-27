@@ -6,8 +6,10 @@ description = "Personal AI assistant"
 license = "MIT"
 
 [features]
-default = ["memory-index"]
+default = ["memory-index", "mcp"]
 memory-index = ["dep:rusqlite", "dep:sqlite-vec"]
+# MCP (Model Context Protocol) servers as tools
+mcp = ["dep:mcp-client", "dep:mcp-spec"]
 # Generate config JSON schema (e.g. cargo run --example generate_config_schema --features schema)
 schema = ["dep:schemars"]
 
@@ -110,6 +112,10 @@ encoding_rs = "0.8"
 
 # Extism: load external Wasm plugins (tools, hooks, skills, background, provider)
 extism = "1.13"
+
+# MCP (Model Context Protocol): connect to MCP servers and expose their tools
+mcp-client = { version = "0.1", optional = true }
+mcp-spec = { version = "0.1", optional = true }
 
 # Sandbox dependencies
 num_cpus = "1"
