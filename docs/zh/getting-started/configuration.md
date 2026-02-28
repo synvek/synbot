@@ -313,6 +313,37 @@ cargo run --example generate_config_schema --features schema -- -o config.schema
 }
 ```
 
+### 额外提供商（OpenAI 兼容）
+
+可以**仅通过配置**、不改代码，添加任意 **OpenAI Chat Completions 兼容**的提供商（如 Minimax、本地代理、其他兼容 API）。
+
+1. 在 **`providers.extra`** 下增加一项，**键名**自定，并填写 `apiKey` 和 `apiBase`。
+2. 将 **`mainAgent.provider`**（或该 agent 的 `provider` 覆盖）设为该键名。
+
+`extra` 中的名称会按 OpenAI 兼容方式调用：使用给定的 `apiBase` 请求 `/chat/completions`。内置提供商名称（如 `openai`、`anthropic`、`openrouter`）不会被 `extra` 覆盖。
+
+示例 — 添加 Minimax：
+
+```json
+{
+  "providers": {
+    "extra": {
+      "minimax": {
+        "apiKey": "YOUR_MINIMAX_API_KEY",
+        "apiBase": "https://api.minimax.chat/v1"
+      }
+    }
+  },
+  "mainAgent": {
+    "provider": "minimax",
+    "model": "abab6.5s-chat"
+  }
+}
+```
+
+- **apiKey**：该服务的 API 密钥。
+- **apiBase**：API 基础 URL（如 `https://api.minimax.chat/v1`），需支持 OpenAI 风格的 `POST .../chat/completions`。不填时使用 `https://api.openai.com/v1`。
+
 ## 代理配置
 
 配置键为 **`mainAgent`**（JSON 中为 camelCase）。**主 agent 是隐式的**：始终存在，使用角色 `main`，其工作区、provider、model 等均来自 `mainAgent`。**不要在** `agents` 列表中定义名为 `main` 的 agent；名称 `main` 保留，以便 `@@main` 和无目标消息唯一解析到该 agent。

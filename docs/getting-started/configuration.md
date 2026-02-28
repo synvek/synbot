@@ -316,6 +316,37 @@ Optional channel for Matrix protocol (decentralized real-time chat). Configure w
 }
 ```
 
+### Extra providers (OpenAI-compatible)
+
+You can add **any OpenAI Chat Completions–compatible provider** (e.g. Minimax, local proxies, other APIs) **without changing code**, by configuration only.
+
+1. Add an entry under **`providers.extra`** with a **name** of your choice, plus `apiKey` and `apiBase`.
+2. Set **`mainAgent.provider`** (or the agent’s `provider` override) to that name.
+
+Names in `extra` are treated as OpenAI-compatible: requests use the `/chat/completions` API against the given `apiBase`. Built-in provider names (e.g. `openai`, `anthropic`, `openrouter`) are not overridden by `extra`.
+
+Example — add Minimax:
+
+```json
+{
+  "providers": {
+    "extra": {
+      "minimax": {
+        "apiKey": "YOUR_MINIMAX_API_KEY",
+        "apiBase": "https://api.minimax.chat/v1"
+      }
+    }
+  },
+  "mainAgent": {
+    "provider": "minimax",
+    "model": "abab6.5s-chat"
+  }
+}
+```
+
+- **apiKey**: Your API key for that service.
+- **apiBase**: Base URL of the API (e.g. `https://api.minimax.chat/v1`). Must support OpenAI-style `POST .../chat/completions`. If omitted, `https://api.openai.com/v1` is used.
+
 ## Agent Configuration
 
 Configuration key: **`mainAgent`** (camelCase in JSON). The main agent is **implicit**: it always exists, uses role `main`, and takes its settings (workspace, provider, model, etc.) from `mainAgent`. You do **not** define an agent named `main` in the `agents` list; the name `main` is reserved so that `@@main` and untargeted messages resolve to exactly one agent.

@@ -147,6 +147,71 @@ impl ProviderRegistry {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Extra providers: config-only OpenAI-compatible providers (no code change)
+// ---------------------------------------------------------------------------
+
+/// Built-in provider names that must not be overridden by config.providers.extra.
+const BUILTIN_PROVIDER_NAMES: &[&str] = &[
+    "openai",
+    "anthropic",
+    "claude",
+    "gemini",
+    "deepseek",
+    "moonshot",
+    "ollama",
+    "kimi",
+    "kimi_code",
+    "openrouter",
+];
+
+const DEFAULT_OPENAI_API_BASE: &str = "https://api.openai.com/v1";
+
+/// Factory that builds an OpenAI Chat Completions–compatible client for any base URL.
+/// Used for config.providers.extra entries so users can add providers (e.g. Minimax, proxies) by config only.
+struct OpenAiCompatibleProviderFactory;
+
+impl ProviderFactory for OpenAiCompatibleProviderFactory {
+    fn build(
+        &self,
+        _provider_name: &str,
+        model_name: &str,
+        api_key: &str,
+        api_base: Option<&str>,
+    ) -> Result<Arc<dyn SynbotCompletionModel>> {
+        let base = api_base
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| s.trim().trim_end_matches('/').to_string())
+            .unwrap_or_else(|| DEFAULT_OPENAI_API_BASE.to_string());
+        let http = crate::appcontainer_dns::build_reqwest_client();
+        type RC = reqwest::Client;
+        let client = rig::providers::openai::CompletionsClient::<RC>::builder()
+            .api_key(api_key.to_string())
+            .http_client(http)
+            .base_url(&base)
+            .build()
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        let m = client.completion_model(model_name.to_string());
+        Ok(Arc::new(OpenAiCompletionsModel(client, m)) as Arc<dyn SynbotCompletionModel>)
+    }
+}
+
+/// Register an OpenAI-compatible provider for each key in `config.providers.extra` that is not a built-in.
+/// Allows users to add new OpenAI-compatible providers (e.g. Minimax, local proxies) by config only.
+pub fn register_extra_openai_compatible_providers(cfg: &crate::config::Config) {
+    let factory: Arc<dyn ProviderFactory> = Arc::new(OpenAiCompatibleProviderFactory);
+    let mut reg = default_registry()
+        .write()
+        .expect("provider registry lock");
+    for name in cfg.providers.extra.keys() {
+        let key = name.trim().to_lowercase();
+        if BUILTIN_PROVIDER_NAMES.iter().any(|n| key == *n) {
+            continue;
+        }
+        reg.register(name, Arc::clone(&factory));
+    }
+}
+
 /// Build an Arc<dyn SynbotCompletionModel> from provider name, model name, API key and optional base URL.
 /// Uses the default provider registry (built-ins + any plugin-registered providers).
 pub fn build_completion_model(

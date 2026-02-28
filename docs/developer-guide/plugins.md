@@ -115,4 +115,4 @@ For `log` and `config_get`, declare the host imports in your Wasm module (names 
 
 - **Host:** `src/plugin/` — ABI constants (`abi.rs`), host functions (`host_fns.rs`), loader (`loader.rs`), adapters (`adapters.rs`).
 - **Config:** No new config structs; only the convention on `config.plugins` (e.g. `internal`, `path`).
-- **Discovery:** Host iterates `config.plugins`; skips `internal: true`; for others, resolves Wasm path and loads with Extism, then registers adapters into the existing registries (tools, hooks, skills, background, provider).
+- **Discovery:** Host iterates `config.plugins`; skips `internal: true`; for others, resolves Wasm path and loads with Extism, then registers adapters into the existing registries (tools, hooks, skills, background, provider). Before loading Wasm, the host also registers **config-only OpenAI-compatible providers**: each key in `config.providers.extra` (that is not a built-in provider name) is registered so users can add providers like Minimax by config only (see [Configuration — Extra providers](/getting-started/configuration#extra-providers-openai-compatible)).
