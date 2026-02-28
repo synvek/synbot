@@ -109,6 +109,12 @@ pub fn build_default_tools(
         reg.register(std::sync::Arc::new(filesystem::WriteFileTool { workspace: ws.clone(), restrict })).expect("register WriteFileTool");
         reg.register(std::sync::Arc::new(filesystem::EditFileTool { workspace: ws.clone(), restrict })).expect("register EditFileTool");
         reg.register(std::sync::Arc::new(filesystem::ListDirTool { workspace: ws.clone(), restrict })).expect("register ListDirTool");
+        reg.register(std::sync::Arc::new(filesystem::ReadMultipleFilesTool { workspace: ws.clone(), restrict })).expect("register ReadMultipleFilesTool");
+        reg.register(std::sync::Arc::new(filesystem::CreateDirTool { workspace: ws.clone(), restrict })).expect("register CreateDirTool");
+        reg.register(std::sync::Arc::new(filesystem::MoveFileTool { workspace: ws.clone(), restrict })).expect("register MoveFileTool");
+        reg.register(std::sync::Arc::new(filesystem::SearchFilesTool { workspace: ws.clone(), restrict })).expect("register SearchFilesTool");
+        reg.register(std::sync::Arc::new(filesystem::SearchTextTool { workspace: ws.clone(), restrict })).expect("register SearchTextTool");
+        reg.register(std::sync::Arc::new(filesystem::GetFileInfoTool { workspace: ws.clone(), restrict })).expect("register GetFileInfoTool");
     }
     reg.register(std::sync::Arc::new(approval_tool::SubmitApprovalResponseTool {
         approval_manager: approval_manager.clone(),

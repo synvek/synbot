@@ -64,10 +64,32 @@ fn sanitize_args_for_log(tool_name: &str, args: &Value) -> String {
         None => return "args=?".to_string(),
     };
     let part = match tool_name {
-        "read_file" | "write_file" | "edit_file" | "list_dir" => obj
+        "read_file" | "write_file" | "edit_file" | "list_dir" | "get_file_info" | "create_dir" => obj
             .get("path")
             .and_then(|v| v.as_str())
             .map(|s| format!("path={}", truncate_for_log(s, 120))),
+        "read_multiple_files" => obj
+            .get("paths")
+            .and_then(|v| v.as_array())
+            .map(|a| format!("paths_count={}", a.len())),
+        "move_file" => {
+            let src = obj.get("source").and_then(|v| v.as_str()).map(|s| truncate_for_log(s, 60));
+            let dst = obj.get("destination").and_then(|v| v.as_str()).map(|s| truncate_for_log(s, 60));
+            match (src, dst) {
+                (Some(s), Some(d)) => Some(format!("source={}, destination={}", s, d)),
+                _ => None,
+            }
+        }
+        "search_files" => {
+            let dir = obj.get("directory").and_then(|v| v.as_str()).unwrap_or(".");
+            let pat = obj.get("pattern").and_then(|v| v.as_str()).unwrap_or("?");
+            Some(format!("directory={}, pattern={}", truncate_for_log(dir, 80), truncate_for_log(pat, 40)))
+        }
+        "search_text" => {
+            let dir = obj.get("directory").and_then(|v| v.as_str()).unwrap_or(".");
+            let q = obj.get("query").and_then(|v| v.as_str()).map(|s| truncate_for_log(s, 40)).unwrap_or_else(|| "?".to_string());
+            Some(format!("directory={}, query={}", truncate_for_log(dir, 80), q))
+        }
         "exec" => obj
             .get("command")
             .and_then(|v| v.as_str())
