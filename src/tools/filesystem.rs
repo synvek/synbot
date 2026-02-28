@@ -1,7 +1,7 @@
 //! File-system tools: read_file, write_file, edit_file, list_dir.
 //!
-//! When an agent runs, paths are restricted to that agent's workspace and memory dir
-//! via the tool execution context (~/.synbot/memory/{agent_id} and the shared workspace root).
+//! When an agent runs, paths are restricted to that agent's workspace
+//! via the tool execution context. Memory is accessed only via remember/list_memory tools.
 
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -24,12 +24,11 @@ fn path_for_prefix_check(p: &Path) -> PathBuf {
 }
 
 /// Resolve path and enforce scope: when restrict is true, path must be under
-/// the current agent's allowed roots (workspace and memory_dir from context, or default workspace).
+/// the current agent's allowed workspace (from context, or default workspace).
 /// When a tool context is set (e.g. @@dev), relative paths are resolved against that agent's
 /// workspace, not the tool's registered workspace (which may be main's).
 fn resolve_path(path: &str, workspace: &Path, restrict: bool) -> anyhow::Result<PathBuf> {
     let effective_workspace: PathBuf = context::current_allowed_roots()
-        .map(|(ctx_ws, _)| ctx_ws)
         .unwrap_or_else(|| workspace.to_path_buf());
     let p = if Path::new(path).is_absolute() {
         PathBuf::from(path)
@@ -40,20 +39,17 @@ fn resolve_path(path: &str, workspace: &Path, restrict: bool) -> anyhow::Result<
     let canonical = p.canonicalize().unwrap_or_else(|_| p.clone());
     let canonical_norm = path_for_prefix_check(&canonical);
 
-    let allowed = if let Some((ctx_workspace, ctx_memory)) = context::current_allowed_roots() {
+    let allowed = if let Some(ctx_workspace) = context::current_allowed_roots() {
         let ws_canon = ctx_workspace.canonicalize().unwrap_or_else(|_| ctx_workspace.to_path_buf());
-        let mem_canon = ctx_memory.canonicalize().unwrap_or_else(|_| ctx_memory.to_path_buf());
         let ws_norm = path_for_prefix_check(&ws_canon);
-        let mem_norm = path_for_prefix_check(&mem_canon);
-        if canonical_norm.starts_with(&ws_norm) || canonical_norm.starts_with(&mem_norm) {
+        if canonical_norm.starts_with(&ws_norm) {
             true
         } else {
             warn!(
                 path = %path,
                 resolved = %canonical.display(),
                 allowed_workspace = %ws_canon.display(),
-                allowed_memory = %mem_canon.display(),
-                "Path is outside current agent scope (workspace or memory); access denied"
+                "Path is outside current agent scope (workspace); access denied"
             );
             false
         }
@@ -66,7 +62,7 @@ fn resolve_path(path: &str, workspace: &Path, restrict: bool) -> anyhow::Result<
     };
     if !allowed {
         anyhow::bail!(
-            "Path {} is outside current agent scope (allowed: this agent's workspace and memory only)",
+            "Path {} is outside current agent scope (allowed: this agent's workspace only)",
             path
         );
     }

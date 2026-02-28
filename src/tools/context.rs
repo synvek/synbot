@@ -1,23 +1,23 @@
-//! Tool execution context — current agent's scope for path and memory isolation.
+//! Tool execution context — current agent's scope for path isolation.
 //!
-//! When a role (e.g. `dev`) runs, tools must only access that role's workspace
-//! and memory. This module provides a task-local context so that filesystem
-//! and memory tools can restrict access without changing the tool trait.
+//! When a role (e.g. `dev`) runs, filesystem tools must only access that role's
+//! workspace. Memory is accessed via dedicated remember/list_memory tools.
+//! This module provides a task-local context so that tools can restrict access
+//! without changing the tool trait.
 
 use std::path::PathBuf;
 
 tokio::task_local! {
-    /// Current agent's tool context: agent_id, allowed workspace, and memory dir.
+    /// Current agent's tool context: agent_id and allowed workspace.
     /// Set by the agent loop before running the completion loop for main or a role.
     pub static TOOL_CONTEXT: ToolContext;
 }
 
-/// Scope for one agent's tool execution. Paths must stay under `workspace` or `memory_dir`.
+/// Scope for one agent's tool execution. Filesystem paths must stay under `workspace`.
 #[derive(Clone)]
 pub struct ToolContext {
     pub agent_id: String,
     pub workspace: PathBuf,
-    pub memory_dir: PathBuf,
 }
 
 impl ToolContext {
@@ -43,10 +43,8 @@ pub fn current_agent_id() -> Option<String> {
     TOOL_CONTEXT.try_with(|c| c.agent_id.clone()).ok()
 }
 
-/// Try to get the current agent's allowed workspace and memory dir for path checks.
-/// Returns (workspace, memory_dir) or None if not in context.
-pub fn current_allowed_roots() -> Option<(PathBuf, PathBuf)> {
-    TOOL_CONTEXT
-        .try_with(|c| (c.workspace.clone(), c.memory_dir.clone()))
-        .ok()
+/// Try to get the current agent's allowed workspace root for path checks.
+/// Returns None if not in context.
+pub fn current_allowed_roots() -> Option<PathBuf> {
+    TOOL_CONTEXT.try_with(|c| c.workspace.clone()).ok()
 }

@@ -201,11 +201,9 @@ async fn run_subagent_task(
     task: String,
     agent_id: String,
 ) -> Result<String> {
-    let memory_dir = config::memory_dir(&agent_id);
     let tool_ctx = ToolContext {
         agent_id: agent_id.clone(),
         workspace: workspace.clone(),
-        memory_dir,
     };
 
     scope(tool_ctx, async move {

@@ -204,11 +204,9 @@ impl AgentLoop {
             let session_key = session_id.format();
 
             let agent_workspace = agent_ctx.workspace_dir.clone();
-            let agent_memory_dir = config::memory_dir(&agent_id);
             let tool_ctx = ToolContext {
                 agent_id: agent_id.clone(),
                 workspace: agent_workspace,
-                memory_dir: agent_memory_dir,
             };
 
             // When message is a response to a pending approval, prepend instruction so the agent calls submit_approval_response
@@ -403,7 +401,6 @@ impl AgentLoop {
             }
 
             let agent_workspace = agent_ctx.workspace_dir.clone();
-            let agent_memory_dir = crate::config::memory_dir(&agent_id);
 
             let model = Arc::clone(&self.model);
             let tools = Arc::clone(&self.tools);
@@ -422,7 +419,6 @@ impl AgentLoop {
             let tool_ctx = ToolContext {
                 agent_id: aid.clone(),
                 workspace: agent_workspace,
-                memory_dir: agent_memory_dir,
             };
             let tool_result_preview_chars = self.tool_result_preview_chars;
 
