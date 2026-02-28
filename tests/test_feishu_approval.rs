@@ -26,7 +26,7 @@ fn create_test_channel(
         group_my_name: None,
     };
     
-    let mut channel = FeishuChannel::new(config, inbound_tx, outbound_rx, true);
+    let mut channel = FeishuChannel::new(config, inbound_tx, outbound_rx, true, 500, None);
     if let Some(manager) = approval_manager {
         channel = channel.with_approval_manager(manager);
     }

@@ -14,6 +14,10 @@ fn npm_command() -> Command {
 }
 
 fn main() {
+    // Feishu WebSocket proto (Frame/Header) — no third-party Lark crates
+    prost_build::compile_protos(&["proto/pbbp2.proto"], &["."]).expect("compile proto/pbbp2.proto");
+    println!("cargo:rerun-if-changed=proto/pbbp2.proto");
+
     // Only build frontend in release mode
     let profile = env::var("PROFILE").unwrap_or_default();
     

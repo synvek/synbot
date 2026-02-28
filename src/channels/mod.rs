@@ -4,6 +4,8 @@ pub mod file_handler;
 pub mod discord;
 pub mod email;
 pub mod feishu;
+pub mod feishu_api;
+pub mod feishu_ws;
 pub mod factory;
 pub mod matrix;
 pub mod slack;

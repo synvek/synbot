@@ -1,0 +1,22 @@
+// Feishu WebSocket frame format (same wire format as Lark open platform).
+// No third-party Lark proto dependency; minimal definition for Frame/Header only.
+syntax = "proto2";
+
+package pbbp2;
+
+message Header {
+  required string key = 1;
+  required string value = 2;
+}
+
+message Frame {
+  required uint64 SeqID = 1;
+  required uint64 LogID = 2;
+  required int32 service = 3;
+  required int32 method = 4;
+  repeated Header headers = 5;
+  optional string payload_encoding = 6;
+  optional string payload_type = 7;
+  optional bytes payload = 8;
+  optional string LogIDNew = 9;
+}
