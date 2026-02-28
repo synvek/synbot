@@ -14,6 +14,8 @@
 
 - Single small protable execution program for deployment
 
+- No Gateway required
+
 - Support run app and tool in independent isolated sandbox.   
 
 - Support Windows, Macos, Linux with Intel x86 and ARM64 architecture
