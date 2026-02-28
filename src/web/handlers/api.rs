@@ -594,6 +594,7 @@ pub struct AgentInfo {
     pub max_tokens: u32,
     pub temperature: f32,
     pub max_iterations: u32,
+    pub max_chat_history_messages: u32,
     pub workspace_dir: String,
 }
 
@@ -615,6 +616,7 @@ pub async fn get_agents(state: web::Data<AppState>) -> Result<HttpResponse> {
                 max_tokens: ctx.params.max_tokens,
                 temperature: ctx.params.temperature,
                 max_iterations: ctx.params.max_iterations,
+                max_chat_history_messages: ctx.params.max_chat_history_messages,
                 workspace_dir: ctx.workspace_dir.to_string_lossy().to_string(),
             })
         })

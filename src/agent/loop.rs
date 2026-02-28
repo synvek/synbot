@@ -256,11 +256,13 @@ impl AgentLoop {
                 })
                 .await;
             }
+            let max_chat_history_messages = agent_ctx.params.max_chat_history_messages;
             let run_result = scope(tool_ctx, async {
                 run_completion_loop(
                     &*self.model,
                     &system_prompt,
                     model_max_iterations,
+                    max_chat_history_messages,
                     &agent_id,
                     &mut *history_guard,
                     &tool_defs,
@@ -421,6 +423,7 @@ impl AgentLoop {
                 workspace: agent_workspace,
             };
             let tool_result_preview_chars = self.tool_result_preview_chars;
+            let max_chat_history_messages = agent_ctx.params.max_chat_history_messages;
 
             let session_messages_clone = session_messages.clone();
             let task_future = Box::pin(async move {
@@ -432,6 +435,7 @@ impl AgentLoop {
                         &*model,
                         &system_prompt,
                         model_max_iterations,
+                        max_chat_history_messages,
                         &aid,
                         &mut *history_guard,
                         &tool_defs,
@@ -569,6 +573,7 @@ async fn run_completion_loop(
     model: &dyn SynbotCompletionModel,
     system_prompt: &str,
     max_iterations: u32,
+    max_chat_history_messages: u32,
     agent_id: &str,
     history: &mut Vec<Message>,
     tool_defs: &[rig::completion::ToolDefinition],
@@ -593,10 +598,16 @@ async fn run_completion_loop(
 
         tracing::debug!("History check again: {:?}", history);
 
-        let chat_history = if history.is_empty() {
+        // Send at most the last N messages to the model; full history remains in session for persistence.
+        let history_for_model: Vec<Message> = if history.len() <= max_chat_history_messages as usize {
+            history.clone()
+        } else {
+            history[history.len() - max_chat_history_messages as usize..].to_vec()
+        };
+        let chat_history = if history_for_model.is_empty() {
             OneOrMany::one(Message::user(""))
         } else {
-            OneOrMany::many(history.clone()).expect("non-empty history")
+            OneOrMany::many(history_for_model).expect("non-empty history")
         };
         let request = CompletionRequest {
             preamble: Some(system_prompt.to_string()),

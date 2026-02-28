@@ -402,6 +402,9 @@ pub struct MainAgent {
     pub temperature: f32,
     #[serde(default = "default_max_iterations")]
     pub max_tool_iterations: u32,
+    /// Maximum number of chat history messages to send to the model (most recent N). Default 20.
+    #[serde(default = "default_max_chat_history_messages")]
+    pub max_chat_history_messages: u32,
     #[serde(default = "default_max_concurrent_subagents")]
     pub max_concurrent_subagents: usize,
     #[serde(default = "default_agents")]
@@ -428,6 +431,9 @@ fn default_temperature() -> f32 {
 fn default_max_iterations() -> u32 {
     20
 }
+fn default_max_chat_history_messages() -> u32 {
+    20
+}
 fn default_max_concurrent_subagents() -> usize {
     5
 }
@@ -441,6 +447,7 @@ impl Default for MainAgent {
             max_tokens: default_max_tokens(),
             temperature: default_temperature(),
             max_tool_iterations: default_max_iterations(),
+            max_chat_history_messages: default_max_chat_history_messages(),
             max_concurrent_subagents: default_max_concurrent_subagents(),
             agents: default_agents(),
         }
