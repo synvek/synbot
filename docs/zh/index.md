@@ -24,6 +24,7 @@ Synbot 是一个用 Rust 编写的个人 AI 助手，灵感来源于 [nanobot](h
 ### 用户指南
 - [消息渠道](/zh/user-guide/channels)
 - [工具系统](/zh/user-guide/tools)
+- [工作流](/zh/user-guide/workflow)
 - [权限控制](/zh/user-guide/permissions)
 
 ### 开发指南
@@ -49,6 +50,11 @@ Synbot 是一个用 Rust 编写的个人 AI 助手，灵感来源于 [nanobot](h
 - **Web 工具**: 网页搜索和内容获取
 - **消息工具**: 跨渠道发送消息
 - **审批工具**: 基于权限的审批工作流
+
+### 工作流 (TurboWorkflow)
+- **可持久化**: 每步后保存状态，支持中断后恢复
+- **多步串行**: 支持 LLM 步骤与用户输入步骤
+- **控制指令**: `/workflow` 创建/继续，`/stop`、`/status`、`/clear`、`/resume` 控制与查看
 
 ### 权限控制
 - **细粒度规则**: 基于模式的权限规则

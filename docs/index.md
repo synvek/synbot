@@ -154,6 +154,11 @@ Synbot is currently in research & experiment stage. Please:
     <p>Learn about available tools</p>
   </a>
   
+  <a class="quick-link-card" href="/user-guide/workflow">
+    <h3>📋 Workflow</h3>
+    <p>Persistent, resumable multi-step workflows</p>
+  </a>
+  
   <a class="quick-link-card" href="/developer-guide/architecture">
     <h3>🏗️ Architecture</h3>
     <p>Understand how Synbot works</p>
@@ -181,6 +186,7 @@ Synbot is a personal AI assistant written in Rust, originally inspired by [nanob
 - **Permission Control**: Fine-grained permission system with approval workflows
 - **Web Dashboard**: Built-in web interface for monitoring and management
 - **Multi-agent Support**: Role-based agents with different capabilities
+- **Workflows**: Persistent, resumable multi-step workflows (TurboWorkflow)
 - **Cron Jobs**: Scheduled task execution
 - **Logging**: Configurable logging with multiple formats
 
