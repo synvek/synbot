@@ -1023,6 +1023,32 @@ pub struct CronConfig {
     pub tasks: Vec<CronTaskConfig>,
 }
 
+/// TurboWorkflow config: persistent resumable workflows.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowConfig {
+    /// Timeout in seconds when a step waits for user input (default 1800 = 30 min).
+    #[serde(default = "default_workflow_user_input_timeout")]
+    pub user_input_timeout_secs: u64,
+    /// Root directory for workflow state files. When empty, uses config_dir/workflows.
+    #[serde(default)]
+    pub workflows_root: Option<String>,
+}
+
+fn default_workflow_user_input_timeout() -> u64 {
+    1800 // 30 minutes
+}
+
+impl Default for WorkflowConfig {
+    fn default() -> Self {
+        Self {
+            user_input_timeout_secs: default_workflow_user_input_timeout(),
+            workflows_root: None,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Sandbox config (app_sandbox / tool_sandbox / monitoring)
 // ---------------------------------------------------------------------------
@@ -1236,6 +1262,9 @@ pub struct Config {
     /// Cron: scheduled tasks from config (schedule, description, enabled, command, channel, userId).
     #[serde(default)]
     pub cron: CronConfig,
+    /// TurboWorkflow: persistent resumable workflows (user_input_timeout_secs, workflows_root).
+    #[serde(default)]
+    pub workflow: WorkflowConfig,
     /// Optional app sandbox (isolates main process; platform-specific).
     #[serde(default)]
     pub app_sandbox: Option<AppSandboxConfig>,
@@ -1963,6 +1992,25 @@ pub fn memory_root() -> PathBuf {
 /// Main agent sessions live in `sessions_root()/main/`, role sessions in `sessions_root()/{role}/`.
 pub fn sessions_root() -> PathBuf {
     config_dir().join("sessions")
+}
+
+/// Workflows root directory: `~/.synbot/workflows/` or config `workflow.workflowsRoot`.
+/// Used by WorkflowStore for persistent workflow state per session.
+pub fn workflows_root(cfg: &Config) -> PathBuf {
+    cfg.workflow
+        .workflows_root
+        .as_deref()
+        .map(|s| {
+            let s = s.trim();
+            if s.starts_with('~') {
+                dirs::home_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join(s.trim_start_matches("~/").trim_start_matches('~'))
+            } else {
+                PathBuf::from(s)
+            }
+        })
+        .unwrap_or_else(|| config_dir().join("workflows"))
 }
 
 /// Memory directory for an agent: `~/.synbot/memory/{agentId}`.

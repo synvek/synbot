@@ -14,6 +14,7 @@ mod plugin;
 mod rig_provider;
 mod tools;
 mod web;
+mod workflow;
 mod sandbox;
 
 mod url_utils;

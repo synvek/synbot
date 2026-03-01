@@ -8,6 +8,7 @@ use crate::rig_provider::SynbotCompletionModel;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, Mutex};
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn, Instrument};
 
 use crate::agent::agent_registry::AgentRegistry;
@@ -20,6 +21,11 @@ use crate::config::Config;
 use crate::config;
 use crate::hooks::{HookEvent, HookRegistry};
 use crate::tools::{scope, ToolContext, ToolRegistry};
+use crate::agent::control_commands::{parse_control_command, busy_hint_commands, ControlCommand};
+use crate::workflow::{
+    generate_workflow, parse_workflow_trigger, run_workflow, PendingConfirmStore,
+    PendingWorkflowInputStore, WorkflowDef, WorkflowState, WorkflowStore, WorkflowTrigger,
+};
 
 pub struct AgentLoop {
     model: Arc<dyn SynbotCompletionModel>,
@@ -34,6 +40,10 @@ pub struct AgentLoop {
     tool_sandbox_enabled: bool,
     hooks: Option<Arc<HookRegistry>>,
     tool_result_preview_chars: usize,
+    workflow_store: WorkflowStore,
+    pending_workflow_input: PendingWorkflowInputStore,
+    pending_workflow_confirm: PendingConfirmStore,
+    workflow_user_input_timeout_secs: u64,
 }
 
 impl AgentLoop {
@@ -52,6 +62,8 @@ impl AgentLoop {
     ) -> Self {
         let subagent_manager = SubagentManager::new(config.main_agent.max_concurrent_subagents);
         let tool_result_preview_chars = config.tool_result_preview_chars as usize;
+        let workflow_store = WorkflowStore::new(config::workflows_root(config).as_path());
+        let workflow_user_input_timeout_secs = config.workflow.user_input_timeout_secs;
         Self {
             workspace,
             model,
@@ -65,20 +77,98 @@ impl AgentLoop {
             tool_sandbox_enabled,
             hooks,
             tool_result_preview_chars,
+            workflow_store,
+            pending_workflow_input: PendingWorkflowInputStore::new(),
+            pending_workflow_confirm: PendingConfirmStore::new(),
+            workflow_user_input_timeout_secs,
         }
     }
 
     pub async fn run(&mut self) -> Result<()> {
         info!("Agent loop started");
-        while let Some(msg) = self.inbound_rx.recv().await {
-            if let Err(e) = self.handle_message(msg).await {
-                error!("Error handling message: {e:#}");
+        type TaskHandle = (tokio::task::JoinHandle<()>, CancellationToken, String);
+        let mut current_task: Option<TaskHandle> = None;
+
+        loop {
+            if let Some((mut handle, token, running_session_key)) = current_task.take() {
+                // Something is running: wait for either a new message or task completion.
+                tokio::select! {
+                    msg_opt = self.inbound_rx.recv() => {
+                        let msg = match msg_opt {
+                            None => { current_task = Some((handle, token, running_session_key)); break; }
+                            Some(m) => m,
+                        };
+                        if let Some(cmd) = parse_control_command(&msg.content) {
+                            match cmd {
+                                ControlCommand::Stop => {
+                                    token.cancel();
+                                    let _ = handle.await;
+                                    let _ = self.outbound_tx.send(OutboundMessage::chat(
+                                        msg.channel.clone(),
+                                        msg.chat_id.clone(),
+                                        "[Control] Stopped.".to_string(),
+                                        vec![],
+                                        None,
+                                    ));
+                                    continue;
+                                }
+                                ControlCommand::Status => { self.handle_status(&msg).await.ok(); }
+                                ControlCommand::Clear => { self.handle_clear(&msg).await.ok(); }
+                                ControlCommand::Resume => {
+                                    if let Some(ref k) = self.resolve_history_session_key(&msg).await {
+                                        let _ = self.session_state.append_user_message_and_save(k, &msg.content).await;
+                                    }
+                                    if let Err(e) = self.handle_workflow_continue(&msg, &msg.session_key()).await {
+                                        let _ = self.outbound_tx.send(OutboundMessage::chat(
+                                            msg.channel.clone(),
+                                            msg.chat_id.clone(),
+                                            format!("[Workflow] Resume failed: {}", e),
+                                            vec![],
+                                            None,
+                                        ));
+                                    }
+                                }
+                            }
+                        } else if msg.session_key() == running_session_key {
+                            let _ = self.outbound_tx.send(OutboundMessage::chat(
+                                msg.channel.clone(),
+                                msg.chat_id.clone(),
+                                format!("[Control] Busy. {}", busy_hint_commands()),
+                                vec![],
+                                None,
+                            ));
+                        } else {
+                            let _ = self.outbound_tx.send(OutboundMessage::chat(
+                                msg.channel.clone(),
+                                msg.chat_id.clone(),
+                                "Agent is busy with another conversation. Use /status to see state.".to_string(),
+                                vec![],
+                                None,
+                            ));
+                        }
+                        current_task = Some((handle, token, running_session_key));
+                    }
+                    _ = &mut handle => {
+                        // Task finished
+                    }
+                }
+            } else {
+                let msg = match self.inbound_rx.recv().await {
+                    None => break,
+                    Some(m) => m,
+                };
+                match self.handle_message(msg).await {
+                    Err(e) => error!("Error handling message: {e:#}"),
+                    Ok(Some(task_triple)) => current_task = Some(task_triple),
+                    Ok(None) => {}
+                }
             }
         }
         Ok(())
     }
 
-    async fn handle_message(&mut self, msg: InboundMessage) -> Result<()> {
+    /// Returns Ok(Some((handle, token, session_key))) when a workflow was started (so run() can track for /stop).
+    async fn handle_message(&mut self, msg: InboundMessage) -> Result<Option<(tokio::task::JoinHandle<()>, CancellationToken, String)>> {
         let span = tracing::info_span!(
             "handle_message",
             channel = %msg.channel,
@@ -94,7 +184,112 @@ impl AgentLoop {
                 .unwrap_or(true);
             if !trigger_agent {
                 self.save_message_only(&msg).await?;
-                return Ok(());
+                return Ok(None);
+            }
+
+            let session_key = msg.session_key();
+
+            // If this session is waiting for workflow user input, deliver and exit.
+            if self.pending_workflow_input.deliver(&session_key, msg.content.clone()).await {
+                return Ok(None);
+            }
+
+            // If user previously got "confirm?" and now confirms (intent-based, same as approval), start workflow.
+            if let Some(def) = self
+                .pending_workflow_confirm
+                .take_if_confirm(&session_key, &msg.content, self.model.as_ref())
+                .await
+            {
+                if let Some(ref k) = self.resolve_history_session_key(&msg).await {
+                    let _ = self.session_state.append_user_message_and_save(k, &msg.content).await;
+                }
+                let task = self.start_workflow_with_def(&msg, &session_key, def).await?;
+                return Ok(task);
+            }
+
+            // Control commands: /status, /clear, /resume, /stop (handled in run() when task is running).
+            if let Some(cmd) = parse_control_command(&msg.content) {
+                match cmd {
+                    ControlCommand::Status => {
+                        self.handle_status(&msg).await?;
+                        return Ok(None);
+                    }
+                    ControlCommand::Clear => {
+                        self.handle_clear(&msg).await?;
+                        return Ok(None);
+                    }
+                    ControlCommand::Resume => {
+                        if let Some(ref k) = self.resolve_history_session_key(&msg).await {
+                            let _ = self.session_state.append_user_message_and_save(k, &msg.content).await;
+                        }
+                        match self.handle_workflow_continue(&msg, &session_key).await {
+                            Ok(Some(task)) => return Ok(Some(task)),
+                            Ok(None) => {}
+                            Err(e) => {
+                                let _ = self.outbound_tx.send(OutboundMessage::chat(
+                                    msg.channel.clone(),
+                                    msg.chat_id.clone(),
+                                    format!("[Workflow] Resume failed: {}", e),
+                                    vec![],
+                                    None,
+                                ));
+                            }
+                        }
+                        return Ok(None);
+                    }
+                    ControlCommand::Stop => {
+                        let _ = self.outbound_tx.send(OutboundMessage::chat(
+                            msg.channel.clone(),
+                            msg.chat_id.clone(),
+                            "[Control] Nothing is currently running. Use /status to check.".to_string(),
+                            vec![],
+                            None,
+                        ));
+                        return Ok(None);
+                    }
+                }
+            }
+
+            match parse_workflow_trigger(&msg.content) {
+                WorkflowTrigger::Continue => {
+                    if let Some(ref k) = self.resolve_history_session_key(&msg).await {
+                        let _ = self.session_state.append_user_message_and_save(k, &msg.content).await;
+                    }
+                    match self.handle_workflow_continue(&msg, &session_key).await {
+                        Ok(Some(task)) => return Ok(Some(task)),
+                        Ok(None) => {}
+                        Err(e) => {
+                            let _ = self.outbound_tx.send(OutboundMessage::chat(
+                                msg.channel.clone(),
+                                msg.chat_id.clone(),
+                                format!("[Workflow] Continue failed: {}", e),
+                                vec![],
+                                None,
+                            ));
+                        }
+                    }
+                    return Ok(None);
+                }
+                WorkflowTrigger::Create { description, user_provided_def } => {
+                    if let Some(ref k) = self.resolve_history_session_key(&msg).await {
+                        let _ = self.session_state.append_user_message_and_save(k, &msg.content).await;
+                    }
+                    match self.handle_workflow_create(&msg, &session_key, &description, user_provided_def).await {
+                        Ok(Some(task)) => return Ok(Some(task)),
+                        Ok(None) => {}
+                        Err(e) => {
+                            let _ = self.outbound_tx.send(OutboundMessage::chat(
+                                msg.channel.clone(),
+                                msg.chat_id.clone(),
+                                format!("[Workflow] Create failed: {}", e),
+                                vec![],
+                                None,
+                            ));
+                        }
+                    }
+                    return Ok(None);
+                }
+                WorkflowTrigger::None => {}
             }
 
             let start = std::time::Instant::now();
@@ -108,10 +303,263 @@ impl AgentLoop {
             } else {
                 self.process_directives_parallel(&msg, &directives, start).await?;
             }
-            Ok(())
+            Ok(None)
         }
         .instrument(span)
         .await
+    }
+
+    /// Returns Some((handle, token, session_key)) when a workflow was started (caller can track for /stop).
+    async fn handle_workflow_continue(
+        &self,
+        msg: &InboundMessage,
+        session_key: &str,
+    ) -> Result<Option<(tokio::task::JoinHandle<()>, CancellationToken, String)>> {
+        let state: WorkflowState = match self.workflow_store.load_state(session_key).await? {
+            Some(s) => s,
+            None => {
+                let _ = self.outbound_tx.send(OutboundMessage::chat(
+                    msg.channel.clone(),
+                    msg.chat_id.clone(),
+                    "[Workflow] No workflow in progress for this session.".to_string(),
+                    vec![],
+                    None,
+                ));
+                return Ok(None);
+            }
+        };
+        if state.is_finished() {
+            let _ = self.outbound_tx.send(OutboundMessage::chat(
+                msg.channel.clone(),
+                msg.chat_id.clone(),
+                "[Workflow] Workflow already ended.".to_string(),
+                vec![],
+                None,
+            ));
+            return Ok(None);
+        }
+        let history_session_key = self.resolve_history_session_key(msg).await;
+        let token = CancellationToken::new();
+        let handle = self.spawn_workflow_run(msg, session_key, history_session_key, state, Some(token.clone()));
+        Ok(Some((handle, token, session_key.to_string())))
+    }
+
+    async fn handle_workflow_create(
+        &self,
+        msg: &InboundMessage,
+        session_key: &str,
+        description: &str,
+        user_provided_def: Option<WorkflowDef>,
+    ) -> Result<Option<(tokio::task::JoinHandle<()>, CancellationToken, String)>> {
+        if let Some(def) = user_provided_def {
+            if let Err(e) = def.validate() {
+                let _ = self.outbound_tx.send(OutboundMessage::chat(
+                    msg.channel.clone(),
+                    msg.chat_id.clone(),
+                    format!("[Workflow] Definition validation failed: {}. Please fix and retry.", e),
+                    vec![],
+                    None,
+                ));
+                return Ok(None);
+            }
+            let steps_preview: String = def
+                .steps
+                .iter()
+                .enumerate()
+                .map(|(i, s)| format!("{}. {} ({})", i + 1, s.id, s.step_type))
+                .collect::<Vec<_>>()
+                .join("\n");
+            self.pending_workflow_confirm.set(session_key, def).await;
+            let _ = self.outbound_tx.send(OutboundMessage::chat(
+                msg.channel.clone(),
+                msg.chat_id.clone(),
+                format!(
+                    "[Workflow] Parsed steps:\n{}\nReply to approve and start (any language).",
+                    steps_preview
+                ),
+                vec![],
+                None,
+            ));
+            return Ok(None);
+        }
+        let def = generate_workflow(self.model.as_ref(), description).await?;
+        self.start_workflow_with_def(msg, session_key, def).await
+    }
+
+    /// Returns Some((handle, token, session_key)) when workflow was started (caller can track for /stop).
+    async fn start_workflow_with_def(
+        &self,
+        msg: &InboundMessage,
+        session_key: &str,
+        def: WorkflowDef,
+    ) -> Result<Option<(tokio::task::JoinHandle<()>, CancellationToken, String)>> {
+        let initial_inputs = std::collections::HashMap::new();
+        let state = WorkflowState::new(
+            session_key.to_string(),
+            def,
+            initial_inputs,
+            self.workflow_user_input_timeout_secs,
+        );
+        self.workflow_store.save_state(session_key, &state).await?;
+        let history_session_key = self.resolve_history_session_key(msg).await;
+        let created_msg = "[Workflow] Created and started.".to_string();
+        let _ = self.outbound_tx.send(OutboundMessage::chat(
+            msg.channel.clone(),
+            msg.chat_id.clone(),
+            created_msg.clone(),
+            vec![],
+            None,
+        ));
+        if let Some(ref k) = history_session_key {
+            let _ = self
+                .session_state
+                .append_assistant_message_and_save(k, &created_msg)
+                .await;
+        }
+        let token = CancellationToken::new();
+        let handle = self.spawn_workflow_run(msg, session_key, history_session_key, state, Some(token.clone()));
+        Ok(Some((handle, token, session_key.to_string())))
+    }
+
+    /// Resolve session key used for conversation history (agent:main:channel:scope:id).
+    async fn resolve_history_session_key(&self, msg: &InboundMessage) -> Option<String> {
+        let session_id = {
+            let sm = self.session_state.session_manager.write().await;
+            sm.resolve_session("main", &msg.channel, &msg.chat_id, &msg.metadata)
+        };
+        Some(session_id.format())
+    }
+
+    /// Handle /status: show current session info and workflow state if any.
+    async fn handle_status(&self, msg: &InboundMessage) -> Result<()> {
+        let history_key = match self.resolve_history_session_key(msg).await {
+            Some(k) => k,
+            None => {
+                let _ = self.outbound_tx.send(OutboundMessage::chat(
+                    msg.channel.clone(),
+                    msg.chat_id.clone(),
+                    "[Status] Could not resolve session.".to_string(),
+                    vec![],
+                    None,
+                ));
+                return Ok(());
+            }
+        };
+        let session_key = msg.session_key();
+        let mut lines: Vec<String> = Vec::new();
+        if let Ok(sid) = crate::agent::session_id::SessionId::parse(&history_key) {
+            let (meta_opt, msg_count) = {
+                let sm = self.session_state.session_manager.read().await;
+                let count = sm.get_history(&sid).map(|h| h.len()).unwrap_or(0);
+                let meta = sm.get_meta(&sid).cloned();
+                (meta, count)
+            };
+            lines.push(format!("Session: {}", history_key));
+            if let Some(meta) = meta_opt {
+                lines.push(format!("  channel={}  scope={:?}  identifier={:?}  messages={}", meta.id.channel, meta.id.scope, meta.id.identifier, msg_count));
+                lines.push(format!("  updated_at={}", meta.updated_at));
+            } else {
+                lines.push(format!("  messages={}", msg_count));
+            }
+            let active = self.session_state.get_active_snapshot().await;
+            if let Some(activity) = active.get(&history_key) {
+                lines.push(format!("  running=true  activity={}", activity));
+            } else {
+                lines.push("  running=false".to_string());
+            }
+        }
+        if let Ok(Some(state)) = self.workflow_store.load_state(&session_key).await {
+            lines.push("Workflow:".to_string());
+            lines.push(format!("  workflow_id={}  status={:?}  current_step_index={}", state.workflow_id, state.status, state.current_step_index));
+            lines.push(format!("  steps_total={}  step_outputs={}", state.definition.steps.len(), state.step_outputs.len()));
+        } else {
+            lines.push("Workflow: none for this session.".to_string());
+        }
+        let text = lines.join("\n");
+        let _ = self.outbound_tx.send(OutboundMessage::chat(
+            msg.channel.clone(),
+            msg.chat_id.clone(),
+            format!("[Status]\n{}", text),
+            vec![],
+            None,
+        ));
+        Ok(())
+    }
+
+    /// Handle /clear: clear session (same as reset_session tool) and workflow state for this chat.
+    async fn handle_clear(&self, msg: &InboundMessage) -> Result<()> {
+        let history_key = match self.resolve_history_session_key(msg).await {
+            Some(k) => k,
+            None => {
+                let _ = self.outbound_tx.send(OutboundMessage::chat(
+                    msg.channel.clone(),
+                    msg.chat_id.clone(),
+                    "[Clear] Could not resolve session.".to_string(),
+                    vec![],
+                    None,
+                ));
+                return Ok(());
+            }
+        };
+        let session_key = msg.session_key();
+        if let Err(e) = self.session_state.clear_session(&history_key).await {
+            let _ = self.outbound_tx.send(OutboundMessage::chat(
+                msg.channel.clone(),
+                msg.chat_id.clone(),
+                format!("[Clear] Failed: {}.", e),
+                vec![],
+                None,
+            ));
+            return Ok(());
+        }
+        let _ = self.workflow_store.delete_state(&session_key).await;
+        let _ = self.outbound_tx.send(OutboundMessage::chat(
+            msg.channel.clone(),
+            msg.chat_id.clone(),
+            "[Clear] Session cleared. Conversation will continue as a fresh chat.".to_string(),
+            vec![],
+            None,
+        ));
+        Ok(())
+    }
+
+    /// Spawns workflow run and returns the JoinHandle so the caller can wait or cancel via token.
+    fn spawn_workflow_run(
+        &self,
+        msg: &InboundMessage,
+        session_key: &str,
+        history_session_key: Option<String>,
+        state: WorkflowState,
+        cancel: Option<CancellationToken>,
+    ) -> tokio::task::JoinHandle<()> {
+        let store = self.workflow_store.clone();
+        let model = Arc::clone(&self.model);
+        let outbound_tx = self.outbound_tx.clone();
+        let pending_input = self.pending_workflow_input.clone();
+        let session_state = self.session_state.clone();
+        let channel = msg.channel.clone();
+        let chat_id = msg.chat_id.clone();
+        let session_key = session_key.to_string();
+        let cancel_for_run = cancel.as_ref().map(|t| t.clone());
+        tokio::spawn(async move {
+            if let Err(e) = run_workflow(
+                &store,
+                model.as_ref(),
+                &outbound_tx,
+                &pending_input,
+                &session_state,
+                history_session_key.as_deref(),
+                &channel,
+                &chat_id,
+                &session_key,
+                state,
+                cancel_for_run,
+            )
+            .await
+            {
+                tracing::error!(session_key = %session_key, "Workflow run error: {e:#}");
+            }
+        })
     }
 
     /// Append the message to the main agent's session and persist to disk, without running completion.

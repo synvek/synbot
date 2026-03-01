@@ -110,6 +110,7 @@ pub mod agent;
 pub mod appcontainer_dns;
 pub mod background;
 pub mod bus;
+pub mod workflow;
 pub mod channels;
 pub mod hooks;
 pub mod cli;

@@ -1,4 +1,5 @@
 pub mod agent_registry;
+pub mod control_commands;
 pub mod context;
 pub mod directive;
 pub mod memory;

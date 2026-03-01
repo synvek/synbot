@@ -13,7 +13,7 @@ use tracing::{debug, info, warn};
 
 use crate::agent::session::{SessionMessage, SessionStore};
 use crate::agent::session_id::SessionId;
-use crate::agent::session_manager::SessionManager;
+use crate::agent::session_manager::{SessionManager, SessionMeta};
 
 /// Shared state for session storage: per-session message history, manager, and persistence.
 /// Used by the agent loop (dispatcher + workers) and by the reset_session tool.
@@ -99,6 +99,98 @@ impl SharedSessionState {
             }
         }
         info!(count = sm.session_count(), "Loaded sessions into session_manager");
+        Ok(())
+    }
+
+    /// Append a user message to a session and persist. Used when handling workflow triggers
+    /// so the user's "twfw ..." or "continue workflow" appears in conversation history.
+    pub async fn append_user_message_and_save(
+        &self,
+        session_key: &str,
+        content: &str,
+    ) -> Result<()> {
+        let session_messages = self.get_or_create_session_messages(session_key).await;
+        {
+            let mut history = session_messages.lock().await;
+            history.push(Message::user(content));
+        }
+        let messages = session_messages.lock().await.clone();
+        let now = chrono::Utc::now();
+        let meta = if let Ok(sid) = SessionId::parse(session_key) {
+            {
+                let mut sm = self.session_manager.write().await;
+                let session_messages_sm: Vec<SessionMessage> =
+                    messages.iter().map(SessionMessage::from_message).collect();
+                let history = sm.get_or_create(&sid);
+                history.clear();
+                history.extend(session_messages_sm);
+            }
+            Some(SessionMeta {
+                id: sid,
+                participants: vec![],
+                created_at: now,
+                updated_at: now,
+            })
+        } else {
+            None
+        };
+        if let Err(e) = self
+            .session_store
+            .save_session(session_key, &messages, meta.as_ref())
+            .await
+        {
+            warn!(
+                session_key = %session_key,
+                error = %e,
+                "Failed to persist session (append_user_message)"
+            );
+        }
+        Ok(())
+    }
+
+    /// Append an assistant message to a session and persist. Used by workflow runner
+    /// so that workflow output appears in conversation history.
+    pub async fn append_assistant_message_and_save(
+        &self,
+        session_key: &str,
+        content: &str,
+    ) -> Result<()> {
+        let session_messages = self.get_or_create_session_messages(session_key).await;
+        {
+            let mut history = session_messages.lock().await;
+            history.push(Message::assistant(content));
+        }
+        let messages = session_messages.lock().await.clone();
+        let now = chrono::Utc::now();
+        let meta = if let Ok(sid) = SessionId::parse(session_key) {
+            {
+                let mut sm = self.session_manager.write().await;
+                let session_messages_sm: Vec<SessionMessage> =
+                    messages.iter().map(SessionMessage::from_message).collect();
+                let history = sm.get_or_create(&sid);
+                history.clear();
+                history.extend(session_messages_sm);
+            }
+            Some(SessionMeta {
+                id: sid,
+                participants: vec![],
+                created_at: now,
+                updated_at: now,
+            })
+        } else {
+            None
+        };
+        if let Err(e) = self
+            .session_store
+            .save_session(session_key, &messages, meta.as_ref())
+            .await
+        {
+            warn!(
+                session_key = %session_key,
+                error = %e,
+                "Failed to persist session (append_assistant_message)"
+            );
+        }
         Ok(())
     }
 
