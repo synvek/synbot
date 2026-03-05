@@ -1,4 +1,5 @@
-//! Control commands: /stop, /resume, /status, /clear, /skills (case-insensitive prefix).
+//! Control commands: /stop, /resume, /status, /clear (case-insensitive prefix).
+//! /skills is not a control command; the user message is passed to the model, which answers from the # Skills section in the system prompt.
 
 /// Control command parsed from user message (trimmed content).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -11,15 +12,12 @@ pub enum ControlCommand {
     Status,
     /// Clear session (same as reset_session tool).
     Clear,
-    /// List available skills from ~/.synbot/skills (or config root).
-    Skills,
 }
 
 const PREFIX_STOP: &str = "/stop";
 const PREFIX_RESUME: &str = "/resume";
 const PREFIX_STATUS: &str = "/status";
 const PREFIX_CLEAR: &str = "/clear";
-const PREFIX_SKILLS: &str = "/skills";
 
 /// Returns true if content is exactly the command or command followed by optional whitespace only.
 /// Uses get() for slicing so we never split in the middle of a multi-byte UTF-8 character.
@@ -52,15 +50,12 @@ pub fn parse_control_command(content: &str) -> Option<ControlCommand> {
     if match_prefix(c, PREFIX_CLEAR) {
         return Some(ControlCommand::Clear);
     }
-    if match_prefix(c, PREFIX_SKILLS) {
-        return Some(ControlCommand::Skills);
-    }
     None
 }
 
 /// Hint text shown when agent/workflow is busy: list available control commands.
 pub fn busy_hint_commands() -> &'static str {
-    "Available commands: /stop (stop current work), /status (show session and workflow state), /clear (clear session), /resume (resume workflow), /skills (list available skills)."
+    "Available commands: /stop (stop current work), /status (show session and workflow state), /clear (clear session), /resume (resume workflow)."
 }
 
 #[cfg(test)]
@@ -77,17 +72,18 @@ mod tests {
     }
 
     #[test]
-    fn resume_status_clear_skills() {
+    fn resume_status_clear() {
         assert_eq!(parse_control_command("/resume"), Some(ControlCommand::Resume));
         assert_eq!(parse_control_command("/status"), Some(ControlCommand::Status));
         assert_eq!(parse_control_command("/clear"), Some(ControlCommand::Clear));
-        assert_eq!(parse_control_command("/skills"), Some(ControlCommand::Skills));
     }
 
     #[test]
     fn non_control() {
         assert_eq!(parse_control_command("hello"), None);
         assert_eq!(parse_control_command("/workflow foo"), None);
+        // /skills is not a control command; it goes to the model as a normal message
+        assert_eq!(parse_control_command("/skills"), None);
     }
 
     #[test]

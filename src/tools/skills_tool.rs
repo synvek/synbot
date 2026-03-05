@@ -1,15 +1,13 @@
-//! list_skills tool — list available skills from the config skills directory (~/.synbot/skills).
+//! list_skills tool — delegates to the model to answer from the system prompt.
 
 use anyhow::Result;
 use serde_json::{json, Value};
 
-use crate::agent::skills::{SkillProvider, SkillsLoader};
-use crate::config;
 use crate::tools::DynTool;
 
-/// Tool to list available skills from the global skills directory (e.g. ~/.synbot/skills/).
-/// Each subdirectory that contains SKILL.md is reported as a skill. Use when the user asks what
-/// skills are available or how to check skills.
+/// Tool that does not read the filesystem. The available skills (name + description) are already
+/// in your system prompt under the "# Skills" section. Use that section to answer the user:
+/// summarize, categorize, or list skills as appropriate.
 pub struct ListSkillsTool;
 
 impl ListSkillsTool {
@@ -25,7 +23,7 @@ impl DynTool for ListSkillsTool {
     }
 
     fn description(&self) -> &str {
-        "List available skills from the global skills directory (~/.synbot/skills or config root). Returns skill names (one per line). Use when the user asks what skills are available, which skills exist, or to check available skills."
+        "When the user asks what skills you have, which skills are available, or to list skills: your available skills and their descriptions are already in your system prompt under the '# Skills' section. Use that section to answer—summarize, categorize, or list them. Do not read the filesystem; answer from your system context."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -37,19 +35,6 @@ impl DynTool for ListSkillsTool {
     }
 
     async fn call(&self, _args: Value) -> Result<String> {
-        let skills_dir = config::skills_dir();
-        let loader = SkillsLoader::new(skills_dir.as_path());
-        let names = loader.list_skills();
-        if names.is_empty() {
-            return Ok(format!(
-                "No skills found. Skills are loaded from {} (each subdirectory with SKILL.md is a skill).",
-                skills_dir.display()
-            ));
-        }
-        let mut lines = vec![format!("Available skills (from {}):", skills_dir.display())];
-        for name in &names {
-            lines.push(format!("- {}", name));
-        }
-        Ok(lines.join("\n"))
+        Ok("Your available skills and their descriptions are in your system prompt under '# Skills'. Use that section to answer the user: summarize, categorize, or list the skills as appropriate.".to_string())
     }
 }

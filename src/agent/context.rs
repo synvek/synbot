@@ -65,10 +65,14 @@ impl ContextBuilder {
             parts.push(format!("# Memory\n\n{}", mem));
         }
 
+        // Always include Skills section so the model knows about the skill list (from ~/.synbot/skills or config root).
         let skills = self.skills.build_skills_summary();
-        if !skills.is_empty() {
-            parts.push(format!("# Skills\n\n{}", skills));
-        }
+        let skills_section = if skills.is_empty() {
+            "No skills are currently loaded. Skills are subdirectories containing SKILL.md under the config skills directory.".to_string()
+        } else {
+            skills
+        };
+        parts.push(format!("# Skills\n\n{}", skills_section));
 
         parts.join("\n\n---\n\n")
     }
