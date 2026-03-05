@@ -30,6 +30,7 @@ pub mod mcp;
 pub mod permission;
 pub mod session_tools;
 pub mod shell;
+pub mod skills_tool;
 pub mod spawn;
 pub mod truncation;
 pub mod web;

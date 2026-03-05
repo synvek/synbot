@@ -155,6 +155,8 @@ pub fn build_default_tools(
         shared_session_state.clone(),
     )))
     .expect("register ResetSessionTool");
+    reg.register(std::sync::Arc::new(skills_tool::ListSkillsTool::new()))
+        .expect("register ListSkillsTool");
 
     reg.register(std::sync::Arc::new(message::MessageTool {
         outbound_tx: outbound_tx.clone(),

@@ -13,6 +13,7 @@ use tracing::{error, info, warn, Instrument};
 
 use crate::agent::agent_registry::AgentRegistry;
 use crate::agent::context::ContextBuilder;
+use crate::agent::skills::SkillProvider;
 use crate::agent::directive::DirectiveParser;
 use crate::agent::session_state::SharedSessionState;
 use crate::agent::subagent::SubagentManager;
@@ -114,6 +115,7 @@ impl AgentLoop {
                                 }
                                 ControlCommand::Status => { self.handle_status(&msg).await.ok(); }
                                 ControlCommand::Clear => { self.handle_clear(&msg).await.ok(); }
+                                ControlCommand::Skills => { self.handle_skills(&msg).await.ok(); }
                                 ControlCommand::Resume => {
                                     if let Some(ref k) = self.resolve_history_session_key(&msg).await {
                                         let _ = self.session_state.append_user_message_and_save(k, &msg.content).await;
@@ -216,6 +218,10 @@ impl AgentLoop {
                     }
                     ControlCommand::Clear => {
                         self.handle_clear(&msg).await?;
+                        return Ok(None);
+                    }
+                    ControlCommand::Skills => {
+                        self.handle_skills(&msg).await?;
                         return Ok(None);
                     }
                     ControlCommand::Resume => {
@@ -517,6 +523,33 @@ impl AgentLoop {
             msg.channel.clone(),
             msg.chat_id.clone(),
             "[Clear] Session cleared. Conversation will continue as a fresh chat.".to_string(),
+            vec![],
+            None,
+        ));
+        Ok(())
+    }
+
+    /// Handle /skills: list available skills from config skills dir (~/.synbot/skills).
+    async fn handle_skills(&self, msg: &InboundMessage) -> Result<()> {
+        let skills_dir = config::skills_dir();
+        let loader = crate::agent::skills::SkillsLoader::new(skills_dir.as_path());
+        let names = loader.list_skills();
+        let text = if names.is_empty() {
+            format!(
+                "[Skills] No skills found. Skills are loaded from {} (each subdirectory with SKILL.md is a skill).",
+                skills_dir.display()
+            )
+        } else {
+            let mut lines = vec![format!("[Skills] Available skills (from {}):", skills_dir.display())];
+            for name in &names {
+                lines.push(format!("- {}", name));
+            }
+            lines.join("\n")
+        };
+        let _ = self.outbound_tx.send(OutboundMessage::chat(
+            msg.channel.clone(),
+            msg.chat_id.clone(),
+            text,
             vec![],
             None,
         ));
