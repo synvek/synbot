@@ -505,6 +505,62 @@ cargo run --example generate_config_schema --features schema -- -o config.schema
 - **searxngUrl**: 使用 `"searxNG"` 时的 SearxNG 实例地址
 - **searchCount**: 最多返回的搜索结果数（默认 5）
 
+### 生成类工具（图像、视频、语音）
+
+可选工具，用于根据文本通过配置的 provider 生成图像、视频或语音。每个工具将输出保存到工作区下指定目录（`outputDir`），并通过当前渠道发送给用户。
+
+- **图像**：使用与对话模型相同的 provider 解析（如 `openai` 对应 DALL·E）。在 `tools.generation.image` 下配置。
+- **语音（TTS）**：文本转语音（如 OpenAI TTS）。在 `tools.generation.speech` 下配置。
+- **视频**：文本生成视频（依具体 provider，如可在 `providers.extra` 中配置 Runway 等）。在 `tools.generation.video` 下配置。
+
+凭证来自 `providers`（见 [提供商配置](#提供商配置)）：设置 `provider` 名称（如 `"openai"`），并确保该 provider 已配置 `apiKey`（及可选的 `apiBase`）。
+
+示例 — 使用 OpenAI 启用图像与语音生成：
+
+```json
+{
+  "providers": {
+    "openai": {
+      "apiKey": "sk-...",
+      "apiBase": "https://api.openai.com/v1"
+    }
+  },
+  "tools": {
+    "generation": {
+      "image": {
+        "enabled": true,
+        "provider": "openai",
+        "outputDir": "generated/images",
+        "model": "dall-e-3",
+        "size": "1024x1024",
+        "quality": "standard"
+      },
+      "speech": {
+        "enabled": true,
+        "provider": "openai",
+        "outputDir": "generated/speech",
+        "model": "tts-1",
+        "voice": "alloy",
+        "format": "mp3"
+      },
+      "video": {
+        "enabled": false,
+        "provider": "",
+        "outputDir": "generated/video",
+        "model": ""
+      }
+    }
+  }
+}
+```
+
+- **enabled**：为 `true` 时注册对应工具（默认 `false`）。
+- **provider**：提供商名称（如 `"openai"` 或 `providers.extra` 中的键）。须已配置 `apiKey`（及可选 `apiBase`）。
+- **outputDir**：生成文件保存目录（相对工作区），如 `"generated/images"`。
+- **model**、**size**、**quality**（图像）：默认模型/尺寸/质量；Agent 可通过工具参数覆盖。
+- **model**、**voice**、**format**（语音）：默认 TTS 模型、音色与输出格式（如 `mp3`）。
+- **model**（视频）：视频 API 的模型名；使用 `providers.extra` 中的自定义 provider 时必填。
+
 ## Web 控制台配置
 
 ```json

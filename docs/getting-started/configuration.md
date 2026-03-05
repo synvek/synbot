@@ -508,6 +508,62 @@ For selective behavior (some commands allowed without approval, some require app
 - **searxngUrl**: SearxNG instance URL when using `"searxNG"`
 - **searchCount**: Max number of search results (default 5)
 
+### Generation tools (image, video, speech)
+
+Optional tools that generate images, video, or speech from text using a configured provider. Each tool saves the output under the workspace (in the configured `outputDir`) and sends the file to the user on the current channel.
+
+- **Image**: Uses the same provider resolution as the chat model (e.g. `openai` for DALL·E). Configure under `tools.generation.image`.
+- **Speech (TTS)**: Text-to-speech (e.g. OpenAI TTS). Configure under `tools.generation.speech`.
+- **Video**: Text-to-video (provider-specific; e.g. add a Runway-compatible entry in `providers.extra`). Configure under `tools.generation.video`.
+
+Provider credentials come from `providers` (see [Provider Configuration](#provider-configuration)); set the `provider` name (e.g. `"openai"`) and ensure that provider has `apiKey` (and optional `apiBase`) set.
+
+Example — enable image and speech with OpenAI:
+
+```json
+{
+  "providers": {
+    "openai": {
+      "apiKey": "sk-...",
+      "apiBase": "https://api.openai.com/v1"
+    }
+  },
+  "tools": {
+    "generation": {
+      "image": {
+        "enabled": true,
+        "provider": "openai",
+        "outputDir": "generated/images",
+        "model": "dall-e-3",
+        "size": "1024x1024",
+        "quality": "standard"
+      },
+      "speech": {
+        "enabled": true,
+        "provider": "openai",
+        "outputDir": "generated/speech",
+        "model": "tts-1",
+        "voice": "alloy",
+        "format": "mp3"
+      },
+      "video": {
+        "enabled": false,
+        "provider": "",
+        "outputDir": "generated/video",
+        "model": ""
+      }
+    }
+  }
+}
+```
+
+- **enabled**: When `true`, the corresponding tool is registered (default: `false`).
+- **provider**: Name of the provider (e.g. `"openai"` or a key in `providers.extra`). Must have `apiKey` (and optional `apiBase`) configured.
+- **outputDir**: Directory relative to the workspace where generated files are saved (e.g. `"generated/images"`).
+- **model**, **size**, **quality** (image): Default model/size/quality; the agent can override via tool arguments.
+- **model**, **voice**, **format** (speech): Default TTS model, voice, and output format (e.g. `mp3`).
+- **model** (video): Model name for the video API; required when using a custom provider in `providers.extra`.
+
 ## Web Dashboard Configuration
 
 ```json

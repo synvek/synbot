@@ -157,11 +157,58 @@ pub fn build_default_tools(
     .expect("register ResetSessionTool");
 
     reg.register(std::sync::Arc::new(message::MessageTool {
-        outbound_tx,
+        outbound_tx: outbound_tx.clone(),
         default_channel: String::new(),
         default_chat_id: String::new(),
     }))
     .expect("register MessageTool");
+
+    if cfg.tools.generation.image.enabled && !cfg.tools.generation.image.provider.is_empty() {
+        let (api_key, api_base) = resolve_provider(cfg, &cfg.tools.generation.image.provider);
+        reg.register(std::sync::Arc::new(crate::tools::generation::GenerateImageTool {
+            workspace: ws.clone(),
+            outbound_tx: outbound_tx.clone(),
+            default_channel: String::new(),
+            default_chat_id: String::new(),
+            api_key,
+            api_base,
+            output_dir: cfg.tools.generation.image.output_dir.clone(),
+            model: cfg.tools.generation.image.model.clone(),
+            size: cfg.tools.generation.image.size.clone(),
+            quality: cfg.tools.generation.image.quality.clone(),
+        }))
+        .expect("register GenerateImageTool");
+    }
+    if cfg.tools.generation.speech.enabled && !cfg.tools.generation.speech.provider.is_empty() {
+        let (api_key, api_base) = resolve_provider(cfg, &cfg.tools.generation.speech.provider);
+        reg.register(std::sync::Arc::new(crate::tools::generation::GenerateSpeechTool {
+            workspace: ws.clone(),
+            outbound_tx: outbound_tx.clone(),
+            default_channel: String::new(),
+            default_chat_id: String::new(),
+            api_key,
+            api_base,
+            output_dir: cfg.tools.generation.speech.output_dir.clone(),
+            model: cfg.tools.generation.speech.model.clone(),
+            voice: cfg.tools.generation.speech.voice.clone(),
+            format: cfg.tools.generation.speech.format.clone(),
+        }))
+        .expect("register GenerateSpeechTool");
+    }
+    if cfg.tools.generation.video.enabled && !cfg.tools.generation.video.provider.is_empty() {
+        let (api_key, api_base) = resolve_provider(cfg, &cfg.tools.generation.video.provider);
+        reg.register(std::sync::Arc::new(crate::tools::generation::GenerateVideoTool {
+            workspace: ws.clone(),
+            outbound_tx: outbound_tx.clone(),
+            default_channel: String::new(),
+            default_chat_id: String::new(),
+            api_key,
+            api_base,
+            output_dir: cfg.tools.generation.video.output_dir.clone(),
+            model: cfg.tools.generation.video.model.clone(),
+        }))
+        .expect("register GenerateVideoTool");
+    }
 
     if let Some((config, config_path)) = heartbeat_cron {
         let inner = heartbeat_cron::HeartbeatCronTools {

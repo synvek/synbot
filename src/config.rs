@@ -878,6 +878,109 @@ impl Default for BrowserToolConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Generation tools config (image, video, speech)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct ImageGenConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Provider name (e.g. "openai" or a key in providers.extra).
+    #[serde(default)]
+    pub provider: String,
+    /// Output directory relative to workspace (e.g. "generated/images").
+    #[serde(default = "default_generation_output_dir_image")]
+    pub output_dir: String,
+    /// Model (e.g. "dall-e-3", "gpt-image-1").
+    #[serde(default = "default_image_model")]
+    pub model: String,
+    /// Size (e.g. "1024x1024", "1792x1024" for dall-e-3).
+    #[serde(default = "default_image_size")]
+    pub size: String,
+    /// Quality: "standard" or "hd" (dall-e-3).
+    #[serde(default = "default_image_quality")]
+    pub quality: String,
+}
+
+fn default_generation_output_dir_image() -> String {
+    "generated/images".to_string()
+}
+fn default_image_model() -> String {
+    "dall-e-3".to_string()
+}
+fn default_image_size() -> String {
+    "1024x1024".to_string()
+}
+fn default_image_quality() -> String {
+    "standard".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct VideoGenConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub provider: String,
+    #[serde(default = "default_generation_output_dir_video")]
+    pub output_dir: String,
+    #[serde(default)]
+    pub model: String,
+}
+
+fn default_generation_output_dir_video() -> String {
+    "generated/video".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct SpeechGenConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub provider: String,
+    #[serde(default = "default_generation_output_dir_speech")]
+    pub output_dir: String,
+    #[serde(default = "default_speech_model")]
+    pub model: String,
+    /// Voice (e.g. "alloy", "echo", "fable", "onyx", "nova", "shimmer" for OpenAI TTS).
+    #[serde(default = "default_speech_voice")]
+    pub voice: String,
+    /// Output format: "mp3", "opus", "aac", "flac".
+    #[serde(default = "default_speech_format")]
+    pub format: String,
+}
+
+fn default_generation_output_dir_speech() -> String {
+    "generated/speech".to_string()
+}
+fn default_speech_model() -> String {
+    "tts-1".to_string()
+}
+fn default_speech_voice() -> String {
+    "alloy".to_string()
+}
+fn default_speech_format() -> String {
+    "mp3".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct GenerationConfig {
+    #[serde(default)]
+    pub image: ImageGenConfig,
+    #[serde(default)]
+    pub video: VideoGenConfig,
+    #[serde(default)]
+    pub speech: SpeechGenConfig,
+}
+
+// ---------------------------------------------------------------------------
 // Tools config
 // ---------------------------------------------------------------------------
 
@@ -934,6 +1037,9 @@ pub struct ToolsConfig {
     pub web: WebToolConfig,
     #[serde(default)]
     pub browser: BrowserToolConfig,
+    /// Image, video, and speech generation tools (provider + output_dir per type).
+    #[serde(default)]
+    pub generation: GenerationConfig,
     /// MCP servers to connect; their tools are registered as synbot tools.
     #[serde(default)]
     pub mcp: Option<McpConfig>,

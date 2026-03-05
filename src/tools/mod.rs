@@ -21,6 +21,7 @@ pub mod approval_tool;
 pub mod browser;
 pub mod context;
 pub mod filesystem;
+pub mod generation;
 pub mod heartbeat_cron;
 pub mod memory_tool;
 pub mod message;
@@ -225,7 +226,11 @@ impl ToolRegistry {
                     obj.insert("_session_id".into(), serde_json::Value::String(session_id.to_string()));
                 }
             }
-            if name == "message" {
+            if name == "message"
+                || name == "generate_image"
+                || name == "generate_video"
+                || name == "generate_speech"
+            {
                 if let Some(obj) = args.as_object_mut() {
                     obj.insert("channel".into(), serde_json::Value::String(channel.to_string()));
                     obj.insert("chat_id".into(), serde_json::Value::String(chat_id.to_string()));

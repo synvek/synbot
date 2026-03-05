@@ -19,12 +19,16 @@ const PREFIX_STATUS: &str = "/status";
 const PREFIX_CLEAR: &str = "/clear";
 
 /// Returns true if content is exactly the command or command followed by optional whitespace only.
+/// Uses get() for slicing so we never split in the middle of a multi-byte UTF-8 character.
 fn match_prefix(content: &str, prefix: &str) -> bool {
     let c = content.trim();
-    c.eq_ignore_ascii_case(prefix)
-        || (c.len() >= prefix.len()
-            && c[..prefix.len()].eq_ignore_ascii_case(prefix)
-            && c[prefix.len()..].trim().is_empty())
+    if c.eq_ignore_ascii_case(prefix) {
+        return true;
+    }
+    let Some(head) = c.get(..prefix.len()) else {
+        return false;
+    };
+    head.eq_ignore_ascii_case(prefix) && c[prefix.len()..].trim().is_empty()
 }
 
 /// Parse control command. Only matches if the whole message is the command (or command + trailing space).
@@ -77,5 +81,12 @@ mod tests {
     fn non_control() {
         assert_eq!(parse_control_command("hello"), None);
         assert_eq!(parse_control_command("/workflow foo"), None);
+    }
+
+    #[test]
+    fn non_ascii_content_does_not_panic() {
+        // Byte index 5 would split the middle of '成' (UTF-8 bytes 3..6). Must not panic.
+        assert_eq!(parse_control_command("生成一张照片，一只小猫在看书"), None);
+        assert_eq!(parse_control_command("日本語"), None);
     }
 }
