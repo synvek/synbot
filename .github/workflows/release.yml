@@ -228,7 +228,7 @@ jobs:
           tag_name: ${{ github.event.inputs.tag }}
           name: ${{ github.event.inputs.tag }}
           body_path: release_notes.md
-          draft: false
+          draft: true
           prerelease: ${{ contains(github.event.inputs.tag, '-') }}
           files: artifacts/*/*
           token: ${{ secrets.GITHUB_TOKEN }}
