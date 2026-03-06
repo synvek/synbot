@@ -493,6 +493,7 @@ cargo run --example generate_config_schema --features schema -- -o config.schema
     "web": {
       "searchBackend": "duckDuckGo",
       "braveApiKey": "",
+      "tavilyApiKey": "",
       "searxngUrl": "https://searx.example.com",
       "searchCount": 5
     }
@@ -500,8 +501,9 @@ cargo run --example generate_config_schema --features schema -- -o config.schema
 }
 ```
 
-- **searchBackend**: `"duckDuckGo"`（默认，无需 API 密钥）、`"searxNG"`（自建；需设置 `searxngUrl`）或 `"brave"`（需 `braveApiKey`）
+- **searchBackend**: `"duckDuckGo"`（默认，无需 API 密钥）、`"searxNG"`（自建；需设置 `searxngUrl`）、`"brave"`（需 `braveApiKey`）或 `"tavily"`（需 `tavilyApiKey`）
 - **braveApiKey**: 使用 `"brave"` 时的 Brave Search API 密钥
+- **tavilyApiKey**: 使用 `"tavily"` 时的 Tavily Search API 密钥（在 https://app.tavily.com/ 获取）
 - **searxngUrl**: 使用 `"searxNG"` 时的 SearxNG 实例地址
 - **searchCount**: 最多返回的搜索结果数（默认 5）
 
@@ -857,7 +859,8 @@ cargo run --example generate_config_schema --features schema -- -o config.schema
       }
     },
     "web": {
-      "braveApiKey": ""
+      "braveApiKey": "",
+      "tavilyApiKey": ""
     }
   },
   "web": {

@@ -90,7 +90,7 @@ The bot will use the `calculate` tool to perform the calculation.
 You: Search for information about Rust programming
 ```
 
-If you have Brave Search API key configured, the bot will perform a web search.
+If you have a web search API key configured (Brave or Tavily), the bot will perform a web search.
 
 ## Understanding the Workflow
 

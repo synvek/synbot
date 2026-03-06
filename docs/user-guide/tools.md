@@ -135,19 +135,22 @@ execute_script {
 ### Web Tools
 
 #### web_search
-Search the web using Brave Search API.
+Search the web and return relevant results (title, URL, snippet). Supports multiple backends:
+
+- **DuckDuckGo** (default): No API key required; uses HTML scraping.
+- **SearxNG**: Self-hosted search; set `searchBackend` to `"searxNG"` and configure `searxngUrl`.
+- **Brave**: Brave Search API; set `searchBackend` to `"brave"` and configure `braveApiKey`.
+- **Tavily**: Tavily Search API (https://tavily.com); set `searchBackend` to `"tavily"` and configure `tavilyApiKey`.
 
 **Parameters**:
 - `query` (string): Search query
-- `count` (number, optional): Number of results (default: 10)
-- `safesearch` (string, optional): Safe search level (off, moderate, strict)
+- `count` (number, optional): Number of results (default from config, typically 5)
 
 **Example**:
 ```
 web_search { 
   "query": "Rust programming language",
-  "count": 5,
-  "safesearch": "moderate"
+  "count": 5
 }
 ```
 
@@ -308,13 +311,39 @@ Configure shell command execution:
 
 ### Web Tool Configuration
 
-Configure web search:
+Configure web search (choose one backend):
 
 ```json
 {
   "tools": {
     "web": {
+      "searchBackend": "duckDuckGo"
+    }
+  }
+}
+```
+
+With Brave Search API:
+
+```json
+{
+  "tools": {
+    "web": {
+      "searchBackend": "brave",
       "braveApiKey": "YOUR_BRAVE_SEARCH_API_KEY"
+    }
+  }
+}
+```
+
+With Tavily Search API:
+
+```json
+{
+  "tools": {
+    "web": {
+      "searchBackend": "tavily",
+      "tavilyApiKey": "YOUR_TAVILY_API_KEY"
     }
   }
 }

@@ -131,19 +131,22 @@ execute_script {
 ### Web 工具
 
 #### web_search
-使用 Brave Search API 搜索网络。
+搜索网络并返回相关结果（标题、URL、摘要）。支持多种后端：
+
+- **DuckDuckGo**（默认）：无需 API 密钥，使用 HTML 抓取。
+- **SearxNG**：自建搜索；将 `searchBackend` 设为 `"searxNG"` 并配置 `searxngUrl`。
+- **Brave**：Brave Search API；将 `searchBackend` 设为 `"brave"` 并配置 `braveApiKey`。
+- **Tavily**：Tavily Search API（https://tavily.com）；将 `searchBackend` 设为 `"tavily"` 并配置 `tavilyApiKey`。
 
 **参数**：
 - `query` (字符串)：搜索查询
-- `count` (数字，可选)：结果数量（默认：10）
-- `safesearch` (字符串，可选)：安全搜索级别（off, moderate, strict）
+- `count` (数字，可选)：结果数量（默认由配置决定，通常为 5）
 
 **示例**：
 ```
 web_search { 
   "query": "Rust 编程语言",
-  "count": 5,
-  "safesearch": "moderate"
+  "count": 5
 }
 ```
 
@@ -304,13 +307,39 @@ calculate {
 
 ### Web 工具配置
 
-配置网络搜索：
+配置网络搜索（任选一种后端）：
 
 ```json
 {
   "tools": {
     "web": {
+      "searchBackend": "duckDuckGo"
+    }
+  }
+}
+```
+
+使用 Brave Search API：
+
+```json
+{
+  "tools": {
+    "web": {
+      "searchBackend": "brave",
       "braveApiKey": "YOUR_BRAVE_SEARCH_API_KEY"
+    }
+  }
+}
+```
+
+使用 Tavily Search API：
+
+```json
+{
+  "tools": {
+    "web": {
+      "searchBackend": "tavily",
+      "tavilyApiKey": "YOUR_TAVILY_API_KEY"
     }
   }
 }

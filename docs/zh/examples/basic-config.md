@@ -611,11 +611,21 @@ synbot start
 
 ### 启用网络搜索
 
-获取 Brave Search API 密钥并更新：
+默认使用 DuckDuckGo（无需密钥），也可设置搜索后端与 API 密钥。使用 Brave Search 时：
 
 ```json
 "web": {
+  "searchBackend": "brave",
   "braveApiKey": "YOUR_BRAVE_API_KEY"
+}
+```
+
+使用 Tavily Search（https://tavily.com）时：
+
+```json
+"web": {
+  "searchBackend": "tavily",
+  "tavilyApiKey": "YOUR_TAVILY_API_KEY"
 }
 ```
 

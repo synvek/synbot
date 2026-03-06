@@ -86,7 +86,7 @@ synbot start
 您：搜索关于 Rust 编程的信息
 ```
 
-如果您配置了 Brave Search API 密钥，机器人将执行网络搜索。
+若已配置网络搜索 API 密钥（Brave 或 Tavily），机器人将执行网络搜索。
 
 ## 理解工作流
 

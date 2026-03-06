@@ -1898,6 +1898,13 @@
           "enum": [
             "brave"
           ]
+        },
+        {
+          "description": "Tavily Search API — requires `tavily_api_key` (https://tavily.com).",
+          "type": "string",
+          "enum": [
+            "tavily"
+          ]
         }
       ]
     },
@@ -1906,6 +1913,11 @@
       "properties": {
         "braveApiKey": {
           "description": "Legacy Brave API key (kept for backwards compatibility; sets backend=brave when non-empty).",
+          "default": "",
+          "type": "string"
+        },
+        "tavilyApiKey": {
+          "description": "Tavily Search API key (used when searchBackend is tavily). Get one at https://app.tavily.com/",
           "default": "",
           "type": "string"
         },

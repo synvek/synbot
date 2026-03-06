@@ -4,6 +4,7 @@
 //!   - DuckDuckGo  — HTML scraping, no API key needed (default)
 //!   - SearxNG     — self-hosted JSON API, requires `searxng_url`
 //!   - Brave       — Brave Search REST API, requires `brave_api_key`
+//!   - Tavily      — Tavily Search API (https://tavily.com), requires `tavily_api_key`
 
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
@@ -145,6 +146,45 @@ async fn search_brave(api_key: &str, query: &str, count: usize) -> Result<Vec<Se
     Ok(results)
 }
 
+async fn search_tavily(api_key: &str, query: &str, count: usize) -> Result<Vec<SearchResult>> {
+    let client = build_client()?;
+    let count = count.min(20);
+
+    let body = serde_json::json!({
+        "query": query,
+        "max_results": count,
+        "search_depth": "basic"
+    });
+
+    let resp = client
+        .post("https://api.tavily.com/search")
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {}", api_key.trim()))
+        .json(&body)
+        .send()
+        .await
+        .context("Tavily Search request failed")?
+        .json::<Value>()
+        .await
+        .context("Tavily Search response parse failed")?;
+
+    let results = resp["results"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .take(count)
+                .map(|r| SearchResult {
+                    title: r["title"].as_str().unwrap_or("").to_string(),
+                    url: r["url"].as_str().unwrap_or("").to_string(),
+                    snippet: r["content"].as_str().unwrap_or("").to_string(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(results)
+}
+
 // ---------------------------------------------------------------------------
 // Shared result type
 // ---------------------------------------------------------------------------
@@ -174,6 +214,8 @@ pub struct WebSearchTool {
     pub backend: WebSearchBackend,
     /// Brave API key (used when backend == Brave)
     pub brave_api_key: String,
+    /// Tavily API key (used when backend == Tavily)
+    pub tavily_api_key: String,
     /// SearxNG base URL (used when backend == SearxNG)
     pub searxng_url: String,
     /// Max results
@@ -182,17 +224,22 @@ pub struct WebSearchTool {
 
 impl WebSearchTool {
     pub fn from_config(cfg: &crate::config::WebToolConfig) -> Self {
-        // Backwards compat: if brave_api_key is set but backend is still default, use Brave.
-        let backend = if cfg.search_backend == WebSearchBackend::DuckDuckGo
-            && !cfg.brave_api_key.is_empty()
-        {
-            WebSearchBackend::Brave
+        // Backwards compat: if only one API key is set and backend is still default, pick that backend.
+        let backend = if cfg.search_backend == WebSearchBackend::DuckDuckGo {
+            if !cfg.tavily_api_key.is_empty() {
+                WebSearchBackend::Tavily
+            } else if !cfg.brave_api_key.is_empty() {
+                WebSearchBackend::Brave
+            } else {
+                WebSearchBackend::DuckDuckGo
+            }
         } else {
             cfg.search_backend.clone()
         };
         Self {
             backend,
             brave_api_key: cfg.brave_api_key.clone(),
+            tavily_api_key: cfg.tavily_api_key.clone(),
             searxng_url: cfg.searxng_url.clone(),
             count: cfg.search_count,
         }
@@ -247,6 +294,12 @@ impl DynTool for WebSearchTool {
                     anyhow::bail!("brave_api_key is not configured");
                 }
                 search_brave(&self.brave_api_key, query, count).await?
+            }
+            WebSearchBackend::Tavily => {
+                if self.tavily_api_key.is_empty() {
+                    anyhow::bail!("tavily_api_key is not configured");
+                }
+                search_tavily(&self.tavily_api_key, query, count).await?
             }
         };
 

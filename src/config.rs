@@ -567,6 +567,8 @@ pub enum WebSearchBackend {
     SearxNG,
     /// Brave Search API — requires `brave_api_key`.
     Brave,
+    /// Tavily Search API — requires `tavily_api_key` (https://tavily.com).
+    Tavily,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -576,6 +578,10 @@ pub struct WebToolConfig {
     /// Legacy Brave API key (kept for backwards compatibility; sets backend=brave when non-empty).
     #[serde(default)]
     pub brave_api_key: String,
+
+    /// Tavily Search API key (used when backend == Tavily). Get one at https://app.tavily.com/
+    #[serde(default)]
+    pub tavily_api_key: String,
 
     /// Active search backend. Defaults to duckDuckGo when not set.
     #[serde(default)]

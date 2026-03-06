@@ -615,11 +615,21 @@ Add to the permission rules:
 
 ### Enable Web Search
 
-Get a Brave Search API key and update:
+Use DuckDuckGo (default, no key), or set a search backend and API key. For Brave Search:
 
 ```json
 "web": {
+  "searchBackend": "brave",
   "braveApiKey": "YOUR_BRAVE_API_KEY"
+}
+```
+
+For Tavily Search (https://tavily.com):
+
+```json
+"web": {
+  "searchBackend": "tavily",
+  "tavilyApiKey": "YOUR_TAVILY_API_KEY"
 }
 ```
 
