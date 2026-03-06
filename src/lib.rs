@@ -106,6 +106,9 @@
 //! - Security violation detection
 //! - Resource usage metrics
 
+#![recursion_limit = "512"]
+#![type_length_limit = "16777216"]
+
 pub mod agent;
 pub mod appcontainer_dns;
 pub mod background;

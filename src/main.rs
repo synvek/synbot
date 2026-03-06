@@ -1,5 +1,6 @@
 //For matrix sdk dependency issue
 #![recursion_limit = "512"]
+#![type_length_limit = "16777216"]
 
 use anyhow::Result;
 
