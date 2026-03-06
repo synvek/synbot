@@ -1,3 +1,6 @@
+//For matrix sdk dependency issue
+#![recursion_limit = "512"]
+
 use anyhow::Result;
 
 mod agent;
