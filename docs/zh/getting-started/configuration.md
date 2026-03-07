@@ -565,6 +565,10 @@ cargo run --example generate_config_schema --features schema -- -o config.schema
 
 ## Web 控制台配置
 
+运行 `synbot onboard` 时，**默认会启用** Web 控制台并**开启身份验证**：用户名为 `admin`，密码为**随机生成的 UUID**。该密码仅在 onboard 时打印一次（并写入 `config.json`），请妥善保存，之后不会再次显示。
+
+可在配置中覆盖或添加 auth：
+
 ```json
 {
   "web": {
@@ -937,7 +941,7 @@ curl -X POST http://localhost:18888/api/config/reload
 将 API 密钥和令牌存储在环境变量或密钥管理系统中。
 
 ### 3. 为 Web 控制台启用身份验证
-如果将 Web 控制台暴露给网络，请始终启用身份验证。
+`synbot onboard` 默认会启用 Web 控制台并开启身份验证（用户名 `admin`，密码为仅打印一次的随机 UUID）。若将 Web 控制台暴露给网络，请始终保持身份验证开启。
 
 ### 4. 配置适当的权限
 从限制性权限开始，根据需要逐渐允许更多操作。

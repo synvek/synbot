@@ -23,6 +23,8 @@ Initialize configuration and workspace. Creates:
 - Workspace directory with templates (`AGENTS.md`, `SOUL.md`, `USER.md`, `TOOLS.md`, `memory/`).
 - Role templates under `~/.synbot/roles/` (e.g. `dev`).
 
+**Web dashboard**: Enabled by default with **authentication** (username `admin`, password a **random UUID**). The credentials are printed once—save them; they are stored in `config.json` and will not be shown again.
+
 If config already exists, the command prints a message and does not overwrite. Run once after a fresh install.
 
 ```bash

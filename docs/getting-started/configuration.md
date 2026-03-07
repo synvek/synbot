@@ -568,6 +568,10 @@ Example — enable image and speech with OpenAI:
 
 ## Web Dashboard Configuration
 
+When you run `synbot onboard`, the web dashboard is **enabled by default** with **authentication enabled**: username `admin` and a **random UUID password**. The password is printed once during onboard (and stored in `config.json`); save it securely—it will not be shown again.
+
+You can override or add auth in config:
+
 ```json
 {
   "web": {
@@ -940,7 +944,7 @@ Begin with a minimal configuration and add features as needed.
 Store API keys and tokens in environment variables or secret management systems.
 
 ### 3. Enable Authentication for Web Dashboard
-Always enable authentication if exposing the web dashboard to networks.
+`synbot onboard` enables the web dashboard with auth by default (username `admin`, password a random UUID printed once). Always keep authentication enabled if exposing the web dashboard to networks.
 
 ### 4. Configure Appropriate Permissions
 Start with restrictive permissions and gradually allow more operations as needed.

@@ -4,13 +4,18 @@
 //! only requires a new subdirectory under `templates/roles/` and a rebuild.
 //! Skill templates are embedded from `templates/skills/` and extracted to the config skills dir
 //! (e.g. ~/.synbot/skills/) so each skill subdirectory (e.g. skill-creator) is available there.
+//!
+//! For security, when creating a new config we enable the web dashboard and Basic auth by default:
+//! username = "admin", password = a newly generated UUID. The credentials are printed once so the
+//! user can save them.
 
 use std::path::Path;
 
 use anyhow::{Context, Result};
 use include_dir::{include_dir, Dir};
+use uuid::Uuid;
 
-use crate::config;
+use crate::config::{self, WebAuthConfig};
 
 /// Role templates embedded at compile time (templates/roles/).
 static TEMPLATES_ROLES: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates/roles");
@@ -32,6 +37,15 @@ pub async fn cmd_onboard() -> Result<()> {
     let mut cfg = config::Config::default();
     // Use workspace under current root (important when using --root-dir).
     cfg.main_agent.workspace = config::config_dir().join("workspace").to_string_lossy().into_owned();
+
+    // Enable web dashboard with auth by default for security (username=admin, password=random UUID).
+    let web_password = Uuid::new_v4().to_string();
+    cfg.web.enabled = true;
+    cfg.web.auth = Some(WebAuthConfig {
+        username: "admin".to_string(),
+        password: web_password.clone(),
+    });
+
     config::save_config(&cfg, None)?;
     println!("✓ Created config at {}", cfg_path.display());
 
@@ -51,10 +65,18 @@ pub async fn cmd_onboard() -> Result<()> {
     create_skills_templates()?;
     println!("✓ Created skill templates at {}", config::skills_dir().display());
 
+    println!("\n🔐 Web dashboard is enabled with authentication. Save these credentials:");
+    println!("   ┌─────────────────────────────────────────────────────────────────┐");
+    println!("   │  Username:  admin                                                │");
+    println!("   │  Password:  {:<36}  │", web_password);
+    println!("   └─────────────────────────────────────────────────────────────────┘");
+    println!("   The password is stored in {} and will not be shown again.", cfg_path.display());
+
     println!("\n🐈 synbot is ready!");
     println!("\nNext steps:");
     println!("  1. Add your API key to {}", cfg_path.display());
     println!("  2. Chat: synbot agent -m \"Hello!\"");
+    println!("  3. Start with web: synbot start (then open the dashboard and log in with the credentials above)");
     Ok(())
 }
 
