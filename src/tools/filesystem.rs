@@ -127,21 +127,77 @@ pub struct EditFileTool {
 #[async_trait::async_trait]
 impl DynTool for EditFileTool {
     fn name(&self) -> &str { "edit_file" }
-    fn description(&self) -> &str { "Edit a file by replacing specific text." }
+    fn description(&self) -> &str {
+        "Edit a file by replacing specific text. Supports single edit (old_text/new_text) or batch edits (edits array). Batch edits are applied sequentially and are atomic — if any edit fails, all changes are rolled back."
+    }
     fn parameters_schema(&self) -> Value {
-        json!({"type":"object","properties":{"path":{"type":"string"},"old_text":{"type":"string"},"new_text":{"type":"string"}},"required":["path","old_text","new_text"]})
+        json!({
+            "type": "object",
+            "properties": {
+                "path": { "type": "string", "description": "File path to edit" },
+                "old_text": { "type": "string", "description": "Text to find (single edit mode)" },
+                "new_text": { "type": "string", "description": "Replacement text (single edit mode)" },
+                "edits": {
+                    "type": "array",
+                    "description": "Batch edits: array of {old_text, new_text} pairs applied sequentially",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "old_text": { "type": "string" },
+                            "new_text": { "type": "string" }
+                        },
+                        "required": ["old_text", "new_text"]
+                    }
+                }
+            },
+            "required": ["path"]
+        })
     }
     async fn call(&self, args: Value) -> anyhow::Result<String> {
         let path = resolve_path(args["path"].as_str().unwrap_or(""), &self.workspace, self.restrict)?;
-        let old = args["old_text"].as_str().unwrap_or("");
-        let new = args["new_text"].as_str().unwrap_or("");
         info!(path = %path.display(), "edit_file");
         let content = tokio::fs::read_to_string(&path).await?;
-        if !content.contains(old) {
-            anyhow::bail!("old_text not found in {}", path.display());
+
+        // Build the list of edits: either from `edits` array or single old_text/new_text
+        let edits: Vec<(String, String)> = if let Some(arr) = args["edits"].as_array() {
+            arr.iter()
+                .map(|e| {
+                    let old = e["old_text"].as_str().unwrap_or("").to_string();
+                    let new = e["new_text"].as_str().unwrap_or("").to_string();
+                    (old, new)
+                })
+                .collect()
+        } else {
+            let old = args["old_text"].as_str().unwrap_or("").to_string();
+            let new = args["new_text"].as_str().unwrap_or("").to_string();
+            vec![(old, new)]
+        };
+
+        if edits.is_empty() {
+            anyhow::bail!("No edits provided");
         }
-        tokio::fs::write(&path, content.replacen(old, new, 1)).await?;
-        Ok(format!("Edited {}", path.display()))
+
+        // Apply edits sequentially; bail on first failure (atomic: original file untouched)
+        let mut result = content;
+        for (i, (old, new)) in edits.iter().enumerate() {
+            if !result.contains(old.as_str()) {
+                anyhow::bail!(
+                    "edit #{}: old_text not found in {} (after {} prior edit(s))",
+                    i + 1,
+                    path.display(),
+                    i
+                );
+            }
+            result = result.replacen(old.as_str(), new.as_str(), 1);
+        }
+
+        tokio::fs::write(&path, &result).await?;
+        let count = edits.len();
+        if count == 1 {
+            Ok(format!("Edited {}", path.display()))
+        } else {
+            Ok(format!("Applied {} edits to {}", count, path.display()))
+        }
     }
 }
 

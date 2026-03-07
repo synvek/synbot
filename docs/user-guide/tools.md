@@ -28,7 +28,8 @@ Tools are functions that the AI assistant can call to perform actions. Each tool
 3. **Web Tools**: Search the web and fetch content
 4. **Message Tools**: Send messages across channels
 5. **Approval Tools**: Handle permission-based approvals
-6. **Utility Tools**: Various utility functions
+6. **Code Development Tools**: Analyze project structure and show code diffs
+7. **Utility Tools**: Various utility functions
 
 ## Built-in Tools
 
@@ -244,6 +245,54 @@ check_approval_status {
   "approval_id": "approval_123456" 
 }
 ```
+
+### Code Development Tools
+
+These tools support the code development workflow (e.g. the **code_dev** skill): analyzing project structure, searching code context, and displaying changes as unified diffs.
+
+#### analyze_code
+Analyze code structure, search for relevant code, and extract top-level symbols in the workspace. Supports two actions:
+
+- **scan_project**: Scans the workspace to detect project type, build a file tree, and extract symbols (e.g. `mod`, `fn`, `struct` in Rust; `def`, `class` in Python; `function`, `class` in JS/TS). Skips common ignore directories (`node_modules`, `target`, `.git`, etc.) and files over the size limit.
+- **search_context**: Searches files for keywords from the query, returns matching code snippets with surrounding context, and collects symbols from imported/referenced modules. Results are sorted by relevance and truncated by result count or total context size.
+
+**Parameters**:
+- `action` (string, required): One of `"scan_project"` or `"search_context"`.
+- `query` (string, required for `search_context`): Search query (keywords, file patterns, symbol names).
+- `max_results` (integer, optional): Maximum number of snippets to return for `search_context` (default: 20).
+- `context_lines` (integer, optional): Number of lines of context around each match for `search_context` (default: 5).
+
+**Example (scan project)**:
+```
+analyze_code { "action": "scan_project" }
+```
+
+**Example (search context)**:
+```
+analyze_code { 
+  "action": "search_context",
+  "query": "parse config toml",
+  "max_results": 15,
+  "context_lines": 5
+}
+```
+
+#### show_diff
+Show a unified diff between the original file content and the current content on disk. Useful for presenting code changes to the user after modifications. The path is resolved relative to the agent workspace; access is restricted to the current agent scope when workspace restriction is enabled.
+
+**Parameters**:
+- `path` (string): File path (relative to workspace or absolute).
+- `original_content` (string): Original file content before modification.
+
+**Example**:
+```
+show_diff { 
+  "path": "src/main.rs",
+  "original_content": "fn main() {\n    println!(\"old\");\n}\n"
+}
+```
+
+If there are no differences, the tool returns `"No differences found."`. Large diffs may be truncated (configurable limit).
 
 ### Utility Tools
 

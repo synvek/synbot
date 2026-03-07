@@ -184,6 +184,7 @@ mod tests {
             max_tokens: 4096,
             temperature: 0.5,
             max_tool_iterations: 10,
+            max_chat_history_messages: 20,
             max_concurrent_subagents: 3,
             agents: Vec::new(),
         }

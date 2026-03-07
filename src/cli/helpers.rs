@@ -115,6 +115,17 @@ pub fn build_default_tools(
         reg.register(std::sync::Arc::new(filesystem::SearchFilesTool { workspace: ws.clone(), restrict })).expect("register SearchFilesTool");
         reg.register(std::sync::Arc::new(filesystem::SearchTextTool { workspace: ws.clone(), restrict })).expect("register SearchTextTool");
         reg.register(std::sync::Arc::new(filesystem::GetFileInfoTool { workspace: ws.clone(), restrict })).expect("register GetFileInfoTool");
+        reg.register(std::sync::Arc::new(code_analyzer::CodeAnalyzerTool {
+            workspace: ws.clone(),
+            restrict,
+            max_file_size: 1_048_576,  // 1MB
+            max_scan_files: 1000,
+        })).expect("register CodeAnalyzerTool");
+        reg.register(std::sync::Arc::new(diff_viewer::DiffViewerTool {
+            workspace: ws.clone(),
+            restrict,
+            max_diff_lines: 500,
+        })).expect("register DiffViewerTool");
     }
     reg.register(std::sync::Arc::new(approval_tool::SubmitApprovalResponseTool {
         approval_manager: approval_manager.clone(),

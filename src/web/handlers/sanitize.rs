@@ -311,6 +311,9 @@ mod tests {
                     allowlist: vec![],
                     ..Default::default()
                 }],
+                slack: vec![],
+                email: vec![],
+                matrix: vec![],
             },
             providers: ProvidersConfig {
                 anthropic: ProviderEntry {

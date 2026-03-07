@@ -24,7 +24,8 @@ Synbot 提供了一个强大的工具系统，允许 AI 助手与外部世界进
 3. **Web 工具**：搜索网络和获取内容
 4. **消息工具**：跨渠道发送消息
 5. **审批工具**：处理基于权限的审批
-6. **实用工具**：各种实用功能
+6. **代码开发工具**：分析项目结构、展示代码差异
+7. **实用工具**：各种实用功能
 
 ## 内置工具
 
@@ -240,6 +241,54 @@ check_approval_status {
   "approval_id": "approval_123456" 
 }
 ```
+
+### 代码开发工具
+
+这些工具用于支持代码开发工作流（例如 **code_dev** 技能）：分析项目结构、搜索代码上下文、并以统一差异（unified diff）形式展示修改。
+
+#### analyze_code
+分析工作区内的代码结构、搜索相关代码并提取顶层符号。支持两种操作：
+
+- **scan_project**：扫描工作区，检测项目类型、构建文件树并提取符号（如 Rust 的 `mod`、`fn`、`struct`；Python 的 `def`、`class`；JS/TS 的 `function`、`class`）。会跳过常见忽略目录（`node_modules`、`target`、`.git` 等）以及超过大小限制的文件。
+- **search_context**：按查询关键词在文件中搜索，返回匹配的代码片段及上下文，并收集被引用/导入模块的符号。结果按相关性排序，并按结果数量或总上下文大小截断。
+
+**参数**：
+- `action` (字符串，必填)：`"scan_project"` 或 `"search_context"` 之一。
+- `query` (字符串，`search_context` 时必填)：搜索查询（关键词、文件模式、符号名）。
+- `max_results` (整数，可选)：`search_context` 返回的最大片段数（默认：20）。
+- `context_lines` (整数，可选)：`search_context` 每个匹配周围的上下文行数（默认：5）。
+
+**示例（扫描项目）**：
+```
+analyze_code { "action": "scan_project" }
+```
+
+**示例（搜索上下文）**：
+```
+analyze_code { 
+  "action": "search_context",
+  "query": "parse config toml",
+  "max_results": 15,
+  "context_lines": 5
+}
+```
+
+#### show_diff
+显示文件原始内容与当前磁盘内容之间的统一差异（unified diff），便于在修改后向用户展示代码变更。路径相对于 agent 工作区解析；启用工作区限制时，仅允许访问当前 agent 作用域内的路径。
+
+**参数**：
+- `path` (字符串)：文件路径（相对于工作区或绝对路径）。
+- `original_content` (字符串)：修改前的文件原始内容。
+
+**示例**：
+```
+show_diff { 
+  "path": "src/main.rs",
+  "original_content": "fn main() {\n    println!(\"old\");\n}\n"
+}
+```
+
+若无差异，工具返回 `"No differences found."`。过大的 diff 可能会被截断（可配置限制）。
 
 ### 实用工具
 
