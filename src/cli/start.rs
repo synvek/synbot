@@ -175,6 +175,10 @@ pub async fn cmd_start() -> Result<()> {
         crate::tools::mcp::load_mcp_tools(mcp, &mut tool_reg).await;
     }
 
+    if let Err(e) = tool_reg.register_list_tools_tool() {
+        tracing::warn!(error = %e, "Failed to register list_tools tool");
+    }
+
     let model = cfg.main_agent.model.clone();
     let provider_name = cfg.main_agent.provider.clone();
     let (api_key, api_base) = resolve_provider(&cfg, &provider_name);

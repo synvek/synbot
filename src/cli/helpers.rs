@@ -152,6 +152,7 @@ pub fn build_default_tools(
     if cfg.tools.browser.enabled {
         reg.register(std::sync::Arc::new(browser::BrowserTool::from_config(&cfg.tools.browser)))
             .expect("register BrowserTool");
+        tracing::info!("Registered tool: browser (BrowserTool)");
     }
     reg.register(std::sync::Arc::new(spawn::SpawnTool {
         manager: subagent_mgr,

@@ -25,6 +25,7 @@ pub mod diff_viewer;
 pub mod filesystem;
 pub mod generation;
 pub mod heartbeat_cron;
+pub mod list_tools;
 pub mod memory_tool;
 pub mod message;
 #[cfg(feature = "mcp")]
@@ -296,6 +297,14 @@ impl ToolRegistry {
 
     pub fn names(&self) -> Vec<&str> {
         self.tools.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// Register the list_tools tool with a snapshot of the current registry.
+    /// Call this after all other tools (including MCP and plugin tools) are registered
+    /// so that "list tools" returns the complete set.
+    pub fn register_list_tools_tool(&mut self) -> Result<()> {
+        let snapshot = self.list_tools();
+        self.register(Arc::new(list_tools::ListToolsTool::new(snapshot)))
     }
 }
 

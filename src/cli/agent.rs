@@ -98,6 +98,10 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
     )
     .await;
 
+    if let Err(e) = tool_reg.register_list_tools_tool() {
+        tracing::warn!(error = %e, "Failed to register list_tools tool");
+    }
+
     let tools = std::sync::Arc::new(tool_reg);
 
     let inbound_tx = bus.inbound_sender();

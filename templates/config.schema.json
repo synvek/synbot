@@ -195,8 +195,8 @@
       "type": "boolean"
     },
     "toolResultPreviewChars": {
-      "description": "Max length (chars) of tool result preview sent to users (default 512).",
-      "default": 512,
+      "description": "Max length (chars) of tool result preview sent to users (default 2048).",
+      "default": 2048,
       "type": "integer",
       "minimum": 1
     },
@@ -215,7 +215,7 @@
     "tools": {
       "default": {
         "browser": {
-          "enabled": false,
+          "enabled": true,
           "executable": "agent-browser",
           "timeoutSecs": 30
         },
@@ -238,7 +238,7 @@
             "rules": []
           },
           "restrictToWorkspace": false,
-          "timeoutSecs": 60
+          "timeoutSecs": 300
         },
         "mcp": null,
         "web": {
@@ -443,8 +443,8 @@
       "type": "object",
       "properties": {
         "enabled": {
-          "description": "Enable the browser tool (default false; requires agent-browser to be installed).",
-          "default": false,
+          "description": "Enable the browser tool (default true; requires agent-browser to be installed).",
+          "default": true,
           "type": "boolean"
         },
         "executable": {
@@ -751,7 +751,7 @@
           "type": "boolean"
         },
         "timeoutSecs": {
-          "default": 60,
+          "default": 300,
           "type": "integer",
           "format": "uint64",
           "minimum": 0.0
@@ -1720,7 +1720,7 @@
       "properties": {
         "browser": {
           "default": {
-            "enabled": false,
+            "enabled": true,
             "executable": "agent-browser",
             "timeoutSecs": 30
           },
@@ -1750,7 +1750,7 @@
               "rules": []
             },
             "restrictToWorkspace": false,
-            "timeoutSecs": 60
+            "timeoutSecs": 300
           },
           "allOf": [
             {

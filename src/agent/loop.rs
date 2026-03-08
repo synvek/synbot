@@ -1124,7 +1124,10 @@ async fn run_completion_loop(
                     } else {
                         "failure"
                     };
-                    let preview = if result_str.len() > tool_result_preview_chars {
+                    // list_tools result is meant to be shown in full to the user; do not truncate
+                    let preview = if tc.function.name == "list_tools" {
+                        result_str.clone()
+                    } else if result_str.len() > tool_result_preview_chars {
                         let mut end = tool_result_preview_chars;
                         while end > 0 && !result_str.is_char_boundary(end) {
                             end -= 1;

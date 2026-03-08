@@ -519,7 +519,7 @@ pub struct ExecToolConfig {
 }
 
 fn default_timeout() -> u64 {
-    60
+    300
 }
 
 fn default_search_count() -> u32 {
@@ -854,8 +854,8 @@ impl Default for MemoryConfig {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct BrowserToolConfig {
-    /// Enable the browser tool (default false; requires agent-browser to be installed).
-    #[serde(default)]
+    /// Enable the browser tool (default true; requires agent-browser to be installed).
+    #[serde(default = "default_browser_enabled")]
     pub enabled: bool,
     /// Path or name of the agent-browser executable (default "agent-browser").
     #[serde(default = "default_browser_executable")]
@@ -863,6 +863,10 @@ pub struct BrowserToolConfig {
     /// Per-command timeout in seconds (default 30).
     #[serde(default = "default_browser_timeout")]
     pub timeout_secs: u64,
+}
+
+fn default_browser_enabled() -> bool {
+    true
 }
 
 fn default_browser_executable() -> String {
@@ -876,7 +880,7 @@ fn default_browser_timeout() -> u64 {
 impl Default for BrowserToolConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: default_browser_enabled(),
             executable: default_browser_executable(),
             timeout_secs: default_browser_timeout(),
         }
@@ -1339,7 +1343,7 @@ fn default_true() -> bool {
 }
 
 fn default_tool_result_preview_chars() -> u32 {
-    512
+    2048
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -1349,7 +1353,7 @@ pub struct Config {
     /// When true (default), all channels may receive tool execution progress; each channel can override via channels.*.showToolCalls.
     #[serde(default = "default_true")]
     pub show_tool_calls: bool,
-    /// Max length (chars) of tool result preview sent to users (default 512).
+    /// Max length (chars) of tool result preview sent to users (default 2048).
     #[serde(default = "default_tool_result_preview_chars")]
     pub tool_result_preview_chars: u32,
     #[serde(default)]
