@@ -370,7 +370,7 @@ impl DynTool for ExecTool {
         let effective_timeout_secs = if cmd_str.trim().contains("npx skills add")
             || cmd_str.trim().contains("npx skills add ")
         {
-            std::cmp::max(self.timeout_secs, 600)
+            std::cmp::max(self.timeout_secs, 300)
         } else {
             self.timeout_secs
         };
