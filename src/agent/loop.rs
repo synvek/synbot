@@ -15,7 +15,7 @@ use crate::agent::agent_registry::AgentRegistry;
 use crate::agent::context::ContextBuilder;
 use crate::agent::directive::DirectiveParser;
 use crate::agent::session_state::SharedSessionState;
-use crate::agent::subagent::SubagentManager;
+use crate::agent::subagent::{SubagentManager, SubagentStatus};
 use crate::bus::{InboundMessage, OutboundMessage};
 use crate::config::Config;
 use crate::config;
@@ -32,7 +32,6 @@ pub struct AgentLoop {
     workspace: PathBuf,
     tools: Arc<ToolRegistry>,
     max_iterations: u32,
-    inbound_rx: mpsc::Receiver<InboundMessage>,
     outbound_tx: broadcast::Sender<OutboundMessage>,
     session_state: SharedSessionState,
     agent_registry: Arc<AgentRegistry>,
@@ -52,7 +51,6 @@ impl AgentLoop {
         workspace: PathBuf,
         tools: Arc<ToolRegistry>,
         max_iterations: u32,
-        inbound_rx: mpsc::Receiver<InboundMessage>,
         outbound_tx: broadcast::Sender<OutboundMessage>,
         config: &Config,
         session_state: SharedSessionState,
@@ -60,7 +58,10 @@ impl AgentLoop {
         tool_sandbox_enabled: bool,
         hooks: Option<Arc<HookRegistry>>,
     ) -> Self {
-        let subagent_manager = SubagentManager::new(config.main_agent.max_concurrent_subagents);
+        let subagent_manager = SubagentManager::new(
+            config.main_agent.max_concurrent_subagents,
+            Some(config.main_agent.subagent_task_timeout_secs),
+        );
         let tool_result_preview_chars = config.tool_result_preview_chars as usize;
         let workflow_store = WorkflowStore::new(config::workflows_root(config).as_path());
         let workflow_user_input_timeout_secs = config.workflow.user_input_timeout_secs;
@@ -69,7 +70,6 @@ impl AgentLoop {
             model,
             tools,
             max_iterations,
-            inbound_rx,
             outbound_tx,
             session_state,
             agent_registry,
@@ -84,7 +84,13 @@ impl AgentLoop {
         }
     }
 
-    pub async fn run(&mut self) -> Result<()> {
+    /// Run the agent loop. Requires the loop to be in an `Arc<Mutex<>>` so that /stop (or /cancel)
+    /// can cancel a running agent task by spawning and tracking it. Pass the receiver so the
+    /// loop can recv without holding the lock (allowing the spawned task to run).
+    pub async fn run(
+        loop_ref: Arc<Mutex<Self>>,
+        mut inbound_rx: mpsc::Receiver<InboundMessage>,
+    ) -> Result<()> {
         info!("Agent loop started");
         type TaskHandle = (tokio::task::JoinHandle<()>, CancellationToken, String);
         let mut current_task: Option<TaskHandle> = None;
@@ -93,7 +99,7 @@ impl AgentLoop {
             if let Some((mut handle, token, running_session_key)) = current_task.take() {
                 // Something is running: wait for either a new message or task completion.
                 tokio::select! {
-                    msg_opt = self.inbound_rx.recv() => {
+                    msg_opt = inbound_rx.recv() => {
                         let msg = match msg_opt {
                             None => { current_task = Some((handle, token, running_session_key)); break; }
                             Some(m) => m,
@@ -103,7 +109,7 @@ impl AgentLoop {
                                 ControlCommand::Stop => {
                                     token.cancel();
                                     let _ = handle.await;
-                                    let _ = self.outbound_tx.send(OutboundMessage::chat(
+                                    let _ = loop_ref.lock().await.outbound_tx.send(OutboundMessage::chat(
                                         msg.channel.clone(),
                                         msg.chat_id.clone(),
                                         "[Control] Stopped.".to_string(),
@@ -112,14 +118,19 @@ impl AgentLoop {
                                     ));
                                     continue;
                                 }
-                                ControlCommand::Status => { self.handle_status(&msg).await.ok(); }
-                                ControlCommand::Clear => { self.handle_clear(&msg).await.ok(); }
+                                ControlCommand::Status => {
+                                    loop_ref.lock().await.handle_status(&msg).await.ok();
+                                }
+                                ControlCommand::Clear => {
+                                    loop_ref.lock().await.handle_clear(&msg).await.ok();
+                                }
                                 ControlCommand::Resume => {
-                                    if let Some(ref k) = self.resolve_history_session_key(&msg).await {
-                                        let _ = self.session_state.append_user_message_and_save(k, &msg.content).await;
+                                    let loop_guard = loop_ref.lock().await;
+                                    if let Some(ref k) = loop_guard.resolve_history_session_key(&msg).await {
+                                        let _ = loop_guard.session_state.append_user_message_and_save(k, &msg.content).await;
                                     }
-                                    if let Err(e) = self.handle_workflow_continue(&msg, &msg.session_key()).await {
-                                        let _ = self.outbound_tx.send(OutboundMessage::chat(
+                                    if let Err(e) = loop_guard.handle_workflow_continue(&msg, &msg.session_key()).await {
+                                        let _ = loop_guard.outbound_tx.send(OutboundMessage::chat(
                                             msg.channel.clone(),
                                             msg.chat_id.clone(),
                                             format!("[Workflow] Resume failed: {}", e),
@@ -130,7 +141,7 @@ impl AgentLoop {
                                 }
                             }
                         } else if msg.session_key() == running_session_key {
-                            let _ = self.outbound_tx.send(OutboundMessage::chat(
+                            let _ = loop_ref.lock().await.outbound_tx.send(OutboundMessage::chat(
                                 msg.channel.clone(),
                                 msg.chat_id.clone(),
                                 format!("[Control] Busy. {}", busy_hint_commands()),
@@ -138,7 +149,7 @@ impl AgentLoop {
                                 None,
                             ));
                         } else {
-                            let _ = self.outbound_tx.send(OutboundMessage::chat(
+                            let _ = loop_ref.lock().await.outbound_tx.send(OutboundMessage::chat(
                                 msg.channel.clone(),
                                 msg.chat_id.clone(),
                                 "Agent is busy with another conversation. Use /status to see state.".to_string(),
@@ -153,11 +164,15 @@ impl AgentLoop {
                     }
                 }
             } else {
-                let msg = match self.inbound_rx.recv().await {
+                let msg = match inbound_rx.recv().await {
                     None => break,
                     Some(m) => m,
                 };
-                match self.handle_message(msg).await {
+                let result = {
+                    let mut guard = loop_ref.lock().await;
+                    guard.handle_message(msg, loop_ref.clone()).await
+                };
+                match result {
                     Err(e) => error!("Error handling message: {e:#}"),
                     Ok(Some(task_triple)) => current_task = Some(task_triple),
                     Ok(None) => {}
@@ -167,8 +182,12 @@ impl AgentLoop {
         Ok(())
     }
 
-    /// Returns Ok(Some((handle, token, session_key))) when a workflow was started (so run() can track for /stop).
-    async fn handle_message(&mut self, msg: InboundMessage) -> Result<Option<(tokio::task::JoinHandle<()>, CancellationToken, String)>> {
+    /// Returns Ok(Some((handle, token, session_key))) when a workflow or agent run was started (so run() can track for /stop).
+    async fn handle_message(
+        &mut self,
+        msg: InboundMessage,
+        loop_ref: Arc<Mutex<AgentLoop>>,
+    ) -> Result<Option<(tokio::task::JoinHandle<()>, CancellationToken, String)>> {
         let span = tracing::info_span!(
             "handle_message",
             channel = %msg.channel,
@@ -299,7 +318,23 @@ impl AgentLoop {
             info!(chat = %msg.chat_id, "Processing message");
             let directives = DirectiveParser::parse(&msg.content);
             if directives.len() <= 1 {
-                self.process_directives_sequential(&msg, &directives, start).await?;
+                // Spawn agent run so /stop or /cancel can cancel it; run() will track (handle, token, session_key).
+                let token = CancellationToken::new();
+                let token_for_spawn = token.clone();
+                let session_key = msg.session_key();
+                let msg_clone = msg.clone();
+                let directives_clone = directives.clone();
+                let loop_ref_spawn = loop_ref.clone();
+                let handle = tokio::spawn(async move {
+                    let mut guard = loop_ref_spawn.lock().await;
+                    if let Err(e) = guard
+                        .process_directives_sequential(&msg_clone, &directives_clone, start, Some(token_for_spawn))
+                        .await
+                    {
+                        tracing::debug!("Agent run ended (cancelled or error): {}", e);
+                    }
+                });
+                return Ok(Some((handle, token, session_key)));
             } else {
                 self.process_directives_parallel(&msg, &directives, start).await?;
             }
@@ -622,6 +657,7 @@ impl AgentLoop {
         msg: &InboundMessage,
         directives: &[crate::agent::directive::Directive],
         start: std::time::Instant,
+        cancel: Option<CancellationToken>,
     ) -> Result<()> {
         for directive in directives {
             let agent_id = match &directive.target {
@@ -722,6 +758,7 @@ impl AgentLoop {
                     &self.outbound_tx,
                     self.hooks.clone(),
                     self.tool_result_preview_chars,
+                    cancel.as_ref(),
                 )
                 .await
             })
@@ -874,7 +911,14 @@ impl AgentLoop {
             let max_chat_history_messages = agent_ctx.params.max_chat_history_messages;
 
             let session_messages_clone = session_messages.clone();
+            let label = format!(
+                "directive:{}:{}",
+                agent_id,
+                directive.content.chars().take(30).collect::<String>()
+            );
+            let label_log = label.clone();
             let task_future = Box::pin(async move {
+                tracing::info!(agent_id = %aid, label = %label_log, "Directive task started");
                 session_state.set_active(&sk, "processing").await;
                 let mut history_guard = session_messages_clone.lock().await;
                 let session_id_str = sk.clone();
@@ -895,6 +939,7 @@ impl AgentLoop {
                         &outbound_tx,
                         hooks.clone(),
                         tool_result_preview_chars,
+                        None, // subagent tasks use timeout; no /stop cancel
                     )
                     .await?;
                     let messages = history_guard.clone();
@@ -938,15 +983,9 @@ impl AgentLoop {
                 Ok(format!("agent={}, iterations={}", aid_for_meta, iterations))
             });
 
-            let label = format!(
-                "directive:{}:{}",
-                agent_id,
-                directive.content.chars().take(30).collect::<String>()
-            );
-
             let subagent_id = {
                 let mut mgr = self.subagent_manager.lock().await;
-                mgr.spawn_fn(label, task_future).await
+                mgr.spawn_fn(label, task_future, None).await
             };
 
             match subagent_id {
@@ -979,7 +1018,7 @@ impl AgentLoop {
                     let mgr = self.subagent_manager.lock().await;
                     for id in &ids {
                         if let Some(handle) = mgr.get_result(id).await {
-                            if matches!(handle.status, crate::agent::subagent::SubagentStatus::Running) {
+                            if matches!(handle.status, SubagentStatus::Running) {
                                 all_done = false;
                                 break;
                             }
@@ -990,6 +1029,57 @@ impl AgentLoop {
                     break;
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            // Notify user if any directive task timed out, and send all subagent results to the user
+            let mgr = self.subagent_manager.lock().await;
+            for (id, agent_id, _) in &spawned_ids {
+                if let Some(handle) = mgr.get_result(id).await {
+                    match &handle.status {
+                        SubagentStatus::Failed(ref err_msg) => {
+                            if err_msg.contains("timed out") || err_msg.contains("Timeout") {
+                                let _ = self.outbound_tx.send(OutboundMessage::chat(
+                                    msg.channel.clone(),
+                                    msg.chat_id.clone(),
+                                    format!(
+                                        "Subagent '{}' timed out and was stopped. You can retry with a simpler request or increase mainAgent.subagent_task_timeout_secs in config (default 600s).",
+                                        agent_id
+                                    ),
+                                    vec![],
+                                    None,
+                                ));
+                            } else {
+                                let _ = self.outbound_tx.send(OutboundMessage::chat(
+                                    msg.channel.clone(),
+                                    msg.chat_id.clone(),
+                                    format!("[Subagent {}] Failed: {}", handle.label, err_msg),
+                                    vec![],
+                                    None,
+                                ));
+                            }
+                        }
+                        SubagentStatus::Completed => {
+                            let body = handle
+                                .result
+                                .as_deref()
+                                .unwrap_or("(no output)");
+                            let _ = self.outbound_tx.send(OutboundMessage::chat(
+                                msg.channel.clone(),
+                                msg.chat_id.clone(),
+                                format!("[Subagent {}] Result:\n\n{}", handle.label, body),
+                                vec![],
+                                None,
+                            ));
+                        }
+                        SubagentStatus::Running => {
+                            // Should not happen after wait loop; log if it does
+                            warn!(
+                                subagent_id = %id,
+                                agent_id = %agent_id,
+                                "Subagent still Running after wait loop"
+                            );
+                        }
+                    }
+                }
             }
         }
 
@@ -1014,6 +1104,22 @@ impl AgentLoop {
 }
 
 // ---------------------------------------------------------------------------
+// Helpers for completion debug logging
+// ---------------------------------------------------------------------------
+
+fn truncate_debug(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        let mut end = max_len.min(s.len());
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}... ({} chars total)", &s[..end], s.len())
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Standalone completion loop
 // ---------------------------------------------------------------------------
 
@@ -1033,11 +1139,18 @@ async fn run_completion_loop(
     outbound_tx: &broadcast::Sender<OutboundMessage>,
     hooks: Option<Arc<HookRegistry>>,
     tool_result_preview_chars: usize,
+    cancel: Option<&CancellationToken>,
 ) -> Result<u32> {
     let message_ctx = Some((channel, chat_id, sender_id, session_id));
     let mut iterations = 0u32;
 
     loop {
+        if let Some(token) = cancel {
+            if token.is_cancelled() {
+                info!(agent_id = %agent_id, "Agent run cancelled by user (/stop or /cancel)");
+                return Err(anyhow::anyhow!("Cancelled by user (/stop or /cancel)"));
+            }
+        }
         iterations += 1;
         if iterations > max_iterations {
             warn!("Max iterations ({}) reached for agent '{}'", max_iterations, agent_id);
@@ -1074,6 +1187,61 @@ async fn run_completion_loop(
             .completion(request)
             .await
             .map_err(|e| anyhow::anyhow!("completion failed (agent_id={}): {}", agent_id, e))?;
+
+        for (i, c) in response.choice.iter().enumerate() {
+            match c {
+                AssistantContent::Text(t) => {
+                    let preview = truncate_debug(&t.text, 800);
+                    tracing::debug!("Completion response [{}] Text ({} chars): {}", i, t.text.len(), preview);
+                }
+                AssistantContent::ToolCall(tc) => {
+                    let name = &tc.function.name;
+                    let args_str = tc.function.arguments.to_string();
+                    let args_preview = truncate_debug(&args_str, 500);
+                    tracing::debug!(
+                        "Completion response [{}] ToolCall name={} args={}",
+                        i,
+                        name,
+                        args_preview
+                    );
+                }
+                AssistantContent::Reasoning(r) => {
+                    let reasoning_text = r.reasoning.join("\n");
+                    let preview = truncate_debug(&reasoning_text, 800);
+                    tracing::debug!(
+                        "Completion response [{}] Reasoning ({} chars): {}",
+                        i,
+                        reasoning_text.len(),
+                        preview
+                    );
+                }
+                AssistantContent::Image(_) => {
+                    tracing::debug!("Completion response [{}] Image", i);
+                }
+            }
+        }
+        let text_preview: String = response
+            .choice
+            .iter()
+            .filter_map(|c| match c {
+                AssistantContent::Text(t) => Some(t.text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("");
+        if !text_preview.is_empty() {
+            let max_preview = 1000;
+            let trunc = if text_preview.len() > max_preview {
+                let mut end = max_preview;
+                while end > 0 && !text_preview.is_char_boundary(end) {
+                    end -= 1;
+                }
+                format!("{}... [truncated, total {} chars]", &text_preview[..end], text_preview.len())
+            } else {
+                text_preview.clone()
+            };
+            tracing::debug!("Completion output (text): {}", trunc);
+        }
 
         let mut has_tool_calls = false;
         let mut text_parts = Vec::new();

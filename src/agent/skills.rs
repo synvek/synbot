@@ -91,7 +91,7 @@ pub trait SkillProvider: Send + Sync {
         if skills.is_empty() {
             return String::new();
         }
-        let mut lines = vec!["Available skills (use read_file to load):".to_string()];
+        let mut lines = vec!["Available skills (use list_system_skills to list, read_system_skill(name) to load, install_system_skill(package_spec) to install from ecosystem into ~/.synbot/skills/):".to_string()];
         for name in &skills {
             lines.push(format!("- {}", name));
         }
@@ -204,7 +204,7 @@ impl SkillProvider for CompositeSkillProvider {
         if skills.is_empty() {
             return String::new();
         }
-        let mut lines = vec!["Available skills (use read_file to load SKILL.md for full content):".to_string()];
+        let mut lines = vec!["Available skills (use list_system_skills to list, read_system_skill(name) to load, install_system_skill(package_spec) to install from ecosystem into ~/.synbot/skills/):".to_string()];
         for dir_name in &skills {
             let (display_name, description) = self
                 .load_skill(dir_name)

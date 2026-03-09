@@ -82,7 +82,9 @@ pub type SandboxContext = Option<(
     Option<String>, // tool_sandbox_id when tool sandbox started, None when only app sandbox or tool failed
 )>;
 
-/// Build default tool registry.
+/// Build default tool registry. Returns the registry and a shared spawn context;
+/// set the context (model, workspace, tools, agent_id) after you have them so the
+/// spawn tool runs real subagents instead of no-ops.
 pub fn build_default_tools(
     cfg: &config::Config,
     ws: &std::path::Path,
@@ -93,7 +95,7 @@ pub fn build_default_tools(
     sandbox_context: &SandboxContext,
     shared_session_state: crate::agent::session_state::SharedSessionState,
     outbound_tx: tokio::sync::broadcast::Sender<crate::bus::OutboundMessage>,
-) -> crate::tools::ToolRegistry {
+) -> (crate::tools::ToolRegistry, std::sync::Arc<tokio::sync::RwLock<Option<crate::tools::spawn::SpawnContext>>>) {
     use crate::tools::*;
     let restrict = cfg.tools.exec.restrict_to_workspace;
     let ws = ws.to_path_buf();
@@ -103,6 +105,7 @@ pub fn build_default_tools(
         .and_then(|(_, id)| id.as_ref())
         .is_some();
 
+    let spawn_context = std::sync::Arc::new(tokio::sync::RwLock::new(None));
     let mut reg = ToolRegistry::new();
     if !tool_sandbox_enabled {
         reg.register(std::sync::Arc::new(filesystem::ReadFileTool { workspace: ws.clone(), restrict })).expect("register ReadFileTool");
@@ -156,6 +159,7 @@ pub fn build_default_tools(
     }
     reg.register(std::sync::Arc::new(spawn::SpawnTool {
         manager: subagent_mgr,
+        context: spawn_context.clone(),
     })).expect("register SpawnTool");
     reg.register(std::sync::Arc::new(memory_tool::RememberTool::new("main"))).expect("register RememberTool");
     reg.register(std::sync::Arc::new(memory_tool::ListMemoryTool::new("main"))).expect("register ListMemoryTool");
@@ -169,6 +173,12 @@ pub fn build_default_tools(
     .expect("register ResetSessionTool");
     reg.register(std::sync::Arc::new(skills_tool::ListSkillsTool::new()))
         .expect("register ListSkillsTool");
+    reg.register(std::sync::Arc::new(skills_tool::ListSystemSkillsTool::new()))
+        .expect("register ListSystemSkillsTool");
+    reg.register(std::sync::Arc::new(skills_tool::ReadSystemSkillTool::new()))
+        .expect("register ReadSystemSkillTool");
+    reg.register(std::sync::Arc::new(skills_tool::InstallSystemSkillTool::new()))
+        .expect("register InstallSystemSkillTool");
 
     reg.register(std::sync::Arc::new(message::MessageTool {
         outbound_tx: outbound_tx.clone(),
@@ -249,5 +259,5 @@ pub fn build_default_tools(
         })).expect("register DeleteCronTaskTool");
     }
 
-    reg
+    (reg, spawn_context)
 }

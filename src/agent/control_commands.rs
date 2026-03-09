@@ -4,7 +4,7 @@
 /// Control command parsed from user message (trimmed content).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ControlCommand {
-    /// Stop current workflow or agent task.
+    /// Stop current workflow or agent task. /cancel is an alias for /stop.
     Stop,
     /// Resume workflow (same as /workflow continue).
     Resume,
@@ -15,6 +15,7 @@ pub enum ControlCommand {
 }
 
 const PREFIX_STOP: &str = "/stop";
+const PREFIX_CANCEL: &str = "/cancel";
 const PREFIX_RESUME: &str = "/resume";
 const PREFIX_STATUS: &str = "/status";
 const PREFIX_CLEAR: &str = "/clear";
@@ -38,7 +39,7 @@ pub fn parse_control_command(content: &str) -> Option<ControlCommand> {
     if c.is_empty() {
         return None;
     }
-    if match_prefix(c, PREFIX_STOP) {
+    if match_prefix(c, PREFIX_STOP) || match_prefix(c, PREFIX_CANCEL) {
         return Some(ControlCommand::Stop);
     }
     if match_prefix(c, PREFIX_RESUME) {
@@ -55,7 +56,7 @@ pub fn parse_control_command(content: &str) -> Option<ControlCommand> {
 
 /// Hint text shown when agent/workflow is busy: list available control commands.
 pub fn busy_hint_commands() -> &'static str {
-    "Available commands: /stop (stop current work), /status (show session and workflow state), /clear (clear session), /resume (resume workflow)."
+    "Available commands: /stop or /cancel (stop current work), /status (show session and workflow state), /clear (clear session), /resume (resume workflow)."
 }
 
 #[cfg(test)]
@@ -69,6 +70,15 @@ mod tests {
         assert_eq!(parse_control_command("/STOP"), Some(ControlCommand::Stop));
         assert_eq!(parse_control_command("/stop  "), Some(ControlCommand::Stop));
         assert_eq!(parse_control_command("/stop x"), None);
+    }
+
+    #[test]
+    fn cancel_is_alias_for_stop() {
+        assert_eq!(parse_control_command("/cancel"), Some(ControlCommand::Stop));
+        assert_eq!(parse_control_command("  /cancel  "), Some(ControlCommand::Stop));
+        assert_eq!(parse_control_command("/CANCEL"), Some(ControlCommand::Stop));
+        assert_eq!(parse_control_command("/cancel  "), Some(ControlCommand::Stop));
+        assert_eq!(parse_control_command("/cancel x"), None);
     }
 
     #[test]

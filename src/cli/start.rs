@@ -98,6 +98,7 @@ pub async fn cmd_start() -> Result<()> {
         tokio::sync::Mutex::new(
             crate::agent::subagent::SubagentManager::new(
                 cfg.main_agent.max_concurrent_subagents,
+                Some(cfg.main_agent.subagent_task_timeout_secs),
             ),
         ),
     );
@@ -135,7 +136,7 @@ pub async fn cmd_start() -> Result<()> {
         tracing::warn!(error = %e, "Failed to load persisted sessions");
     }
 
-    let mut tool_reg = build_default_tools(
+    let (mut tool_reg, spawn_context) = build_default_tools(
         &cfg,
         &ws,
         std::sync::Arc::clone(&subagent_mgr),
@@ -197,6 +198,18 @@ pub async fn cmd_start() -> Result<()> {
 
     let tools = std::sync::Arc::new(tool_reg);
 
+    // Wire spawn tool to run real subagents (model + tools) and to send completion to user
+    {
+        let mut ctx = spawn_context.write().await;
+        *ctx = Some(crate::tools::spawn::SpawnContext {
+            model: std::sync::Arc::clone(&completion_model),
+            workspace: ws.clone(),
+            tools: std::sync::Arc::clone(&tools),
+            agent_id: "main".to_string(),
+            outbound_tx: bus.outbound_tx_clone(),
+        });
+    }
+
     let roles_dir = config::roles_dir();
     let mut role_registry = crate::agent::role_registry::RoleRegistry::new();
     if let Err(e) = role_registry.load_from_dirs(&roles_dir) {
@@ -235,13 +248,12 @@ pub async fn cmd_start() -> Result<()> {
         .and_then(|(_, id)| id.as_ref())
         .is_some();
 
-    // Start agent loop
-    let mut agent_loop = crate::agent::r#loop::AgentLoop::new(
+    // Start agent loop (Arc<Mutex<>> so /stop or /cancel can cancel a running agent task)
+    let agent_loop = crate::agent::r#loop::AgentLoop::new(
         std::sync::Arc::clone(&completion_model),
         ws.clone(),
         tools,
         cfg.main_agent.max_tool_iterations,
-        inbound_rx,
         bus.outbound_tx_clone(),
         &cfg,
         shared_session_state.clone(),
@@ -250,8 +262,9 @@ pub async fn cmd_start() -> Result<()> {
         Some(std::sync::Arc::new(hook_registry)),
     )
     .await;
+    let loop_ref = std::sync::Arc::new(tokio::sync::Mutex::new(agent_loop));
     tokio::spawn(async move {
-        if let Err(e) = agent_loop.run().await {
+        if let Err(e) = crate::agent::r#loop::AgentLoop::run(loop_ref, inbound_rx).await {
             tracing::error!("Agent loop error: {e:#}");
         }
     });

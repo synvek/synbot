@@ -1,21 +1,41 @@
 //! Spawn tool — spawns subagents via SubagentManager.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
 use serde_json::{json, Value};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
+
+use tokio::sync::broadcast;
 
 use crate::agent::subagent::SubagentManager;
-use crate::tools::DynTool;
+use crate::bus::OutboundMessage;
+use crate::rig_provider::SynbotCompletionModel;
+use crate::tools::{DynTool, ToolRegistry};
+
+/// Context required to run a real subagent (model + tools). When set, the spawn tool
+/// uses `SubagentManager::spawn` so the subagent runs the task with the LLM and tools.
+/// `outbound_tx` is used to send the subagent result to the user when the tool is
+/// called with `_channel` and `_chat_id` (injected by the executor).
+/// When unset (e.g. in tests), the tool spawns a no-op that returns immediately.
+pub struct SpawnContext {
+    pub model: Arc<dyn SynbotCompletionModel>,
+    pub workspace: PathBuf,
+    pub tools: Arc<ToolRegistry>,
+    pub agent_id: String,
+    pub outbound_tx: broadcast::Sender<OutboundMessage>,
+}
 
 /// Tool that spawns a background subagent to handle a task.
 ///
-/// Holds a shared reference to the [`SubagentManager`] so that it can call
-/// `spawn_fn` to create a new background task. The manager is wrapped in
-/// `Arc<Mutex<…>>` because `spawn_fn` requires `&mut self`.
+/// If [`SpawnContext`] is set (via the shared `context`), the subagent runs the task
+/// with the LLM and tools (`SubagentManager::spawn`). Otherwise it spawns a no-op that
+/// returns immediately (for tests or before context is set).
 pub struct SpawnTool {
     pub manager: Arc<Mutex<SubagentManager>>,
+    /// When Some, subagent runs the task with model and tools; when None, no-op.
+    pub context: Arc<RwLock<Option<SpawnContext>>>,
 }
 
 #[async_trait::async_trait]
@@ -46,17 +66,41 @@ impl DynTool for SpawnTool {
             .map(|s| s.to_string())
             .unwrap_or_else(|| task.chars().take(30).collect());
 
-        let task_description = task.clone();
-
-        // Lock the manager and spawn a background task.
-        // We use `spawn_fn` with a simple async closure that returns the task
-        // description as the result. Full model-backed subagent execution
-        // (via `SubagentManager::spawn`) requires a CompletionModel, which is
-        // not easily cloneable; this integration demonstrates the complete
-        // lifecycle (spawn → track → collect) through the manager.
-        let mut mgr = self.manager.lock().await;
-        let id = mgr
-            .spawn_fn(
+        let channel = args["_channel"].as_str().map(String::from);
+        let chat_id = args["_chat_id"].as_str().map(String::from);
+        let ctx_guard = self.context.read().await;
+        let id = if let Some(ref ctx) = *ctx_guard {
+            // Real subagent: run task with model and tools in the background.
+            let on_complete: Option<Box<dyn FnOnce(String, Result<String>) + Send>> =
+                if let (Some(ch), Some(cid)) = (channel.clone(), chat_id.clone()) {
+                    let tx = ctx.outbound_tx.clone();
+                    Some(Box::new(move |completed_label, result| {
+                        let (status, body) = match result {
+                            Ok(out) => ("Result", out),
+                            Err(e) => ("Failed", e.to_string()),
+                        };
+                        let content = format!("[Subagent {}] {}:\n\n{}", completed_label, status, body);
+                        let _ = tx.send(OutboundMessage::chat(ch, cid, content, vec![], None));
+                    }))
+                } else {
+                    None
+                };
+            let mut mgr = self.manager.lock().await;
+            mgr.spawn(
+                label.clone(),
+                task,
+                ctx.model.clone(),
+                ctx.workspace.clone(),
+                ctx.tools.clone(),
+                &ctx.agent_id,
+                on_complete,
+            )
+            .await?
+        } else {
+            // No context (e.g. tests): spawn a no-op that returns immediately.
+            let task_description = task.clone();
+            let mut mgr = self.manager.lock().await;
+            mgr.spawn_fn(
                 label.clone(),
                 Box::pin(async move {
                     Ok(format!(
@@ -64,8 +108,10 @@ impl DynTool for SpawnTool {
                         task_description
                     ))
                 }),
+                None,
             )
-            .await?;
+            .await?
+        };
 
         Ok(format!(
             "Subagent [{}] spawned with id '{}'. Use list_subagents to check status.",
@@ -79,11 +125,16 @@ mod tests {
     use super::*;
     use crate::agent::subagent::SubagentManager;
 
+    fn no_ctx() -> Arc<RwLock<Option<SpawnContext>>> {
+        Arc::new(RwLock::new(None))
+    }
+
     #[tokio::test]
     async fn test_spawn_tool_creates_subagent() {
-        let mgr = Arc::new(Mutex::new(SubagentManager::new(5)));
+        let mgr = Arc::new(Mutex::new(SubagentManager::new(5, None)));
         let tool = SpawnTool {
             manager: Arc::clone(&mgr),
+            context: no_ctx(),
         };
 
         let result = tool
@@ -106,9 +157,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_spawn_tool_uses_task_prefix_as_default_label() {
-        let mgr = Arc::new(Mutex::new(SubagentManager::new(5)));
+        let mgr = Arc::new(Mutex::new(SubagentManager::new(5, None)));
         let tool = SpawnTool {
             manager: Arc::clone(&mgr),
+            context: no_ctx(),
         };
 
         let result = tool
@@ -129,9 +181,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_spawn_tool_returns_error_at_limit() {
-        let mgr = Arc::new(Mutex::new(SubagentManager::new(1)));
+        let mgr = Arc::new(Mutex::new(SubagentManager::new(1, None)));
         let tool = SpawnTool {
             manager: Arc::clone(&mgr),
+            context: no_ctx(),
         };
 
         // Spawn a long-running task to fill the slot
@@ -145,6 +198,7 @@ mod tests {
                         let _ = rx.await;
                         Ok("done".to_string())
                     }),
+                    None,
                 )
                 .await
                 .unwrap();
@@ -165,9 +219,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_spawn_tool_subagent_completes() {
-        let mgr = Arc::new(Mutex::new(SubagentManager::new(5)));
+        let mgr = Arc::new(Mutex::new(SubagentManager::new(5, None)));
         let tool = SpawnTool {
             manager: Arc::clone(&mgr),
+            context: no_ctx(),
         };
 
         let result = tool

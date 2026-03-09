@@ -366,10 +366,20 @@ impl DynTool for ExecTool {
         let start = Instant::now();
         let working_dir = cwd.display().to_string();
 
+        // Use longer timeout for "npx skills add" (npm install can take several minutes).
+        let effective_timeout_secs = if cmd_str.trim().contains("npx skills add")
+            || cmd_str.trim().contains("npx skills add ")
+        {
+            std::cmp::max(self.timeout_secs, 600)
+        } else {
+            self.timeout_secs
+        };
+        let timeout_duration = Duration::from_secs(effective_timeout_secs);
+
         // Run inside tool sandbox when configured (cwd is /workspace in container).
         // Tool sandbox is always a Linux container (plain-docker / gvisor-docker / wsl2-gvisor), so use sh -c.
         if let Some((ref manager, ref sandbox_id)) = self.sandbox_context {
-            let timeout = Duration::from_secs(self.timeout_secs);
+            let timeout = timeout_duration;
             let (command, args) = ("sh".to_string(), vec!["-c".to_string(), cmd_str.to_string()]);
             let sandbox_cwd = Some("/workspace");
             match manager.execute_in_sandbox(sandbox_id, &command, &args, timeout, sandbox_cwd).await {
@@ -423,7 +433,7 @@ impl DynTool for ExecTool {
         }
 
         let output = tokio::time::timeout(
-            Duration::from_secs(self.timeout_secs),
+            timeout_duration,
             Command::new(if cfg!(windows) { "cmd" } else { "sh" })
                 .args(if cfg!(windows) {
                     vec!["/C", &cmd_str]
@@ -434,7 +444,7 @@ impl DynTool for ExecTool {
                 .output(),
         )
         .await
-        .map_err(|_| anyhow::anyhow!("Command timed out after {}s", self.timeout_secs))??;
+        .map_err(|_| anyhow::anyhow!("Command timed out after {}s", effective_timeout_secs))??;
 
         let duration_ms = start.elapsed().as_millis() as u64;
 

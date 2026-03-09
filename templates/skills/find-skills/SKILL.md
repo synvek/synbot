@@ -86,13 +86,10 @@ Learn more: https://skills.sh/vercel-labs/agent-skills/vercel-react-best-practic
 
 ### Step 4: Offer to Install
 
-If the user wants to proceed, you can install the skill for them:
+If the user wants to proceed, install the skill so it appears in Synbot's system skills directory:
 
-```bash
-npx skills add <owner/repo@skill> -g -y
-```
-
-The `-g` flag installs globally (user-level) and `-y` skips confirmation prompts.
+- **Preferred (Synbot):** Use the `install_system_skill` tool with argument `package_spec` (e.g. `othmanadi/planning-with-files@planning-with-files`). This installs into `~/.synbot/skills/` where Synbot can list and use it, uses a long timeout (600s), and does not require exec approval.
+- **Alternative:** You can use `exec` with `npx skills add <owner/repo@skill> -g -y`; Synbot extends the exec timeout to 600s for this command. If exec permissions are enabled, the user will see an approval prompt in chat before the command runs. Ensure `tools.exec.permissions.enabled` is true in config if you want approval prompts.
 
 ## Common Skill Categories
 

@@ -93,6 +93,7 @@
           }
         ],
         "maxConcurrentSubagents": 5,
+        "subagentTaskTimeoutSecs": 600,
         "maxTokens": 8192,
         "maxToolIterations": 20,
         "model": "claude-sonnet-4-5",
@@ -969,6 +970,13 @@
           "type": "integer",
           "format": "uint",
           "minimum": 0.0
+        },
+        "subagentTaskTimeoutSecs": {
+          "description": "Timeout in seconds for each subagent/directive task. When exceeded, the task is marked failed and the slot is freed. Default 600 (10 min).",
+          "default": 600,
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 1.0
         },
         "maxTokens": {
           "default": 8192,

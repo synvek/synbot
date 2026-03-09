@@ -186,6 +186,7 @@ mod tests {
             max_tool_iterations: 10,
             max_chat_history_messages: 20,
             max_concurrent_subagents: 3,
+            subagent_task_timeout_secs: 600,
             agents: Vec::new(),
         }
     }

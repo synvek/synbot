@@ -59,13 +59,17 @@ pub struct SubagentManager {
     handles: HashMap<String, SharedHandle>,
     /// Maximum number of concurrently running subagents.
     max_concurrent: usize,
+    /// If set, each spawned task is limited to this many seconds; on timeout the task is marked failed.
+    timeout_secs: Option<u64>,
 }
 
 impl SubagentManager {
-    pub fn new(max_concurrent: usize) -> Self {
+    /// Create a new manager. `timeout_secs`: if `Some(n)`, each spawned task is limited to `n` seconds.
+    pub fn new(max_concurrent: usize, timeout_secs: Option<u64>) -> Self {
         Self {
             handles: HashMap::new(),
             max_concurrent,
+            timeout_secs,
         }
     }
 
@@ -76,12 +80,16 @@ impl SubagentManager {
     /// returns `Result<String>`. The higher-level [`spawn`] method wraps a
     /// full `AgentLoop` interaction into such a future.
     ///
+    /// If `on_complete` is provided, it is called when the task finishes (with
+    /// label and result) so the caller can e.g. send the result to the user.
+    ///
     /// Returns the subagent id on success, or an error if the concurrency
     /// limit has been reached.
     pub async fn spawn_fn(
         &mut self,
         label: String,
         task_fn: Pin<Box<dyn Future<Output = Result<String>> + Send + 'static>>,
+        on_complete: Option<Box<dyn FnOnce(String, Result<String>) + Send>>,
     ) -> Result<String> {
         // Enforce concurrency limit
         let active = self.active_count().await;
@@ -106,26 +114,44 @@ impl SubagentManager {
 
         self.handles.insert(id.clone(), Arc::clone(&handle));
 
-        // Spawn background task
+        let timeout_secs = self.timeout_secs;
+        let label_for_cb = label.clone();
+        // Spawn background task (with optional timeout so long-running tasks don't block the slot forever)
         let task_id = id.clone();
         tokio::spawn(async move {
-            info!(subagent_id = %task_id, label = %label, "Subagent started");
-            let result = task_fn.await;
+            info!(subagent_id = %task_id, label = %label, timeout_secs = ?timeout_secs, "Subagent started");
+            let result = if let Some(secs) = timeout_secs {
+                match tokio::time::timeout(std::time::Duration::from_secs(secs), task_fn).await {
+                    Ok(Ok(out)) => Ok(out),
+                    Ok(Err(e)) => Err(e),
+                    Err(_) => {
+                        warn!(subagent_id = %task_id, label = %label, secs = secs, "Subagent task timed out");
+                        Err(anyhow::anyhow!("Task timed out after {} seconds", secs))
+                    }
+                }
+            } else {
+                task_fn.await
+            };
 
             let mut h = handle.lock().await;
-            match result {
+            match &result {
                 Ok(output) => {
                     info!(subagent_id = %task_id, "Subagent completed");
                     h.status = SubagentStatus::Completed;
-                    h.result = Some(output);
+                    h.result = Some(output.clone());
                 }
                 Err(e) => {
                     let err_msg = format!("{e:#}");
                     error!(subagent_id = %task_id, error = %err_msg, "Subagent failed");
-                    h.status = SubagentStatus::Failed(err_msg);
+                    h.status = SubagentStatus::Failed(err_msg.clone());
                 }
             }
             h.completed_at = Some(Utc::now());
+
+            if let Some(cb) = on_complete {
+                let result_for_cb = result.map_err(|e| anyhow::anyhow!("{}", e));
+                cb(label_for_cb, result_for_cb);
+            }
         });
 
         Ok(id)
@@ -145,6 +171,7 @@ impl SubagentManager {
         workspace: PathBuf,
         tools: Arc<ToolRegistry>,
         agent_id: &str,
+        on_complete: Option<Box<dyn FnOnce(String, Result<String>) + Send>>,
     ) -> Result<String> {
         let task_fn = Box::pin(run_subagent_task(
             model,
@@ -153,7 +180,7 @@ impl SubagentManager {
             task,
             agent_id.to_string(),
         ));
-        self.spawn_fn(label, task_fn).await
+        self.spawn_fn(label, task_fn, on_complete).await
     }
 
     /// Return cloned handles for **all** subagents (running + finished).
@@ -320,7 +347,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_new_creates_empty_manager() {
-        let mgr = SubagentManager::new(3);
+        let mgr = SubagentManager::new(3, None);
         assert_eq!(mgr.max_concurrent, 3);
         assert!(mgr.handles.is_empty());
         assert_eq!(mgr.active_count().await, 0);
@@ -328,19 +355,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_active_count_starts_at_zero() {
-        let mgr = SubagentManager::new(5);
+        let mgr = SubagentManager::new(5, None);
         assert_eq!(mgr.active_count().await, 0);
     }
 
     #[tokio::test]
     async fn test_list_empty() {
-        let mgr = SubagentManager::new(5);
+        let mgr = SubagentManager::new(5, None);
         assert!(mgr.list().await.is_empty());
     }
 
     #[tokio::test]
     async fn test_get_result_nonexistent() {
-        let mgr = SubagentManager::new(5);
+        let mgr = SubagentManager::new(5, None);
         assert!(mgr.get_result("nonexistent").await.is_none());
     }
 
@@ -348,7 +375,7 @@ mod tests {
     /// handles in Running status and then verifying spawn would fail.
     #[tokio::test]
     async fn test_concurrent_limit_enforcement() {
-        let mut mgr = SubagentManager::new(2);
+        let mut mgr = SubagentManager::new(2, None);
 
         // Manually insert two "running" handles to simulate active subagents
         for i in 0..2 {
@@ -379,7 +406,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_completed_subagent_not_counted_as_active() {
-        let mut mgr = SubagentManager::new(2);
+        let mut mgr = SubagentManager::new(2, None);
 
         // Insert one completed and one running
         let completed_handle = Arc::new(Mutex::new(SubagentHandle {
@@ -408,7 +435,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_failed_subagent_not_counted_as_active() {
-        let mut mgr = SubagentManager::new(3);
+        let mut mgr = SubagentManager::new(3, None);
 
         let failed_handle = Arc::new(Mutex::new(SubagentHandle {
             id: "fail-1".to_string(),
@@ -425,7 +452,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_returns_all_handles() {
-        let mut mgr = SubagentManager::new(5);
+        let mut mgr = SubagentManager::new(5, None);
 
         for i in 0..3 {
             let id = format!("sa-{i}");
@@ -451,7 +478,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_result_returns_correct_handle() {
-        let mut mgr = SubagentManager::new(5);
+        let mut mgr = SubagentManager::new(5, None);
 
         let handle = Arc::new(Mutex::new(SubagentHandle {
             id: "test-id".to_string(),
@@ -474,7 +501,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_max_concurrent_zero_blocks_all_spawns() {
-        let mgr = SubagentManager::new(0);
+        let mgr = SubagentManager::new(0, None);
         // With max_concurrent=0, even with no active subagents, the limit
         // is already reached (0 >= 0), so no spawns should be possible.
         assert!(mgr.active_count().await >= mgr.max_concurrent);
@@ -482,12 +509,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_spawn_fn_and_collect_result() {
-        let mut mgr = SubagentManager::new(5);
+        let mut mgr = SubagentManager::new(5, None);
 
         let id = mgr
             .spawn_fn(
                 "test task".to_string(),
                 Box::pin(async { Ok("hello from subagent".to_string()) }),
+                None,
             )
             .await
             .expect("spawn should succeed");
@@ -503,7 +531,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_spawn_fn_failed_task() {
-        let mut mgr = SubagentManager::new(5);
+        let mut mgr = SubagentManager::new(5, None);
 
         let id = mgr
             .spawn_fn(
@@ -511,6 +539,7 @@ mod tests {
                 Box::pin(async {
                     Err(anyhow::anyhow!("something went wrong"))
                 }),
+                None,
             )
             .await
             .expect("spawn should succeed");
@@ -527,7 +556,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_spawn_fn_concurrent_limit_enforced() {
-        let mut mgr = SubagentManager::new(2);
+        let mut mgr = SubagentManager::new(2, None);
 
         // Spawn two long-running tasks
         let (tx1, rx1) = tokio::sync::oneshot::channel::<()>();
@@ -540,6 +569,7 @@ mod tests {
                     let _ = rx1.await;
                     Ok("done-1".to_string())
                 }),
+                None,
             )
             .await
             .expect("first spawn should succeed");
@@ -551,6 +581,7 @@ mod tests {
                     let _ = rx2.await;
                     Ok("done-2".to_string())
                 }),
+                None,
             )
             .await
             .expect("second spawn should succeed");
@@ -560,6 +591,7 @@ mod tests {
             .spawn_fn(
                 "task-3".to_string(),
                 Box::pin(async { Ok("done-3".to_string()) }),
+                None,
             )
             .await;
 
@@ -574,13 +606,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_spawn_fn_slot_freed_after_completion() {
-        let mut mgr = SubagentManager::new(1);
+        let mut mgr = SubagentManager::new(1, None);
 
         // Spawn one task that completes immediately
         let id1 = mgr
             .spawn_fn(
                 "quick task".to_string(),
                 Box::pin(async { Ok("done".to_string()) }),
+                None,
             )
             .await
             .expect("spawn should succeed");
@@ -599,6 +632,7 @@ mod tests {
             .spawn_fn(
                 "second task".to_string(),
                 Box::pin(async { Ok("also done".to_string()) }),
+                None,
             )
             .await
             .expect("spawn should succeed after slot freed");
@@ -606,12 +640,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_includes_spawned_tasks() {
-        let mut mgr = SubagentManager::new(5);
+        let mut mgr = SubagentManager::new(5, None);
 
         let id1 = mgr
             .spawn_fn(
                 "task-a".to_string(),
                 Box::pin(async { Ok("a".to_string()) }),
+                None,
             )
             .await
             .unwrap();
@@ -620,6 +655,7 @@ mod tests {
             .spawn_fn(
                 "task-b".to_string(),
                 Box::pin(async { Ok("b".to_string()) }),
+                None,
             )
             .await
             .unwrap();

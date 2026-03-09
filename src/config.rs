@@ -407,6 +407,9 @@ pub struct MainAgent {
     pub max_chat_history_messages: u32,
     #[serde(default = "default_max_concurrent_subagents")]
     pub max_concurrent_subagents: usize,
+    /// Timeout in seconds for each subagent/directive task. When exceeded, the task is marked failed and the slot is freed. Default 600 (10 min).
+    #[serde(default = "default_subagent_task_timeout_secs")]
+    pub subagent_task_timeout_secs: u64,
     #[serde(default = "default_agents")]
     pub agents: Vec<AgentConfig>,
 }
@@ -437,6 +440,9 @@ fn default_max_chat_history_messages() -> u32 {
 fn default_max_concurrent_subagents() -> usize {
     5
 }
+fn default_subagent_task_timeout_secs() -> u64 {
+    600
+}
 
 impl Default for MainAgent {
     fn default() -> Self {
@@ -449,6 +455,7 @@ impl Default for MainAgent {
             max_tool_iterations: default_max_iterations(),
             max_chat_history_messages: default_max_chat_history_messages(),
             max_concurrent_subagents: default_max_concurrent_subagents(),
+            subagent_task_timeout_secs: default_subagent_task_timeout_secs(),
             agents: default_agents(),
         }
     }

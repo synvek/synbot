@@ -41,6 +41,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
         tokio::sync::Mutex::new(
             crate::agent::subagent::SubagentManager::new(
                 cfg.main_agent.max_concurrent_subagents,
+                Some(cfg.main_agent.subagent_task_timeout_secs),
             ),
         ),
     );
@@ -69,7 +70,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
     let mut bus = crate::bus::MessageBus::new();
 
     // Build tools (pass subagent manager, approval manager, permission policy, session state, and outbound_tx for message tool)
-    let mut tool_reg = build_default_tools(
+    let (mut tool_reg, spawn_context) = build_default_tools(
         &cfg,
         &ws,
         std::sync::Arc::clone(&subagent_mgr),
@@ -104,6 +105,18 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
 
     let tools = std::sync::Arc::new(tool_reg);
 
+    // Wire spawn tool to run real subagents (model + tools) and to send completion to user
+    {
+        let mut ctx = spawn_context.write().await;
+        *ctx = Some(crate::tools::spawn::SpawnContext {
+            model: std::sync::Arc::clone(&completion_model),
+            workspace: ws.clone(),
+            tools: std::sync::Arc::clone(&tools),
+            agent_id: "main".to_string(),
+            outbound_tx: bus.outbound_tx_clone(),
+        });
+    }
+
     let inbound_tx = bus.inbound_sender();
     let inbound_rx = bus.take_inbound_receiver().unwrap();
 
@@ -124,13 +137,13 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
     }
     let agent_registry = std::sync::Arc::new(agent_registry);
 
-    // Agent loop (CLI agent has no tool sandbox; hooks from plugins are used when configured)
-    let mut agent_loop = crate::agent::r#loop::AgentLoop::new(
+    // Agent loop (CLI agent has no tool sandbox; hooks from plugins are used when configured).
+    // Arc<Mutex<>> so /stop or /cancel can cancel a running agent task.
+    let agent_loop = crate::agent::r#loop::AgentLoop::new(
         completion_model,
         ws,
         tools,
         cfg.main_agent.max_tool_iterations,
-        inbound_rx,
         bus.outbound_tx_clone(),
         &cfg,
         shared_session_state,
@@ -139,6 +152,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
         Some(std::sync::Arc::new(hook_registry)),
     )
     .await;
+    let loop_ref = std::sync::Arc::new(tokio::sync::Mutex::new(agent_loop));
 
     // If one-shot message, inject it and collect response
     if let Some(msg) = message {
@@ -154,7 +168,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
             })
             .await;
 
-        // Close the inbound channel so agent_loop.run() exits after processing this one message.
+        // Close the inbound channel so run() exits after processing this one message.
         // (Bus and our sender must both be dropped for the mpsc to close.)
         bus.close_inbound();
         drop(inbound_tx);
@@ -184,7 +198,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
         // Run agent until the loop finishes (no more inbound messages)
         let _ = tokio::time::timeout(
             std::time::Duration::from_secs(120),
-            agent_loop.run(),
+            crate::agent::r#loop::AgentLoop::run(loop_ref, inbound_rx),
         )
         .await;
 
@@ -212,7 +226,9 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
             }
         });
 
-        let agent_handle = tokio::spawn(async move { agent_loop.run().await });
+        let agent_handle = tokio::spawn(async move {
+            let _ = crate::agent::r#loop::AgentLoop::run(loop_ref, inbound_rx).await;
+        });
 
         println!("🐈 synbot interactive mode (type 'exit' to quit)");
         loop {

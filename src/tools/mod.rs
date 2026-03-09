@@ -240,6 +240,12 @@ impl ToolRegistry {
                     obj.insert("chat_id".into(), serde_json::Value::String(chat_id.to_string()));
                 }
             }
+            if name == "spawn" {
+                if let Some(obj) = args.as_object_mut() {
+                    obj.insert("_channel".into(), serde_json::Value::String(channel.to_string()));
+                    obj.insert("_chat_id".into(), serde_json::Value::String(chat_id.to_string()));
+                }
+            }
         }
         let args_for_log = sanitize_args_for_log(name, &args);
         let span = tracing::info_span!(
