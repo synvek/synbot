@@ -60,7 +60,7 @@ impl DynTool for RememberTool {
     }
 
     fn description(&self) -> &str {
-        "Save a fact or note to memory. Use 'content' for the text and optionally 'daily' to choose where: (1) daily=false or omit: save to long-term memory (MEMORY.md), e.g. when user says '记住…' or 'remember that'. (2) daily=true: save to today's daily note (memory/YYYY-MM-DD.md), e.g. when user says '记一下今天的…' or '今天做了…' or wants a dated log."
+        "Save a fact or note to memory. Use 'content' for the text and optionally 'daily' to choose where: (1) daily=false or omit: save to long-term memory (MEMORY.md), e.g. when user says 'remember that'. (2) daily=true: save to today's daily note (memory/YYYY-MM-DD.md), e.g. when user says 'log today...' or wants a dated log."
     }
 
     fn parameters_schema(&self) -> Value {
@@ -90,10 +90,10 @@ impl DynTool for RememberTool {
         if daily {
             Self::append_daily_note_for(&agent_id, content)?;
             let today = Local::now().format("%Y-%m-%d");
-            Ok(format!("已写入今日笔记（{}）：{}", today, content))
+            Ok(format!("Written to today's note ({}): {}", today, content))
         } else {
             Self::append_long_term_for(&agent_id, content)?;
-            Ok(format!("已写入长期记忆：{}", content))
+            Ok(format!("Written to long-term memory: {}", content))
         }
     }
 }

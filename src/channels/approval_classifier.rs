@@ -9,8 +9,8 @@ use tracing::warn;
 const SYSTEM_PROMPT: &str = r#"You are a classifier. The user was asked to approve or reject running a command (e.g. "Run python script X?"). They replied with a short message.
 
 Classify their reply into exactly one of:
-- APPROVE: they agree, allow, or confirm (in any language: yes, 好, 批准, ok, 行, etc.)
-- REJECT: they disagree, deny, or refuse (no, 不, 拒绝, reject, etc.)
+- APPROVE: they agree, allow, or confirm (e.g. yes, approve, ok in any language)
+- REJECT: they disagree, deny, or refuse (e.g. no, reject in any language)
 - UNKNOWN: unclear or unrelated (e.g. "what command?", "later", or empty)
 
 Reply with exactly one word: APPROVE, REJECT, or UNKNOWN. No other text."#;

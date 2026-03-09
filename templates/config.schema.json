@@ -1301,7 +1301,7 @@
           }
         },
         "kimiCode": {
-          "description": "Kimi Code (月之暗面 / Moonshot coding API). Uses OpenAI-compatible chat completions; set api_base if using a custom endpoint.",
+          "description": "Kimi Code (Moonshot coding API). Uses OpenAI-compatible chat completions; set api_base if using a custom endpoint.",
           "default": {
             "apiBase": null,
             "apiKey": ""

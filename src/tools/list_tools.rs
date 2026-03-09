@@ -1,7 +1,7 @@
 //! list_tools — returns the current set of available tools (name + description).
 //!
 //! Registered after all other tools (including MCP and plugin tools) so the agent
-//! can answer "what tools do you have?" / "列举可用工具" with the real list.
+//! can answer "what tools do you have?" / "list available tools" with the real list.
 
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use crate::tools::{DynTool, ToolInfo};
 
 /// Tool that returns a formatted list of all registered tools (name and description).
-/// Use when the user asks what tools are available, to list tools, or 列举可用工具.
+/// Use when the user asks what tools are available, to list tools, or to list/enumerate available tools.
 pub struct ListToolsTool {
     /// Snapshot of tool names and descriptions at registration time.
     tools: Vec<ToolInfo>,
@@ -36,7 +36,7 @@ impl DynTool for ListToolsTool {
     }
 
     fn description(&self) -> &str {
-        "List all available tools (name and short description). Call this when the user asks what tools you have, what you can do, or to list/enumerate available tools (e.g. 列举可用工具)."
+        "List all available tools (name and short description). Call this when the user asks what tools you have, what you can do, or to list/enumerate available tools."
     }
 
     fn parameters_schema(&self) -> Value {

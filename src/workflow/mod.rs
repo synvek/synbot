@@ -1,6 +1,6 @@
 //! TurboWorkflow: persistent, resumable multi-step workflows.
 //!
-//! Triggered by "twfw"/"turboworkflow" (case-insensitive) or intent "创建 workflow/twfw".
+//! Triggered by "twfw"/"turboworkflow" (case-insensitive) or intent "create workflow/twfw".
 //! Workflow definition is JSON (LLM-generated or user-provided with confirmation).
 //! State is persisted after each step so execution can resume after interrupt.
 

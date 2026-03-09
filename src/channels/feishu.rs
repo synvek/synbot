@@ -546,7 +546,7 @@ async fn process_im_message_receive(
                                         channel: channel_name.to_string(),
                                         sender_id: sender_open_id.clone(),
                                         chat_id: chat_id.clone(),
-                                        content: format!("[文件] {}", file_name),
+                                        content: format!("[File] {}", file_name),
                                         timestamp: chrono::Utc::now(),
                                         media: vec![media_path],
                                         metadata: serde_json::json!({
@@ -562,7 +562,7 @@ async fn process_im_message_receive(
                                         channel: channel_name.to_string(),
                                         sender_id: sender_open_id.clone(),
                                         chat_id: chat_id.clone(),
-                                        content: format!("[文件] {} 保存到工作区失败", file_name),
+                                        content: format!("[File] {} failed to save to workspace", file_name),
                                         timestamp: chrono::Utc::now(),
                                         media: vec![],
                                         metadata: serde_json::json!({
@@ -580,7 +580,7 @@ async fn process_im_message_receive(
                                     channel: channel_name.to_string(),
                                     sender_id: sender_open_id.clone(),
                                     chat_id: chat_id.clone(),
-                                    content: format!("[文件] {} 下载失败（{}）", file_name, e),
+                                    content: format!("[File] {} download failed ({})", file_name, e),
                                     timestamp: chrono::Utc::now(),
                                     media: vec![],
                                     metadata: serde_json::json!({
@@ -669,7 +669,7 @@ async fn process_im_message_receive(
             None => {
                 warn!(chat_id = %chat_id, "Feishu: chat not in allowlist");
                 let _ = client
-                    .send_message("chat_id", &chat_id, "text", &serde_json::json!({ "text": "未配置聊天许可，请配置。" }).to_string())
+                    .send_message("chat_id", &chat_id, "text", &serde_json::json!({ "text": "Chat not in allowlist. Please configure allowlist." }).to_string())
                     .await;
                 let _ = inbound_tx.try_send(InboundMessage {
                     channel: channel_name.to_string(),
@@ -963,7 +963,7 @@ impl Channel for FeishuChannel {
                                             e.contains("99991672") || e.contains("im:resource");
                                         if is_permission_denied {
                                             if let Some(ref tx) = outbound_tx_for_fail {
-                                                let hint = "⚠️ 文件发送失败：应用未开通「发送与上传消息中的资源文件」权限。请在飞书开放平台为该应用开通 im:resource 或 im:resource:upload 权限后重试。";
+                                                let hint = "⚠️ File send failed: app does not have permission to send/upload resource files. Please enable im:resource or im:resource:upload for this app in Feishu open platform and retry.";
                                                 let _ = tx.send(OutboundMessage::chat(
                                                     feishu_channel_name.clone(),
                                                     msg.chat_id.clone(),

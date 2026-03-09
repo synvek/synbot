@@ -204,7 +204,7 @@ fn discord_event_to_inbound_with_attachments(
     let content = if has_content {
         content
     } else {
-        "[附件]".to_string()
+        "[Attachment]".to_string()
     };
 
     let message_id = data
@@ -723,7 +723,7 @@ impl DiscordChannel {
                                                             client,
                                                             token,
                                                             &inbound.chat_id,
-                                                            "未配置聊天许可，请配置。",
+                                                            "Chat not in allowlist. Please configure allowlist.",
                                                         )
                                                         .await;
                                                         inbound.metadata["trigger_agent"] =

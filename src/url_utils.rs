@@ -100,6 +100,7 @@ mod tests {
 
     #[test]
     fn normalizes_idn_to_punycode() {
+        // IDN (internationalized domain name) with non-ASCII labels
         let u = "https://例子.中国/path";
         let out = normalize_http_url(u).unwrap();
         assert!(out.starts_with("https://xn--"));

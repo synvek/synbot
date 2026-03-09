@@ -496,7 +496,7 @@ impl EmailChannel {
                 let mut p = self.pending.write().await;
                 p.insert(chat_id.clone(), (from_addr.clone(), uid, tx));
             }
-            let content = if body.is_empty() { "(无正文)" } else { body.as_str() };
+            let content = if body.is_empty() { "(no body)" } else { body.as_str() };
             info!(
                 channel = %self.config.name,
                 uid,

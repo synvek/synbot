@@ -292,7 +292,7 @@ mod tests {
     #[test]
     fn truncation_handles_multibyte_utf8() {
         // Each CJK character is 3 bytes in UTF-8
-        let content = "中".repeat(200); // 600 bytes
+        let content = "中".repeat(200); // 200 × 3-byte UTF-8 chars = 600 bytes
         let max_size = 200;
         let result = smart_truncate(&content, max_size);
 
