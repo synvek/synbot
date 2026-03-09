@@ -10,7 +10,7 @@ Synbot is controlled via the `synbot` command. This page lists all subcommands a
 ## Global options
 
 - `-h`, `--help` — Print help.
-- `-V`, `--version` — Print version (e.g. `synbot 0.1.0`).
+- `-V`, `--version` — Print version (e.g. `synbot 0.7.1`).
 - `--root-dir <DIR>` — Root directory for this instance (config, roles, memory, sessions). Default: `~/.synbot`. Use different values to run multiple synbot instances with separate workspaces.
 
 ## Subcommands
@@ -51,7 +51,7 @@ synbot agent   # interactive (no -m)
 
 ### `synbot start` [options]
 
-Start the full daemon: channels (Telegram, Discord, Feishu), heartbeat, cron, and optional web dashboard. Loads config from the default root (`~/.synbot`) or from the directory given by `--root-dir`.
+Start the full daemon: channels (Telegram, Discord, Slack, Feishu, Email, Matrix), heartbeat, cron, and optional web dashboard. Loads config from the default root (`~/.synbot`) or from the directory given by `--root-dir`.
 
 | Option | Description |
 |--------|-------------|

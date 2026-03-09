@@ -42,7 +42,10 @@ Synbot 是一个用 Rust 编写的个人 AI 助手，灵感来源于 [nanobot](h
 ### 多渠道支持
 - **Telegram**: 通过 Bot API 支持
 - **Discord**: 通过 Discord Gateway 支持
+- **Slack**: Socket Mode，无需公网 URL
 - **飞书 (Feishu)**: 企业级消息支持
+- **Email**: IMAP 收信 + SMTP 回复
+- **Matrix**: 去中心化实时通信
 
 ### 工具系统
 - **文件系统工具**: 读取、写入、列出文件
@@ -51,6 +54,8 @@ Synbot 是一个用 Rust 编写的个人 AI 助手，灵感来源于 [nanobot](h
 - **消息工具**: 跨渠道发送消息
 - **审批工具**: 基于权限的审批工作流
 - **代码开发工具**: 项目扫描、代码上下文搜索、统一 diff 展示（配合 code_dev 技能）
+- **MCP 与插件**: MCP（Model Context Protocol）服务器、Extism Wasm 插件（Rust/C/C++/Go）
+- **记忆**: 每日记忆、长期记忆、SQLite 向量 + FTS5、自动压缩
 
 ### 工作流 (TurboWorkflow)
 - **可持久化**: 每步后保存状态，支持中断后恢复

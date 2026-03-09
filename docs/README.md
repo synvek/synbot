@@ -1,4 +1,4 @@
-﻿# Synbot Documentation (VitePress)
+# Synbot Documentation (VitePress)
 
 This directory contains the Synbot documentation built with [VitePress](https://vitepress.dev/).
 
@@ -9,22 +9,24 @@ docs/
 ├── .vitepress/              # VitePress configuration
 │   ├── config.js           # Site configuration
 │   ├── theme/              # Custom theme
-│   │   ├── index.js       # Theme entry point
-│   │   ├── styles/        # Custom styles
-│   │   ├── components/    # Vue components
+│   │   ├── index.js        # Theme entry point
+│   │   ├── styles/         # Custom styles
+│   │   ├── components/     # Vue components
 │   │   └── scripts/       # JavaScript files
-│   └── dist/              # Built site (generated)
-├── en/                     # English documentation
-│   ├── getting-started/   # Installation, configuration, etc.
-│   ├── user-guide/        # User guides
-│   ├── developer-guide/   # Developer documentation
-│   ├── examples/          # Examples
-│   └── index.md           # English homepage
-├── zh/                     # Chinese documentation
-│   └── ...                # Same structure as en/
-├── index.md               # Main landing page
-├── package.json           # Node.js dependencies
-└── README.md              # This file
+│   └── dist/               # Built site (generated)
+├── getting-started/        # English: installation, configuration, etc.
+├── user-guide/             # English: user guides
+├── developer-guide/        # English: developer documentation
+├── examples/                # English: examples
+├── zh/                     # Chinese documentation (same structure)
+│   ├── getting-started/
+│   ├── user-guide/
+│   ├── developer-guide/
+│   ├── examples/
+│   └── index.md            # Chinese homepage
+├── index.md                # Main landing page (English)
+├── package.json            # Node.js dependencies (if using VitePress)
+└── README.md               # This file
 ```
 
 ## Development

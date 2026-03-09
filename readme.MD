@@ -12,7 +12,7 @@
 
 ## Features
 
-- Single small protable execution program for deployment
+- Single small portable execution program for deployment
 
 - No Gateway required
 
@@ -130,16 +130,12 @@ On Windows, run `synbot sandbox setup` once as Administrator to add network rule
 
 ## Channels
 
+- Telegram
 - Discord
-
 - Slack
-
-- Feishu(飞书)
-
+- Feishu (飞书)
 - Email
-
 - Matrix
-
 - More are still in progress
 
 ## Providers

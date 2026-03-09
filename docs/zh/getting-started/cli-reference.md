@@ -10,7 +10,7 @@ Synbot 通过 `synbot` 命令控制。本文列出所有子命令与选项。
 ## 全局选项
 
 - `-h`, `--help` — 显示帮助。
-- `-V`, `--version` — 显示版本（如 `synbot 0.1.0`）。
+- `-V`, `--version` — 显示版本（如 `synbot 0.7.1`）。
 - `--root-dir <目录>` — 当前实例的根目录（配置、角色、记忆、会话等）。默认：`~/.synbot`。使用不同值可同时运行多个 synbot 实例，各自独立工作区。
 
 ## 子命令
@@ -51,7 +51,7 @@ synbot agent   # 交互模式（不加 -m）
 
 ### `synbot start` [选项]
 
-启动完整守护进程：渠道（Telegram、Discord、飞书）、心跳、定时任务及可选 Web 控制台。从默认根目录 `~/.synbot` 或通过 `--root-dir` 指定的目录加载配置。
+启动完整守护进程：渠道（Telegram、Discord、Slack、飞书、Email、Matrix）、心跳、定时任务及可选 Web 控制台。从默认根目录 `~/.synbot` 或通过 `--root-dir` 指定的目录加载配置。
 
 | 选项 | 说明 |
 |------|------|

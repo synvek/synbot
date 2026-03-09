@@ -129,16 +129,12 @@ synbot sandbox start
 
 ## 渠道
 
+- Telegram
 - Discord
-
 - Slack
-
 - 飞书 (Feishu)
-
 - Email
-
 - Matrix
-
 - 更多渠道开发中
 
 ## 模型提供商
