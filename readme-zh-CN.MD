@@ -135,6 +135,7 @@ synbot sandbox start
 - 飞书 (Feishu)
 - Email
 - Matrix
+- 钉钉 (DingTalk)
 - 更多渠道开发中
 
 ## 模型提供商

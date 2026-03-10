@@ -314,6 +314,7 @@ mod tests {
                 slack: vec![],
                 email: vec![],
                 matrix: vec![],
+                dingtalk: vec![],
             },
             providers: ProvidersConfig {
                 anthropic: ProviderEntry {

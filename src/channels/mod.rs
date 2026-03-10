@@ -6,6 +6,8 @@ pub mod email;
 pub mod feishu;
 pub mod feishu_api;
 pub mod feishu_ws;
+pub mod dingtalk;
+pub mod dingtalk_stream;
 pub mod factory;
 pub mod matrix;
 pub mod slack;

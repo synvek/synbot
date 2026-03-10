@@ -20,6 +20,7 @@ Synbot supports multiple messaging channels, allowing you to interact with the A
 - **Slack**: Team chat with **Socket Mode** (no public URL required)
 - **Email**: Poll IMAP for unread messages from a configured sender, reply via SMTP, and mark as read (configurable start time and poll interval; messages processed oldest-first).
 - **Matrix**: Decentralized real-time communication via the Matrix protocol (homeserver + username/password or access token).
+- **DingTalk (钉钉)**: Enterprise IM; Synbot uses **Stream mode** (self-implemented protocol) to receive robot messages and reply via **session webhook**. Single chat works without @; in groups only messages that **@ the robot** are delivered.
 
 ### Planned Support
 - WeChat
@@ -454,6 +455,48 @@ Synbot connects to a Matrix homeserver as a bot user, syncs room messages, and r
 - **groupMyName**: When set, in group rooms only messages that start with this mention (e.g. `@bot:example.org` or localpart) are processed; the mention is stripped before sending to the agent.
 
 **Note:** End-to-end encrypted (E2EE) rooms are supported for plain-text messages; the bot does not participate in E2EE by default.
+
+## DingTalk (钉钉)
+
+Synbot connects using **DingTalk Stream mode** with a **self-implemented protocol** (no third-party Rust SDK): it calls `POST /v1.0/gateway/connections/open`, opens a WebSocket with the returned ticket, subscribes to robot message callbacks, and replies by **POSTing to `sessionWebhook`** from each callback (session-scoped; expires — new user messages refresh the webhook).
+
+### Prerequisites
+
+1. Create an app in the [DingTalk Open Platform](https://open.dingtalk.com/) and add a **robot** capability.
+2. Enable **Stream mode** for the app so the server pushes callbacks over the long connection.
+3. Note the app's **Client ID** and **Client Secret** (OAuth; formerly AppKey/AppSecret).
+
+### Configuration
+
+`channels.dingtalk` is an **array** (like Matrix). Minimal example:
+
+```json
+{
+  "channels": {
+    "dingtalk": [
+      {
+        "name": "dingtalk",
+        "enabled": true,
+        "clientId": "YOUR_CLIENT_ID",
+        "clientSecret": "YOUR_CLIENT_SECRET",
+        "allowlist": [],
+        "enableAllowlist": false
+      }
+    ]
+  },
+  "mainChannel": "dingtalk"
+}
+```
+
+- **clientId** / **clientSecret**: From the open platform (required when enabled).
+- **allowlist**: Optional. When `enableAllowlist` is true, only conversations whose `chatId` matches an entry (use `conversationId` or sender id from DingTalk) are processed.
+- **Group chats**: Only messages that **@ the robot** are received by the platform.
+
+### Troubleshooting
+
+- Ensure the process can reach `api.dingtalk.com` (HTTPS) and the WebSocket host returned in `endpoint`.
+- If replies stop working, `sessionWebhook` may have expired; the user must send another message to obtain a fresh webhook.
+- In AppContainer/sandbox environments, WebSocket uses the same DNS path as other channels if `SYNBOT_IN_APP_SANDBOX` is set.
 
 ## Multi-Channel Configuration
 

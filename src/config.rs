@@ -173,6 +173,41 @@ fn default_matrix_name() -> String {
     "matrix".into()
 }
 
+/// DingTalk Stream robot — clientId/clientSecret from open platform; receives via Stream CALLBACK, replies via sessionWebhook.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct DingTalkConfig {
+    /// Unique channel name (default "dingtalk").
+    #[serde(default = "default_dingtalk_name")]
+    pub name: String,
+    #[serde(default)]
+    pub enabled: bool,
+    /// OAuth ClientID (formerly AppKey). Use this or appKey.
+    #[serde(default)]
+    pub client_id: String,
+    /// OAuth ClientSecret (formerly AppSecret). Use this or appSecret.
+    #[serde(default)]
+    pub client_secret: String,
+    /// Alias for clientId (console may show "AppKey"). Ignored if clientId is set.
+    #[serde(default)]
+    pub app_key: Option<String>,
+    /// Alias for clientSecret (console may show "AppSecret"). Ignored if clientSecret is set.
+    #[serde(default)]
+    pub app_secret: Option<String>,
+    #[serde(default)]
+    pub allowlist: Vec<AllowlistEntry>,
+    /// When true (default), only allowlist chats are accepted.
+    #[serde(default = "default_true")]
+    pub enable_allowlist: bool,
+    #[serde(default = "default_true")]
+    pub show_tool_calls: bool,
+}
+
+fn default_dingtalk_name() -> String {
+    "dingtalk".into()
+}
+
 /// Email account and transport settings (IMAP receive, SMTP send).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -244,6 +279,8 @@ pub struct ChannelsConfig {
     pub email: Vec<EmailConfig>,
     #[serde(default)]
     pub matrix: Vec<MatrixConfig>,
+    #[serde(default)]
+    pub dingtalk: Vec<DingTalkConfig>,
 }
 
 impl ChannelsConfig {
@@ -298,6 +335,14 @@ impl ChannelsConfig {
             .collect();
         if !matrix.is_empty() {
             out.push(("matrix".to_string(), matrix));
+        }
+        let dingtalk: Vec<serde_json::Value> = self
+            .dingtalk
+            .iter()
+            .map(|c| serde_json::to_value(c).unwrap_or_default())
+            .collect();
+        if !dingtalk.is_empty() {
+            out.push(("dingtalk".to_string(), dingtalk));
         }
         out
     }
@@ -1935,6 +1980,41 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
             });
         }
     }
+    for (i, c) in config.channels.dingtalk.iter().enumerate() {
+        if c.enabled {
+            let has_id = !c.client_id.trim().is_empty()
+                || c.app_key
+                    .as_deref()
+                    .map(|s| !s.trim().is_empty())
+                    .unwrap_or(false);
+            if !has_id {
+                errors.push(ValidationError {
+                    field: format!("channels.dingtalk[{}].clientId", i),
+                    value: String::new(),
+                    constraint: "must be non-empty when enabled (or set appKey)".into(),
+                });
+            }
+            let has_secret = !c.client_secret.trim().is_empty()
+                || c.app_secret
+                    .as_deref()
+                    .map(|s| !s.trim().is_empty())
+                    .unwrap_or(false);
+            if !has_secret {
+                errors.push(ValidationError {
+                    field: format!("channels.dingtalk[{}].clientSecret", i),
+                    value: String::new(),
+                    constraint: "must be non-empty when enabled (or set appSecret)".into(),
+                });
+            }
+        }
+        if !c.name.is_empty() && !all_channel_names.insert(c.name.clone()) {
+            errors.push(ValidationError {
+                field: format!("channels.dingtalk[{}].name", i),
+                value: c.name.clone(),
+                constraint: "channel name must be globally unique".into(),
+            });
+        }
+    }
 
     // --- Collect enabled channel names for main_channel validation ---
     let enabled_channels: Vec<String> = {
@@ -1965,6 +2045,11 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
             }
         }
         for c in &config.channels.matrix {
+            if c.enabled && !c.name.is_empty() {
+                ch.push(c.name.clone());
+            }
+        }
+        for c in &config.channels.dingtalk {
             if c.enabled && !c.name.is_empty() {
                 ch.push(c.name.clone());
             }

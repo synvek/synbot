@@ -136,6 +136,7 @@ On Windows, run `synbot sandbox setup` once as Administrator to add network rule
 - Feishu (飞书)
 - Email
 - Matrix
+- DingTalk (钉钉)
 - More are still in progress
 
 ## Providers
