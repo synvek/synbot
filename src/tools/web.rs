@@ -5,6 +5,7 @@
 //!   - SearxNG     — self-hosted JSON API, requires `searxng_url`
 //!   - Brave       — Brave Search REST API, requires `brave_api_key`
 //!   - Tavily      — Tavily Search API (https://tavily.com), requires `tavily_api_key`
+//!   - Firecrawl   — Firecrawl Search API (https://firecrawl.dev), requires `firecrawl_api_key`
 
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
@@ -185,6 +186,53 @@ async fn search_tavily(api_key: &str, query: &str, count: usize) -> Result<Vec<S
     Ok(results)
 }
 
+/// Firecrawl v2 Search API: POST /v2/search, returns data.web[] with title, description, url.
+async fn search_firecrawl(api_key: &str, query: &str, count: usize) -> Result<Vec<SearchResult>> {
+    let client = build_client()?;
+    let limit = count.min(100);
+
+    let body = serde_json::json!({
+        "query": query,
+        "limit": limit,
+        "sources": [{ "type": "web" }]
+    });
+
+    let resp = client
+        .post("https://api.firecrawl.dev/v2/search")
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {}", api_key.trim()))
+        .json(&body)
+        .send()
+        .await
+        .context("Firecrawl Search request failed")?
+        .json::<Value>()
+        .await
+        .context("Firecrawl Search response parse failed")?;
+
+    if !resp["success"].as_bool().unwrap_or(false) {
+        anyhow::bail!(
+            "Firecrawl Search API error: {}",
+            resp["error"].as_str().unwrap_or("unknown")
+        );
+    }
+
+    let results = resp["data"]["web"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .take(count)
+                .map(|r| SearchResult {
+                    title: r["title"].as_str().unwrap_or("").to_string(),
+                    url: r["url"].as_str().unwrap_or("").to_string(),
+                    snippet: r["description"].as_str().unwrap_or("").to_string(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(results)
+}
+
 // ---------------------------------------------------------------------------
 // Shared result type
 // ---------------------------------------------------------------------------
@@ -216,6 +264,8 @@ pub struct WebSearchTool {
     pub brave_api_key: String,
     /// Tavily API key (used when backend == Tavily)
     pub tavily_api_key: String,
+    /// Firecrawl API key (used when backend == Firecrawl)
+    pub firecrawl_api_key: String,
     /// SearxNG base URL (used when backend == SearxNG)
     pub searxng_url: String,
     /// Max results
@@ -230,6 +280,8 @@ impl WebSearchTool {
                 WebSearchBackend::Tavily
             } else if !cfg.brave_api_key.is_empty() {
                 WebSearchBackend::Brave
+            } else if !cfg.firecrawl_api_key.is_empty() {
+                WebSearchBackend::Firecrawl
             } else {
                 WebSearchBackend::DuckDuckGo
             }
@@ -240,6 +292,7 @@ impl WebSearchTool {
             backend,
             brave_api_key: cfg.brave_api_key.clone(),
             tavily_api_key: cfg.tavily_api_key.clone(),
+            firecrawl_api_key: cfg.firecrawl_api_key.clone(),
             searxng_url: cfg.searxng_url.clone(),
             count: cfg.search_count,
         }
@@ -300,6 +353,12 @@ impl DynTool for WebSearchTool {
                     anyhow::bail!("tavily_api_key is not configured");
                 }
                 search_tavily(&self.tavily_api_key, query, count).await?
+            }
+            WebSearchBackend::Firecrawl => {
+                if self.firecrawl_api_key.is_empty() {
+                    anyhow::bail!("firecrawl_api_key is not configured");
+                }
+                search_firecrawl(&self.firecrawl_api_key, query, count).await?
             }
         };
 

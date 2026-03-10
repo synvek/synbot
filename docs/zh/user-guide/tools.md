@@ -138,6 +138,7 @@ execute_script {
 - **SearxNG**：自建搜索；将 `searchBackend` 设为 `"searxNG"` 并配置 `searxngUrl`。
 - **Brave**：Brave Search API；将 `searchBackend` 设为 `"brave"` 并配置 `braveApiKey`。
 - **Tavily**：Tavily Search API（https://tavily.com）；将 `searchBackend` 设为 `"tavily"` 并配置 `tavilyApiKey`。
+- **Firecrawl**：Firecrawl Search API（https://firecrawl.dev）；将 `searchBackend` 设为 `"firecrawl"` 并配置 `firecrawlApiKey`。
 
 **参数**：
 - `query` (字符串)：搜索查询
@@ -389,6 +390,19 @@ calculate {
     "web": {
       "searchBackend": "tavily",
       "tavilyApiKey": "YOUR_TAVILY_API_KEY"
+    }
+  }
+}
+```
+
+使用 Firecrawl Search API：
+
+```json
+{
+  "tools": {
+    "web": {
+      "searchBackend": "firecrawl",
+      "firecrawlApiKey": "YOUR_FIRECRAWL_API_KEY"
     }
   }
 }

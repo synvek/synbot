@@ -621,6 +621,8 @@ pub enum WebSearchBackend {
     Brave,
     /// Tavily Search API — requires `tavily_api_key` (https://tavily.com).
     Tavily,
+    /// Firecrawl Search API — requires `firecrawl_api_key` (https://firecrawl.dev).
+    Firecrawl,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -642,6 +644,10 @@ pub struct WebToolConfig {
     /// SearxNG instance base URL, e.g. "https://searx.example.com".
     #[serde(default)]
     pub searxng_url: String,
+
+    /// Firecrawl API key (used when backend == Firecrawl). Get one at https://firecrawl.dev
+    #[serde(default)]
+    pub firecrawl_api_key: String,
 
     /// Maximum results to return (default 5).
     #[serde(default = "default_search_count")]

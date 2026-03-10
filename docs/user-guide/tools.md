@@ -142,6 +142,7 @@ Search the web and return relevant results (title, URL, snippet). Supports multi
 - **SearxNG**: Self-hosted search; set `searchBackend` to `"searxNG"` and configure `searxngUrl`.
 - **Brave**: Brave Search API; set `searchBackend` to `"brave"` and configure `braveApiKey`.
 - **Tavily**: Tavily Search API (https://tavily.com); set `searchBackend` to `"tavily"` and configure `tavilyApiKey`.
+- **Firecrawl**: Firecrawl Search API (https://firecrawl.dev); set `searchBackend` to `"firecrawl"` and configure `firecrawlApiKey`.
 
 **Parameters**:
 - `query` (string): Search query
@@ -393,6 +394,19 @@ With Tavily Search API:
     "web": {
       "searchBackend": "tavily",
       "tavilyApiKey": "YOUR_TAVILY_API_KEY"
+    }
+  }
+}
+```
+
+With Firecrawl Search API:
+
+```json
+{
+  "tools": {
+    "web": {
+      "searchBackend": "firecrawl",
+      "firecrawlApiKey": "YOUR_FIRECRAWL_API_KEY"
     }
   }
 }

@@ -497,6 +497,7 @@ For selective behavior (some commands allowed without approval, some require app
       "searchBackend": "duckDuckGo",
       "braveApiKey": "",
       "tavilyApiKey": "",
+      "firecrawlApiKey": "",
       "searxngUrl": "https://searx.example.com",
       "searchCount": 5
     }
@@ -504,9 +505,10 @@ For selective behavior (some commands allowed without approval, some require app
 }
 ```
 
-- **searchBackend**: `"duckDuckGo"` (default, no API key), `"searxNG"` (self-hosted; set `searxngUrl`), `"brave"` (requires `braveApiKey`), or `"tavily"` (requires `tavilyApiKey`)
+- **searchBackend**: `"duckDuckGo"` (default, no API key), `"searxNG"` (self-hosted; set `searxngUrl`), `"brave"` (requires `braveApiKey`), `"tavily"` (requires `tavilyApiKey`), or `"firecrawl"` (requires `firecrawlApiKey`)
 - **braveApiKey**: Brave Search API key when using `"brave"`
 - **tavilyApiKey**: Tavily Search API key when using `"tavily"` (get one at https://app.tavily.com/)
+- **firecrawlApiKey**: Firecrawl API key when using `"firecrawl"` (get one at https://firecrawl.dev)
 - **searxngUrl**: SearxNG instance URL when using `"searxNG"`
 - **searchCount**: Max number of search results (default 5)
 

@@ -244,6 +244,7 @@
         "mcp": null,
         "web": {
           "braveApiKey": "",
+          "firecrawlApiKey": "",
           "searchBackend": "duckDuckGo",
           "searchCount": 0,
           "searxngUrl": ""
@@ -1781,6 +1782,7 @@
         "web": {
           "default": {
             "braveApiKey": "",
+            "firecrawlApiKey": "",
             "searchBackend": "duckDuckGo",
             "searchCount": 0,
             "searxngUrl": ""
@@ -1913,6 +1915,13 @@
           "enum": [
             "tavily"
           ]
+        },
+        {
+          "description": "Firecrawl Search API — requires `firecrawl_api_key` (https://firecrawl.dev).",
+          "type": "string",
+          "enum": [
+            "firecrawl"
+          ]
         }
       ]
     },
@@ -1926,6 +1935,11 @@
         },
         "tavilyApiKey": {
           "description": "Tavily Search API key (used when searchBackend is tavily). Get one at https://app.tavily.com/",
+          "default": "",
+          "type": "string"
+        },
+        "firecrawlApiKey": {
+          "description": "Firecrawl API key (used when searchBackend is firecrawl). Get one at https://firecrawl.dev",
           "default": "",
           "type": "string"
         },
