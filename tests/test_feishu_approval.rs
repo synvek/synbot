@@ -24,6 +24,7 @@ fn create_test_channel(
         enabled: true,
         show_tool_calls: true,
         group_my_name: None,
+        default_agent: "main".to_string(),
     };
     
     let mut channel = FeishuChannel::new(config, inbound_tx, outbound_rx, true, 500, None);

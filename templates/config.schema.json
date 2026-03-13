@@ -608,6 +608,11 @@
         "token": {
           "default": "",
           "type": "string"
+        },
+        "defaultAgent": {
+          "description": "Agent to use for this channel (e.g. \"main\", \"dev\"). Default \"main\".",
+          "default": "main",
+          "type": "string"
         }
       }
     },
@@ -654,6 +659,11 @@
           "description": "When true (default), push tool execution progress to this channel.",
           "default": true,
           "type": "boolean"
+        },
+        "defaultAgent": {
+          "description": "Agent to use for this channel (e.g. \"main\", \"dev\"). Default \"main\".",
+          "default": "main",
+          "type": "string"
         },
         "smtp": {
           "description": "SMTP send server (host, port, username, password).",
@@ -804,6 +814,11 @@
           "description": "When true (default), push tool execution progress to this channel.",
           "default": true,
           "type": "boolean"
+        },
+        "defaultAgent": {
+          "description": "Agent to use for this channel (e.g. \"main\", \"dev\"). Default \"main\".",
+          "default": "main",
+          "type": "string"
         }
       }
     },
@@ -1066,6 +1081,11 @@
         "username": {
           "description": "Bot user ID (e.g. \"@bot:example.org\") or localpart for login.",
           "default": "",
+          "type": "string"
+        },
+        "defaultAgent": {
+          "description": "Agent to use for this channel (e.g. \"main\", \"dev\"). Default \"main\".",
+          "default": "main",
           "type": "string"
         }
       }
@@ -1592,6 +1612,11 @@
           "description": "Bot token (xoxb-...) for Web API (e.g. chat.postMessage). Required for sending messages.",
           "default": "",
           "type": "string"
+        },
+        "defaultAgent": {
+          "description": "Agent to use for this channel (e.g. \"main\", \"dev\"). Default \"main\".",
+          "default": "main",
+          "type": "string"
         }
       }
     },
@@ -1640,6 +1665,11 @@
         },
         "token": {
           "default": "",
+          "type": "string"
+        },
+        "defaultAgent": {
+          "description": "Agent to use for this channel (e.g. \"main\", \"dev\"). Default \"main\".",
+          "default": "main",
           "type": "string"
         }
       }

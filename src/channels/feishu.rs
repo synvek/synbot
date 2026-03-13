@@ -380,6 +380,7 @@ async fn attempt_ws_connection(
     channel_name: String,
     enable_allowlist: bool,
     group_my_name: Option<String>,
+    default_agent: String,
     app_id: String,
     app_secret: String,
     approval_manager: Option<Arc<ApprovalManager>>,
@@ -412,6 +413,7 @@ async fn attempt_ws_connection(
         enable_allowlist,
         group_my_name: group_my_name.clone(),
         show_tool_calls: true,
+        default_agent: default_agent.clone(),
     };
 
     info!("Feishu WebSocket connecting...");
@@ -553,6 +555,7 @@ async fn process_im_message_receive(
                                             "message_id": message_id,
                                             "message_type": message_type,
                                             "chat_type": chat_type,
+                                            "default_agent": config.default_agent,
                                         }),
                                     })
                                     .await;
@@ -569,6 +572,7 @@ async fn process_im_message_receive(
                                             "message_id": message_id,
                                             "message_type": message_type,
                                             "chat_type": chat_type,
+                                            "default_agent": config.default_agent,
                                         }),
                                     })
                                     .await;
@@ -588,6 +592,7 @@ async fn process_im_message_receive(
                                         "message_type": message_type,
                                         "chat_type": chat_type,
                                         "download_error": e.to_string(),
+                                        "default_agent": config.default_agent,
                                     }),
                                 })
                                 .await;
@@ -648,6 +653,7 @@ async fn process_im_message_receive(
                                 "chat_type": chat_type,
                                 "trigger_agent": false,
                                 "group": true,
+                                "default_agent": config.default_agent,
                             }),
                         });
                     return;
@@ -683,6 +689,7 @@ async fn process_im_message_receive(
                         "message_type": message_type,
                         "chat_type": chat_type,
                         "trigger_agent": false,
+                        "default_agent": config.default_agent,
                     }),
                 });
                 return;
@@ -710,6 +717,7 @@ async fn process_im_message_receive(
                                 "chat_type": chat_type,
                                 "trigger_agent": false,
                                 "group": true,
+                                "default_agent": config.default_agent,
                             }),
                         });
                         return;
@@ -757,7 +765,10 @@ async fn process_im_message_receive(
                     }
                 }
             }
-            let mut meta = serde_json::json!({ "pending_approval_request_id": request_id });
+            let mut meta = serde_json::json!({
+                "pending_approval_request_id": request_id,
+                "default_agent": config.default_agent,
+            });
             if is_group_meta {
                 meta["group"] = serde_json::json!(true);
             }
@@ -778,6 +789,7 @@ async fn process_im_message_receive(
         "message_id": message_id,
         "message_type": message_type,
         "chat_type": chat_type,
+        "default_agent": config.default_agent,
     });
     if is_group_meta {
         meta["group"] = serde_json::json!(true);
@@ -992,6 +1004,7 @@ impl Channel for FeishuChannel {
                 self.config.name.clone(),
                 self.config.enable_allowlist,
                 self.config.group_my_name.clone(),
+                self.config.default_agent.clone(),
                 self.config.app_id.clone(),
                 self.config.app_secret.clone(),
                 self.approval_manager.clone(),

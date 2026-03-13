@@ -435,6 +435,7 @@ impl DiscordChannel {
         inbound_tx: &mpsc::Sender<InboundMessage>,
         allowlist: &[AllowlistEntry],
         channel_name: &str,
+        default_agent: &str,
         enable_allowlist: bool,
         group_my_name: Option<&str>,
         resume: &mut ResumeState,
@@ -626,6 +627,12 @@ impl DiscordChannel {
                                             discord_event_to_inbound_with_attachments(d)
                                         {
                                             inbound.channel = channel_name.to_string();
+                                            if let Some(obj) = inbound.metadata.as_object_mut() {
+                                                obj.insert(
+                                                    "default_agent".into(),
+                                                    serde_json::Value::String(default_agent.to_string()),
+                                                );
+                                            }
                                             // Download attachments to workspace when configured
                                             if let Some(ws) = workspace_dir {
                                                 for (url, filename) in attachments {
@@ -1000,6 +1007,7 @@ impl Channel for DiscordChannel {
                 &self.inbound_tx,
                 &self.config.allowlist,
                 &self.config.name,
+                &self.config.default_agent,
                 self.config.enable_allowlist,
                 self.config.group_my_name.as_deref(),
                 &mut resume,

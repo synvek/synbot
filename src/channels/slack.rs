@@ -190,6 +190,7 @@ struct SlackPushState {
 struct SlackPushStateInner {
     inbound_tx: mpsc::Sender<InboundMessage>,
     channel_name: String,
+    default_agent: String,
     allowlist: Vec<AllowlistEntry>,
     enable_allowlist: bool,
     group_my_name: Option<String>,
@@ -277,6 +278,7 @@ impl SlackChannel {
             inner: Arc::new(SlackPushStateInner {
                 inbound_tx: self.inbound_tx.clone(),
                 channel_name: self.config.name.clone(),
+                default_agent: self.config.default_agent.clone(),
                 allowlist: self.config.allowlist.clone(),
                 enable_allowlist: self.config.enable_allowlist,
                 group_my_name: self.config.group_my_name.clone(),
@@ -366,6 +368,7 @@ async fn slack_push_events_handler(
     if let Some(inbound) = slack_push_to_inbound(
         &event,
         &state_inner.channel_name,
+        &state_inner.default_agent,
         &state_inner.allowlist,
         state_inner.enable_allowlist,
         state_inner.group_my_name.as_deref(),
@@ -406,6 +409,7 @@ fn slack_push_event_type_name(event: &SlackPushEventCallback) -> &'static str {
 async fn slack_push_to_inbound(
     event: &SlackPushEventCallback,
     channel_name: &str,
+    default_agent: &str,
     allowlist: &[AllowlistEntry],
     enable_allowlist: bool,
     group_my_name: Option<&str>,
@@ -571,6 +575,7 @@ async fn slack_push_to_inbound(
         metadata: serde_json::json!({
             "event_id": format!("{}", event.event_id.0),
             "team_id": format!("{}", event.team_id.0),
+            "default_agent": default_agent,
         }),
     })
 }

@@ -140,10 +140,12 @@ impl Channel for DingTalkChannel {
 
         let http_loop = self.http.clone();
         // Block here forever; run_forever internally reconnects.
+        let default_agent = self.config.default_agent.clone();
         dingtalk_stream::run_forever(http_loop, client_id, client_secret, move |data_str| {
                 let inbound_tx = inbound_tx.clone();
                 let sessions = Arc::clone(&sessions);
                 let channel_name = channel_name.clone();
+                let default_agent = default_agent.clone();
                 let allowlist_enforce = allowlist_enforce;
                 let allowlist = allowlist.clone();
                 tokio::spawn(async move {
@@ -184,7 +186,9 @@ impl Channel for DingTalkChannel {
                         };
                         sessions.write().await.insert(conversation_id.clone(), entry);
                     }
-                    let mut metadata = serde_json::json!({});
+                    let mut metadata = serde_json::json!({
+                        "default_agent": default_agent,
+                    });
                     if let Some(ref mid) = data.msg_id {
                         metadata["msgId"] = serde_json::Value::String(mid.clone());
                     }

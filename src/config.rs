@@ -44,6 +44,9 @@ pub struct TelegramConfig {
     /// When true (default), push tool execution progress to this channel.
     #[serde(default = "default_true")]
     pub show_tool_calls: bool,
+    /// Agent to use for this channel (e.g. "main", "dev"). Default "main".
+    #[serde(default = "default_channel_agent")]
+    pub default_agent: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -68,6 +71,9 @@ pub struct DiscordConfig {
     /// When true (default), push tool execution progress to this channel.
     #[serde(default = "default_true")]
     pub show_tool_calls: bool,
+    /// Agent to use for this channel (e.g. "main", "dev"). Default "main".
+    #[serde(default = "default_channel_agent")]
+    pub default_agent: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -94,6 +100,9 @@ pub struct FeishuConfig {
     /// When true (default), push tool execution progress to this channel.
     #[serde(default = "default_true")]
     pub show_tool_calls: bool,
+    /// Agent to use for this channel (e.g. "main", "dev"). Default "main".
+    #[serde(default = "default_channel_agent")]
+    pub default_agent: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -122,10 +131,17 @@ pub struct SlackConfig {
     /// When true (default), push tool execution progress to this channel.
     #[serde(default = "default_true")]
     pub show_tool_calls: bool,
+    /// Agent to use for this channel (e.g. "main", "dev"). Default "main".
+    #[serde(default = "default_channel_agent")]
+    pub default_agent: String,
 }
 
 fn default_telegram_name() -> String {
     "telegram".into()
+}
+
+fn default_channel_agent() -> String {
+    "main".into()
 }
 fn default_discord_name() -> String {
     "discord".into()
@@ -167,6 +183,9 @@ pub struct MatrixConfig {
     pub group_my_name: Option<String>,
     #[serde(default = "default_true")]
     pub show_tool_calls: bool,
+    /// Agent to use for this channel (e.g. "main", "dev"). Default "main".
+    #[serde(default = "default_channel_agent")]
+    pub default_agent: String,
 }
 
 fn default_matrix_name() -> String {
@@ -202,6 +221,9 @@ pub struct DingTalkConfig {
     pub enable_allowlist: bool,
     #[serde(default = "default_true")]
     pub show_tool_calls: bool,
+    /// Agent to use for this channel (e.g. "main", "dev"). Default "main".
+    #[serde(default = "default_channel_agent")]
+    pub default_agent: String,
 }
 
 fn default_dingtalk_name() -> String {
@@ -253,6 +275,9 @@ pub struct EmailConfig {
     /// When true (default), push tool execution progress to this channel.
     #[serde(default = "default_true")]
     pub show_tool_calls: bool,
+    /// Agent to use for this channel (e.g. "main", "dev"). Default "main".
+    #[serde(default = "default_channel_agent")]
+    pub default_agent: String,
 }
 
 fn default_email_name() -> String {

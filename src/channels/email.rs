@@ -513,7 +513,9 @@ impl EmailChannel {
                     content: content.to_string(),
                     timestamp: chrono::Utc::now(),
                     media: vec![],
-                    metadata: serde_json::json!({}),
+                    metadata: serde_json::json!({
+                        "default_agent": self.config.default_agent,
+                    }),
                 })
                 .await;
             match tokio::time::timeout(std::time::Duration::from_secs(600), rx).await {

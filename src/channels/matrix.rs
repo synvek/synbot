@@ -206,6 +206,7 @@ impl Channel for MatrixChannel {
         let client = self.ensure_client().await?;
 
         let channel_name = self.config.name.clone();
+        let default_agent = self.config.default_agent.clone();
         let allowlist = self.config.allowlist.clone();
         let enable_allowlist = self.config.enable_allowlist;
         let group_my_name = self.config.group_my_name.clone();
@@ -214,6 +215,7 @@ impl Channel for MatrixChannel {
         client.add_event_handler(
             move |event: SyncRoomMessageEvent, room: Room| {
                 let channel_name = channel_name.clone();
+                let default_agent = default_agent.clone();
                 let allowlist = allowlist.clone();
                 let enable_allowlist = enable_allowlist;
                 let group_my_name = group_my_name.clone();
@@ -279,6 +281,7 @@ impl Channel for MatrixChannel {
                         media: vec![],
                         metadata: serde_json::json!({
                             "event_id": event.event_id.to_string(),
+                            "default_agent": default_agent,
                         }),
                     };
                     if let Err(e) = inbound_tx.send(inbound).await {

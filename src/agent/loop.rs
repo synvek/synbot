@@ -456,11 +456,27 @@ impl AgentLoop {
         Ok(Some((handle, token, session_key.to_string())))
     }
 
-    /// Resolve session key used for conversation history (agent:main:channel:scope:id).
+    /// Resolve the default agent id for this message (from channel's default_agent in metadata, or "main").
+    fn default_agent_for_msg(&self, msg: &InboundMessage) -> String {
+        let id = msg
+            .metadata
+            .get("default_agent")
+            .and_then(|v| v.as_str())
+            .unwrap_or("main")
+            .trim();
+        if id.is_empty() || !self.agent_registry.contains(id) {
+            "main".to_string()
+        } else {
+            id.to_string()
+        }
+    }
+
+    /// Resolve session key used for conversation history (agent:channel:scope:id).
     async fn resolve_history_session_key(&self, msg: &InboundMessage) -> Option<String> {
+        let agent_id = self.default_agent_for_msg(msg);
         let session_id = {
             let sm = self.session_state.session_manager.write().await;
-            sm.resolve_session("main", &msg.channel, &msg.chat_id, &msg.metadata)
+            sm.resolve_session(&agent_id, &msg.channel, &msg.chat_id, &msg.metadata)
         };
         Some(session_id.format())
     }
@@ -597,13 +613,13 @@ impl AgentLoop {
         })
     }
 
-    /// Append the message to the main agent's session and persist to disk, without running completion.
+    /// Append the message to the channel's default agent session and persist to disk, without running completion.
     /// Used when the chat is not in allowlist or when it's a group message not directed at the bot.
     async fn save_message_only(&mut self, msg: &InboundMessage) -> Result<()> {
-        let agent_id = "main";
+        let agent_id = self.default_agent_for_msg(msg);
         let session_id = {
             let sm = self.session_state.session_manager.write().await;
-            sm.resolve_session(agent_id, &msg.channel, &msg.chat_id, &msg.metadata)
+            sm.resolve_session(&agent_id, &msg.channel, &msg.chat_id, &msg.metadata)
         };
         let session_key = session_id.format();
 
@@ -661,7 +677,7 @@ impl AgentLoop {
     ) -> Result<()> {
         for directive in directives {
             let agent_id = match &directive.target {
-                None => "main".to_string(),
+                None => self.default_agent_for_msg(msg),
                 Some(name) => {
                     if !self.agent_registry.contains(name) {
                         self.send_unknown_agent_error(msg, name).await;
@@ -829,7 +845,7 @@ impl AgentLoop {
 
         for directive in directives {
             let agent_id = match &directive.target {
-                None => "main".to_string(),
+                None => self.default_agent_for_msg(msg),
                 Some(name) => {
                     if !self.agent_registry.contains(name) {
                         self.send_unknown_agent_error(msg, name).await;

@@ -372,6 +372,7 @@ impl Channel for TelegramChannel {
                                                     metadata: serde_json::json!({
                                                         "trigger_agent": false,
                                                         "group": true,
+                                                        "default_agent": self.config.default_agent,
                                                     }),
                                                 }).await;
                                                 continue;
@@ -410,7 +411,10 @@ impl Channel for TelegramChannel {
                                                 content: text.clone(),
                                                 timestamp: chrono::Utc::now(),
                                                 media: vec![],
-                                                metadata: serde_json::json!({ "trigger_agent": false }),
+                                                metadata: serde_json::json!({
+                                                    "trigger_agent": false,
+                                                    "default_agent": self.config.default_agent,
+                                                }),
                                             }).await;
                                             continue;
                                         }
@@ -438,6 +442,7 @@ impl Channel for TelegramChannel {
                                                         metadata: serde_json::json!({
                                                             "trigger_agent": false,
                                                             "group": true,
+                                                            "default_agent": self.config.default_agent,
                                                         }),
                                                     }).await;
                                                     continue;
@@ -457,7 +462,8 @@ impl Channel for TelegramChannel {
                                 if let Some((request_id, _chat_id_str)) = self.take_pending_approval(&sender).await {
                                     let mut meta = serde_json::json!({
                                         "trigger_agent": true,
-                                        "pending_approval_request_id": request_id
+                                        "pending_approval_request_id": request_id,
+                                        "default_agent": self.config.default_agent,
                                     });
                                     if is_group_meta {
                                         meta["group"] = serde_json::json!(true);
@@ -474,7 +480,10 @@ impl Channel for TelegramChannel {
                                     continue;
                                 }
                                 // Normal message
-                                let mut meta = serde_json::json!({ "trigger_agent": true });
+                                let mut meta = serde_json::json!({
+                                    "trigger_agent": true,
+                                    "default_agent": self.config.default_agent,
+                                });
                                 if is_group_meta {
                                     meta["group"] = serde_json::json!(true);
                                 }
