@@ -60,18 +60,17 @@ impl DynTool for MessageTool {
 
         let media_len = media.len();
         let empty_media = media.is_empty();
-        let msg = OutboundMessage::chat(
-            channel,
-            chat_id,
-            content,
-            media,
-            None,
-        );
-        let _ = self.outbound_tx.send(msg);
-        if empty_media{
+        // When files are present, do not send here: the agent loop will attach them to the final
+        // reply and send one message (avoids duplicate and ensures channels like DingTalk get
+        // text + files in a single outbound message).
+        if empty_media {
+            let msg = OutboundMessage::chat(channel, chat_id, content, media, None);
+            let _ = self.outbound_tx.send(msg);
+        }
+        if empty_media {
             Ok("Message sent.".into())
         } else {
-            Ok(format!("Message sent with {} file(s).", media_len))
+            Ok(format!("Message sent with {} file(s) (will be delivered with your next reply).", media_len))
         }
     }
 }

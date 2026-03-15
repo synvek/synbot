@@ -224,6 +224,9 @@ pub struct DingTalkConfig {
     /// Agent to use for this channel (e.g. "main", "dev"). Default "main".
     #[serde(default = "default_channel_agent")]
     pub default_agent: String,
+    /// Robot code from open platform (机器人 → robotCode). Required for file/image download API if callback omits it.
+    #[serde(default)]
+    pub robot_code: String,
 }
 
 fn default_dingtalk_name() -> String {

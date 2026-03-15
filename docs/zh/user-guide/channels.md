@@ -434,6 +434,11 @@ Synbot 通过 **钉钉 Stream 模式** 接入，协议为**项目内自研实现
 - **allowlist**：可选。`enableAllowlist` 为 true 时，仅当会话 id（可用回调中的 `conversationId` 或发送者 id）与 allowlist 中 `chatId` 匹配时才处理。
 - **群聊**：平台仅推送 **@ 机器人** 的消息。
 
+### 文件收发（与飞书类似）
+
+- **接收**：单聊里用户发**文件/图/视频/语音**时，Synbot 调用 `messageFiles/download`（请求体需 **`robotCode`**；一般 Stream 回调 JSON 里带 `robotCode`，若没有请在配置里填 **`robotCode`**，与开放平台 **应用 → 机器人 → robotCode** 一致），文件保存到 **`mainAgent.workspace`**。群内 @ 机器人按钉钉规则**收不到**文件类消息，请**单聊**发文件。
+- **发送**：agent 回复中带 **`media` 文件路径**时，Synbot 会先上传再向 **sessionWebhook** 发送文件/图片消息。**注意**：钉钉文档标明会话 Webhook **仅支持文本和 Markdown**，文件/图片消息可能返回 200 但**客户端不展示**。Synbot 会额外发一条文字说明；若需在钉钉内真正收到文件，需通过其他方式（如其他渠道或人工获取工作区文件）。
+
 ### 排障
 
 - 确保本机可访问 `api.dingtalk.com` 及返回的 WebSocket `endpoint`。

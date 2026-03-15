@@ -39,6 +39,7 @@ impl crate::channels::ChannelFactory for DingTalkChannelFactory {
             ctx.outbound_rx,
             ctx.show_tool_calls,
             ctx.tool_result_preview_chars,
+            ctx.workspace,
         );
         Ok(Box::new(ch))
     }

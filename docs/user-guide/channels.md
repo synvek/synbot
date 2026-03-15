@@ -492,6 +492,11 @@ Synbot connects using **DingTalk Stream mode** with a **self-implemented protoco
 - **allowlist**: Optional. When `enableAllowlist` is true, only conversations whose `chatId` matches an entry (use `conversationId` or sender id from DingTalk) are processed.
 - **Group chats**: Only messages that **@ the robot** are received by the platform.
 
+### Files (like Feishu)
+
+- **Receive**: In **1:1 chat with the robot**, when the user sends a **file, picture, video, or audio**, Synbot downloads it via DingTalk’s `messageFiles/download` API (needs **`robotCode`** from the callback; if yours is missing, set **`robotCode`** on the channel to the value from **Open Platform → your app → Robot → robotCode**), saves under **`mainAgent.workspace`**, and passes the path to the agent. **Group @-robot does not receive file/video/voice** per DingTalk—use single chat.
+- **Send**: When the agent replies with **file paths** in `media`, Synbot uploads the file and POSTs a file/image message to **sessionWebhook**. **Note:** Per DingTalk docs, sessionWebhook only supports **text and Markdown**; file/image messages may be accepted (HTTP 200) but **are not displayed** in the client. Synbot will also send a short text note explaining this. For actual file delivery in DingTalk you may need another channel or manual transfer.
+
 ### Troubleshooting
 
 - Ensure the process can reach `api.dingtalk.com` (HTTPS) and the WebSocket host returned in `endpoint`.

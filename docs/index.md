@@ -18,7 +18,7 @@ hero:
 
 features:
   - title: Multi-channel Support
-    details: Connect with Telegram, Discord, Feishu (飞书), Matrix, Slack, and Email for seamless communication across platforms.
+    details: Connect with Telegram, Discord, Feishu(飞书), Dingtalk(钉钉), Matrix, Slack, and Email for seamless communication across platforms.
     icon: 🗨️
   - title: Powerful Tool System
     details: Extensible tool framework with built-in tools for filesystem, shell, web, and more.

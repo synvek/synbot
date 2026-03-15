@@ -1159,6 +1159,8 @@ async fn run_completion_loop(
 ) -> Result<u32> {
     let message_ctx = Some((channel, chat_id, sender_id, session_id));
     let mut iterations = 0u32;
+    /// Media paths from "message" tool calls in this run; sent with the final reply so channels (e.g. DingTalk) get one message with text + files.
+    let mut pending_media = Vec::<String>::new();
 
     loop {
         if let Some(token) = cancel {
@@ -1277,6 +1279,15 @@ async fn run_completion_loop(
                 AssistantContent::ToolCall(tc) => {
                     has_tool_calls = true;
                     assistant_contents.push(content.clone());
+                    if tc.function.name == "message" {
+                        if let Some(arr) = tc.function.arguments.get("files").and_then(|a| a.as_array()) {
+                            for v in arr {
+                                if let Some(s) = v.as_str().filter(|x| !x.trim().is_empty()) {
+                                    pending_media.push(s.to_string());
+                                }
+                            }
+                        }
+                    }
                     let args = tc.function.arguments.clone();
                     let args_str = serde_json::to_string(&args).unwrap_or_else(|_| "{}".to_string());
                     let args_preview = if args_str.len() > 200 {
@@ -1361,13 +1372,15 @@ async fn run_completion_loop(
 
         if !has_tool_calls {
             let reply = text_parts.join("");
-            if !reply.is_empty() {
-                history.push(Message::assistant(&reply));
+            if !reply.is_empty() || !pending_media.is_empty() {
+                if !reply.is_empty() {
+                    history.push(Message::assistant(&reply));
+                }
                 let out_msg = OutboundMessage::chat(
                     channel.to_string(),
                     chat_id.to_string(),
                     reply.clone(),
-                    vec![],
+                    pending_media.clone(),
                     None,
                 );
                 if let Some(ref h) = hooks {

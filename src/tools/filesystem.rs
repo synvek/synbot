@@ -70,6 +70,18 @@ fn resolve_path(path: &str, workspace: &Path, restrict: bool) -> anyhow::Result<
     Ok(p)
 }
 
+/// Extensions that are typically binary; read_file returns file info instead of UTF-8 content.
+fn is_likely_binary_extension(ext: &str) -> bool {
+    matches!(
+        ext.to_lowercase().as_str(),
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" | "svg"
+            | "pdf" | "zip" | "rar" | "7z" | "tar" | "gz"
+            | "mp3" | "mp4" | "wav" | "ogg" | "webm" | "avi" | "mov"
+            | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx"
+            | "woff" | "woff2" | "ttf" | "otf" | "eot"
+    )
+}
+
 // ---- ReadFile ----
 
 pub struct ReadFileTool {
@@ -80,13 +92,33 @@ pub struct ReadFileTool {
 #[async_trait::async_trait]
 impl DynTool for ReadFileTool {
     fn name(&self) -> &str { "read_file" }
-    fn description(&self) -> &str { "Read the contents of a file." }
+    fn description(&self) -> &str { "Read the contents of a file. For binary files (e.g. png, jpg, pdf), returns file type and size instead of content." }
     fn parameters_schema(&self) -> Value {
         json!({"type":"object","properties":{"path":{"type":"string"}},"required":["path"]})
     }
     async fn call(&self, args: Value) -> anyhow::Result<String> {
         let path = resolve_path(args["path"].as_str().unwrap_or(""), &self.workspace, self.restrict)?;
         info!(path = %path.display(), "read_file");
+        let ext = path
+            .extension()
+            .map(|e| e.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if is_likely_binary_extension(&ext) {
+            let meta = tokio::fs::metadata(&path).await?;
+            let size = meta.len();
+            let mime_hint = match ext.to_lowercase().as_str() {
+                "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" => "image",
+                "pdf" => "document (PDF)",
+                "mp3" | "wav" | "ogg" => "audio",
+                "mp4" | "webm" | "avi" | "mov" => "video",
+                "zip" | "rar" | "7z" | "tar" | "gz" => "archive",
+                _ => "binary",
+            };
+            return Ok(format!(
+                "Binary file ({}), size: {} bytes. Content is not text; use get_file_info for metadata.",
+                mime_hint, size
+            ));
+        }
         Ok(tokio::fs::read_to_string(&path).await?)
     }
 }
@@ -288,7 +320,13 @@ impl DynTool for ReadMultipleFilesTool {
             if path_str.is_empty() { continue; }
             let path = resolve_path(path_str, &self.workspace, self.restrict)?;
             info!(path = %path.display(), "read_multiple_files");
-            let content = tokio::fs::read_to_string(&path).await?;
+            let ext = path.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
+            let content = if is_likely_binary_extension(&ext) {
+                let meta = tokio::fs::metadata(&path).await?;
+                format!("[Binary file, {} bytes; use get_file_info for metadata.]", meta.len())
+            } else {
+                tokio::fs::read_to_string(&path).await?
+            };
             if i > 0 {
                 out.push(String::new());
             }
