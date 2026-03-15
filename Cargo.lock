@@ -6136,7 +6136,7 @@ dependencies = [
 
 [[package]]
 name = "synbot"
-version = "0.7.3"
+version = "0.7.4"
 dependencies = [
  "actix",
  "actix-rt",

@@ -181,7 +181,7 @@ Synbot is a personal AI assistant written in Rust, originally inspired by [nanob
 
 ### Key Features
 
-- **Multi-channel Support**: Telegram, Discord, Slack, Feishu (飞书), Email, Matrix
+- **Multi-channel Support**: Telegram, Discord, Slack, Feishu (飞书), Dingtalk(钉钉) Email, Matrix
 - **Tool System**: Extensible tool framework with built-in tools (filesystem, shell, web, approval, etc.)
 - **MCP & Plugins**: MCP (Model Context Protocol) servers and Extism Wasm plugins (Rust, C/C++, Go)
 - **Memory**: Daily memory, long-term memory, SQLite vec + FTS5, auto compression
