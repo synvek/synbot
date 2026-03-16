@@ -282,8 +282,8 @@ def factorial(n):
 - [权限指南](/docs/zh/user-guide/permissions/)
 
 ### 社区支持
-- [GitHub Issues](https://github.com/synbot/synbot/issues)
-- [Discussions](https://github.com/synbot/synbot/discussions)
+- [GitHub Issues](https://github.com/synvek/synbot/issues)
+- [Discussions](https://github.com/synvek/synbot/discussions)
 
 ### 调试资源
 - `~/.synbot/logs/` 中的日志文件

@@ -22,7 +22,7 @@ Before installing Synbot, ensure you have:
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/synbot/synbot.git
+   git clone https://github.com/synvek/synbot.git
    cd synbot
    ```
 
@@ -45,7 +45,7 @@ cargo install synbot
 
 ### Method 3: Pre-built Binaries
 
-Check the [Releases page](https://github.com/synbot/synbot/releases) for pre-built binaries for your platform.
+Check the [Releases page](https://github.com/synvek/synbot/releases) for pre-built binaries for your platform.
 
 ## Platform-Specific Instructions
 
@@ -62,7 +62,7 @@ sudo apt-get update
 sudo apt-get install -y build-essential pkg-config libssl-dev
 
 # Clone and build
-git clone https://github.com/synbot/synbot.git
+git clone https://github.com/synvek/synbot.git
 cd synbot
 cargo build --release
 ```
@@ -74,7 +74,7 @@ sudo pacman -S rustup
 rustup default stable
 
 # Clone and build
-git clone https://github.com/synbot/synbot.git
+git clone https://github.com/synvek/synbot.git
 cd synbot
 cargo build --release
 ```
@@ -88,7 +88,7 @@ brew install rustup
 rustup-init
 
 # Clone and build
-git clone https://github.com/synbot/synbot.git
+git clone https://github.com/synvek/synbot.git
 cd synbot
 cargo build --release
 ```
@@ -99,7 +99,7 @@ cargo build --release
 sudo port install rust
 
 # Clone and build
-git clone https://github.com/synbot/synbot.git
+git clone https://github.com/synvek/synbot.git
 cd synbot
 cargo build --release
 ```
@@ -113,7 +113,7 @@ cargo build --release
 
 ```powershell
 # Clone the repository
-git clone https://github.com/synbot/synbot.git
+git clone https://github.com/synvek/synbot.git
 cd synbot
 
 # Build the project
@@ -127,7 +127,7 @@ choco install rustup.install
 rustup default stable
 
 # Clone and build
-git clone https://github.com/synbot/synbot.git
+git clone https://github.com/synvek/synbot.git
 cd synbot
 cargo build --release
 ```
@@ -313,7 +313,7 @@ sudo apt remove synbot
 
 If you encounter issues during installation:
 
-1. Check the [GitHub Issues](https://github.com/synbot/synbot/issues) for known problems
+1. Check the [GitHub Issues](https://github.com/synvek/synbot/issues) for known problems
 2. Search for error messages in the documentation
 3. Ask for help in the community channels
 

@@ -46,7 +46,7 @@
 
 1. **克隆仓库**：
    ```bash
-   git clone https://github.com/synbot/synbot.git
+   git clone https://github.com/synvek/synbot.git
    cd synbot
    ```
 
@@ -62,7 +62,7 @@
 
 ### 方式二：预编译二进制
 
-请到 [Releases 页面](https://github.com/synbot/synbot/releases) 下载适合您平台的预编译包。
+请到 [Releases 页面](https://github.com/synvek/synbot/releases) 下载适合您平台的预编译包。
 
 ## 快速开始
 
@@ -102,7 +102,7 @@ synbot --root-dir /path/to/workspace onboard
 }
 ```
 
-更多配置请参阅 [文档](https://github.com/synbot/synbot/tree/main/docs)。
+更多配置请参阅 [文档](https://github.com/synvek/synbot/tree/main/docs)。
 
 **MCP 工具**：在配置中增加 `tools.mcp.servers` 可接入 MCP 服务器，将其工具注册为 Agent 可用工具。示例：
 
@@ -183,13 +183,13 @@ synbot sandbox start
 
 ## 获取帮助
 
-- [GitHub Issues](https://github.com/synbot/synbot/issues) — 反馈缺陷与问题
-- [GitHub Discussions](https://github.com/synbot/synbot/discussions) — 提问与交流
-- [文档源码](https://github.com/synbot/synbot/tree/main/docs) — 参与文档编辑
+- [GitHub Issues](https://github.com/synvek/synbot/issues) — 反馈缺陷与问题
+- [GitHub Discussions](https://github.com/synvek/synbot/discussions) — 提问与交流
+- [文档源码](https://github.com/synvek/synbot/tree/main/docs) — 参与文档编辑
 
 ## 参与贡献
 
 欢迎参与贡献，请参阅：
 
-- [贡献指南](https://github.com/synbot/synbot/blob/main/CONTRIBUTING.md)
-- [行为准则](https://github.com/synbot/synbot/blob/main/CODE_OF_CONDUCT.md)
+- [贡献指南](https://github.com/synvek/synbot/blob/main/CONTRIBUTING.md)
+- [行为准则](https://github.com/synvek/synbot/blob/main/CODE_OF_CONDUCT.md)

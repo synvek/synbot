@@ -286,8 +286,8 @@ Extend Synbot with your own tool implementations.
 - [Permission Guide](/user-guide/permissions)
 
 ### Community Support
-- [GitHub Issues](https://github.com/synbot/synbot/issues)
-- [Discussions](https://github.com/synbot/synbot/discussions)
+- [GitHub Issues](https://github.com/synvek/synbot/issues)
+- [Discussions](https://github.com/synvek/synbot/discussions)
 
 ### Debugging Resources
 - Log files in `~/.synbot/logs/`

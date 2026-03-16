@@ -168,7 +168,7 @@ Fetch content from a URL.
 **Example**:
 ```
 fetch_url { 
-  "url": "https://api.github.com/repos/synbot/synbot",
+  "url": "https://api.github.com/repos/synvek/synbot",
   "timeout": 30
 }
 ```

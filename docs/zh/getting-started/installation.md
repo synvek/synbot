@@ -22,7 +22,7 @@ description: 如何在您的系统上安装 Synbot
 
 1. **克隆仓库**:
    ```bash
-   git clone https://github.com/synbot/synbot.git
+   git clone https://github.com/synvek/synbot.git
    cd synbot
    ```
 
@@ -45,7 +45,7 @@ cargo install synbot
 
 ### 方法 3: 预编译二进制文件
 
-查看 [发布页面](https://github.com/synbot/synbot/releases) 获取适合您平台的预编译二进制文件。
+查看 [发布页面](https://github.com/synvek/synbot/releases) 获取适合您平台的预编译二进制文件。
 
 ## 平台特定说明
 
@@ -62,7 +62,7 @@ sudo apt-get update
 sudo apt-get install -y build-essential pkg-config libssl-dev
 
 # 克隆并构建
-git clone https://github.com/synbot/synbot.git
+git clone https://github.com/synvek/synbot.git
 cd synbot
 cargo build --release
 ```
@@ -74,7 +74,7 @@ sudo pacman -S rustup
 rustup default stable
 
 # 克隆并构建
-git clone https://github.com/synbot/synbot.git
+git clone https://github.com/synvek/synbot.git
 cd synbot
 cargo build --release
 ```
@@ -88,7 +88,7 @@ brew install rustup
 rustup-init
 
 # 克隆并构建
-git clone https://github.com/synbot/synbot.git
+git clone https://github.com/synvek/synbot.git
 cd synbot
 cargo build --release
 ```
@@ -99,7 +99,7 @@ cargo build --release
 sudo port install rust
 
 # 克隆并构建
-git clone https://github.com/synbot/synbot.git
+git clone https://github.com/synvek/synbot.git
 cd synbot
 cargo build --release
 ```
@@ -113,7 +113,7 @@ cargo build --release
 
 ```powershell
 # 克隆仓库
-git clone https://github.com/synbot/synbot.git
+git clone https://github.com/synvek/synbot.git
 cd synbot
 
 # 构建项目
@@ -127,7 +127,7 @@ choco install rustup.install
 rustup default stable
 
 # 克隆并构建
-git clone https://github.com/synbot/synbot.git
+git clone https://github.com/synvek/synbot.git
 cd synbot
 cargo build --release
 ```

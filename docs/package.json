@@ -29,7 +29,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/synbot/synbot.git"
+    "url": "git+https://github.com/synvek/synbot.git"
   },
   "keywords": [
     "synbot",
@@ -41,7 +41,7 @@
   "author": "Synbot Team",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/synbot/synbot/issues"
+    "url": "https://github.com/synvek/synbot/issues"
   },
   "homepage": "https://synbot.github.io"
 }

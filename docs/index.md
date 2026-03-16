@@ -14,7 +14,7 @@ hero:
       link: /getting-started/installation
     - theme: alt
       text: View on GitHub
-      link: https://github.com/synbot/synbot
+      link: https://github.com/synvek/synbot
 
 features:
   - title: Multi-channel Support
@@ -199,14 +199,14 @@ Synbot is a personal AI assistant written in Rust, originally inspired by [nanob
 
 ### Getting Help
 
-- [GitHub Issues](https://github.com/synbot/synbot/issues) - Report bugs and issues
-- [GitHub Discussions](https://github.com/synbot/synbot/discussions) - Ask questions and share ideas
-- [Documentation Source](https://github.com/synbot/synbot/tree/main/docs) - Edit documentation
+- [GitHub Issues](https://github.com/synvek/synbot/issues) - Report bugs and issues
+- [GitHub Discussions](https://github.com/synvek/synbot/discussions) - Ask questions and share ideas
+- [Documentation Source](https://github.com/synvek/synbot/tree/main/docs) - Edit documentation
 
 ### Contributing
 
 We welcome contributions! Please see:
-- [Contributing Guide](https://github.com/synbot/synbot/blob/main/CONTRIBUTING.md)
-- [Code of Conduct](https://github.com/synbot/synbot/blob/main/CODE_OF_CONDUCT.md)
+- [Contributing Guide](https://github.com/synvek/synbot/blob/main/CONTRIBUTING.md)
+- [Code of Conduct](https://github.com/synvek/synbot/blob/main/CODE_OF_CONDUCT.md)
 
 ---

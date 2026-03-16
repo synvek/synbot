@@ -46,7 +46,7 @@
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/synbot/synbot.git
+   git clone https://github.com/synvek/synbot.git
    cd synbot
    ```
 
@@ -63,7 +63,7 @@
 
 ### Method 2: Pre-built Binaries
 
-Check the [Releases page](https://github.com/synbot/synbot/releases) for pre-built binaries for your platform.
+Check the [Releases page](https://github.com/synvek/synbot/releases) for pre-built binaries for your platform.
 
 
 ## Quick Start
@@ -104,7 +104,7 @@ Minimal configuration example:
 }
 ```
 
-For more options see the [documentation](https://github.com/synbot/synbot/tree/main/docs).
+For more options see the [documentation](https://github.com/synvek/synbot/tree/main/docs).
 
 **MCP tools**: Add `tools.mcp.servers` to connect MCP servers and register their tools for the agent. Examples:
 
@@ -184,12 +184,12 @@ On Windows, run `synbot sandbox setup` once as Administrator to add network rule
 
 ## Getting Help
 
-- [GitHub Issues](https://github.com/synbot/synbot/issues) - Report bugs and issues
-- [GitHub Discussions](https://github.com/synbot/synbot/discussions) - Ask questions and share ideas
-- [Documentation Source](https://github.com/synbot/synbot/tree/main/docs) - Edit documentation
+- [GitHub Issues](https://github.com/synvek/synbot/issues) - Report bugs and issues
+- [GitHub Discussions](https://github.com/synvek/synbot/discussions) - Ask questions and share ideas
+- [Documentation Source](https://github.com/synvek/synbot/tree/main/docs) - Edit documentation
 
 ## Contributing
 
 We welcome contributions! Please see:
-- [Contributing Guide](https://github.com/synbot/synbot/blob/main/CONTRIBUTING.md)
-- [Code of Conduct](https://github.com/synbot/synbot/blob/main/CODE_OF_CONDUCT.md)
+- [Contributing Guide](https://github.com/synvek/synbot/blob/main/CONTRIBUTING.md)
+- [Code of Conduct](https://github.com/synvek/synbot/blob/main/CODE_OF_CONDUCT.md)
