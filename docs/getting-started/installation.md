@@ -38,7 +38,7 @@ Before installing Synbot, ensure you have:
 
 ### Method 2: Using Cargo (from crates.io)
 
-Once Synbot is published on crates.io:
+Once Synbot is published on crates.io (Not available right now):
 ```bash
 cargo install synbot
 ```

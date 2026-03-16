@@ -38,7 +38,7 @@ description: 如何在您的系统上安装 Synbot
 
 ### 方法 2: 使用 Cargo (从 crates.io)
 
-一旦 Synbot 发布到 crates.io:
+一旦 Synbot 发布到 crates.io （暂不可用）:
 ```bash
 cargo install synbot
 ```
