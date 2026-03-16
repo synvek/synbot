@@ -762,6 +762,7 @@ impl AgentLoop {
                     &*self.model,
                     &system_prompt,
                     model_max_iterations,
+                    agent_ctx.params.max_consecutive_tool_errors,
                     max_chat_history_messages,
                     &agent_id,
                     &mut *history_guard,
@@ -925,6 +926,7 @@ impl AgentLoop {
             };
             let tool_result_preview_chars = self.tool_result_preview_chars;
             let max_chat_history_messages = agent_ctx.params.max_chat_history_messages;
+            let max_consecutive_tool_errors = agent_ctx.params.max_consecutive_tool_errors;
 
             let session_messages_clone = session_messages.clone();
             let label = format!(
@@ -943,6 +945,7 @@ impl AgentLoop {
                         &*model,
                         &system_prompt,
                         model_max_iterations,
+                        max_consecutive_tool_errors,
                         max_chat_history_messages,
                         &aid,
                         &mut *history_guard,
@@ -1143,6 +1146,7 @@ async fn run_completion_loop(
     model: &dyn SynbotCompletionModel,
     system_prompt: &str,
     max_iterations: u32,
+    max_consecutive_tool_errors: u32,
     max_chat_history_messages: u32,
     agent_id: &str,
     history: &mut Vec<Message>,
@@ -1159,7 +1163,8 @@ async fn run_completion_loop(
 ) -> Result<u32> {
     let message_ctx = Some((channel, chat_id, sender_id, session_id));
     let mut iterations = 0u32;
-    /// Media paths from "message" tool calls in this run; sent with the final reply so channels (e.g. DingTalk) get one message with text + files.
+    let mut consecutive_tool_errors: u32 = 0;
+    // Media paths from "message" tool calls in this run; sent with the final reply so channels (e.g. DingTalk) get one message with text + files.
     let mut pending_media = Vec::<String>::new();
 
     loop {
@@ -1172,6 +1177,17 @@ async fn run_completion_loop(
         iterations += 1;
         if iterations > max_iterations {
             warn!("Max iterations ({}) reached for agent '{}'", max_iterations, agent_id);
+            let msg = format!(
+                "[Agent '{}'] 已达到最大 tool 执行次数（{}），已停止。请简化请求或增加配置 mainAgent.maxToolIterations（当前默认 99）。",
+                agent_id, max_iterations
+            );
+            let _ = outbound_tx.send(OutboundMessage::chat(
+                channel.to_string(),
+                chat_id.to_string(),
+                msg,
+                vec![],
+                None,
+            ));
             break;
         }
 
@@ -1352,6 +1368,30 @@ async fn run_completion_loop(
         }
 
         if has_tool_calls && !assistant_contents.is_empty() {
+            let any_tool_failed = tool_results.iter().any(|(_, s)| s.starts_with("Error:"));
+            if any_tool_failed {
+                consecutive_tool_errors += 1;
+            } else {
+                consecutive_tool_errors = 0;
+            }
+            if consecutive_tool_errors >= max_consecutive_tool_errors {
+                warn!(
+                    "Max consecutive tool errors ({}) reached for agent '{}'",
+                    max_consecutive_tool_errors, agent_id
+                );
+                let msg = format!(
+                    "[Agent '{}'] 连续 {} 次 tool 执行失败，已停止。请检查工具配置或简化请求。可调整配置 mainAgent.maxConsecutiveToolErrors（当前默认 8）。",
+                    agent_id, max_consecutive_tool_errors
+                );
+                let _ = outbound_tx.send(OutboundMessage::chat(
+                    channel.to_string(),
+                    chat_id.to_string(),
+                    msg,
+                    vec![],
+                    None,
+                ));
+                break;
+            }
             let content = match assistant_contents.len() {
                 1 => OneOrMany::one(assistant_contents.into_iter().next().unwrap()),
                 _ => OneOrMany::many(assistant_contents).expect("non-empty"),

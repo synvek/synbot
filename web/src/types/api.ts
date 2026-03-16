@@ -91,6 +91,7 @@ export interface AgentInfo {
   max_tokens: number;
   temperature: number;
   max_iterations: number;
+  max_consecutive_tool_errors: number;
   workspace_dir: string;
 }
 

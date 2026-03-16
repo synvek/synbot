@@ -24,6 +24,8 @@ pub struct ResolvedAgentParams {
     pub max_tokens: u32,
     pub temperature: f32,
     pub max_iterations: u32,
+    /// Maximum consecutive tool failures before stopping.
+    pub max_consecutive_tool_errors: u32,
     /// Maximum number of chat history messages to send to the model (most recent N).
     pub max_chat_history_messages: u32,
 }
@@ -37,6 +39,7 @@ impl ResolvedAgentParams {
             max_tokens: main_agent.max_tokens,
             temperature: main_agent.temperature,
             max_iterations: main_agent.max_tool_iterations,
+            max_consecutive_tool_errors: main_agent.max_consecutive_tool_errors,
             max_chat_history_messages: main_agent.max_chat_history_messages,
         }
     }
@@ -54,6 +57,7 @@ impl ResolvedAgentParams {
             max_tokens: agent.max_tokens.unwrap_or(defaults.max_tokens),
             temperature: agent.temperature.unwrap_or(defaults.temperature),
             max_iterations: agent.max_iterations.unwrap_or(defaults.max_tool_iterations),
+            max_consecutive_tool_errors: defaults.max_consecutive_tool_errors,
             max_chat_history_messages: defaults.max_chat_history_messages,
         }
     }
@@ -184,6 +188,7 @@ mod tests {
             max_tokens: 4096,
             temperature: 0.5,
             max_tool_iterations: 10,
+            max_consecutive_tool_errors: 8,
             max_chat_history_messages: 20,
             max_concurrent_subagents: 3,
             subagent_task_timeout_secs: 600,
