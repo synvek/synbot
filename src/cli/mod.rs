@@ -9,7 +9,7 @@ mod helpers;
 
 use std::path::PathBuf;
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 
 pub use onboard::cmd_onboard;
 pub use agent::cmd_agent;
@@ -25,8 +25,12 @@ struct Cli {
     #[arg(long, value_name = "DIR", global = true)]
     root_dir: Option<PathBuf>,
 
+    /// Print version, OS, architecture, and git tag.
+    #[arg(short = 'v', long = "version", global = true)]
+    version: bool,
+
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
@@ -70,13 +74,45 @@ enum Commands {
 pub async fn run() -> Result<()> {
     let cli = Cli::parse();
 
+    if cli.version {
+        return cmd_version();
+    }
+
+    let Some(command) = cli.command else {
+        Cli::command().print_help()?;
+        return Ok(());
+    };
+
     crate::config::set_root_dir(cli.root_dir.clone());
 
-    match cli.command {
+    match command {
         Commands::Onboard => cmd_onboard().await,
         Commands::Agent { message, provider, model } => cmd_agent(message, provider, model).await,
         Commands::Start => cmd_start().await,
         Commands::Sandbox { child_args } => cmd_sandbox(child_args).await,
         Commands::Cron { action } => cmd_cron(action).await,
     }
+}
+
+fn cmd_version() -> Result<()> {
+    let version = env!("CARGO_PKG_VERSION");
+    let os = std::env::consts::OS;
+    let arch = std::env::consts::ARCH;
+    let git_commit = std::process::Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()
+        .and_then(|o| {
+            if o.status.success() {
+                String::from_utf8(o.stdout).ok().map(|s| s.trim().to_string())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| "unknown".to_string());
+    println!("synbot {}", version);
+    println!("  os:    {}", os);
+    println!("  arch:  {}", arch);
+    println!("  git:   {}", git_commit);
+    Ok(())
 }
