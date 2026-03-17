@@ -86,6 +86,37 @@ synbot sandbox agent --message "你好"
 
 配置与平台说明见 [沙箱](/zh/getting-started/sandbox)。
 
+### `synbot service` \<操作\>
+
+将 Synbot 守护进程安装为系统服务，或对其进行卸载、启动、停止、重启及状态查询。支持平台：
+
+- **Linux**：systemd 用户单元（`~/.config/systemd/user/synbot.service`）。执行 `synbot service install` 后使用 `synbot service start`；服务已设为用户登录时自动启动。
+- **macOS**：launchd 用户代理（`~/Library/LaunchAgents/com.synbot.plist`）。执行 `synbot service install` 后使用 `synbot service start`（也可依赖 RunAtLoad 在登录时启动）。
+- **Windows**：计划任务「Synbot」（在用户登录时运行）。执行 `synbot service install` 后使用 `synbot service start`。停止时会使用守护进程的 PID 文件（`~/.synbot/synbot.pid`）。
+
+若在执行 `synbot service install` 时使用了 `--root-dir`，安装后的服务将使用同一根目录。
+
+**操作：**
+
+| 操作 | 说明 |
+|------|------|
+| `install` | 安装服务（systemd 单元、launchd plist 或计划任务）。 |
+| `uninstall` | 卸载服务。 |
+| `start` | 启动服务（或在服务管理器中运行守护进程）。 |
+| `stop` | 停止正在运行的服务。 |
+| `restart` | 先停止再启动服务。 |
+| `status` | 输出 `active` 或 `inactive`。 |
+
+示例：
+
+```bash
+synbot service install
+synbot service start
+synbot service status
+synbot service stop
+synbot --root-dir /data/synbot service install
+```
+
 ### `synbot cron` \<操作\>
 
 管理定时任务（列出、添加、删除）。任务保存在配置目录下（如 `~/.synbot/cron/jobs.json`）。

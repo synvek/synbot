@@ -5,6 +5,7 @@ mod agent;
 mod start;
 mod cron;
 mod sandbox_cmd;
+mod service;
 mod helpers;
 
 use std::path::PathBuf;
@@ -16,6 +17,7 @@ pub use agent::cmd_agent;
 pub use start::cmd_start;
 pub use cron::{cmd_cron, CronAction};
 pub use sandbox_cmd::cmd_sandbox;
+pub use service::{cmd_service, ServiceAction};
 
 #[derive(Parser)]
 #[command(name = "synbot", about = "synbot — Personal AI Assistant")]
@@ -69,6 +71,12 @@ enum Commands {
         #[command(subcommand)]
         action: CronAction,
     },
+
+    /// Install, uninstall, start, stop, restart, or show status of the Synbot daemon as a system service (Linux: systemd user, macOS: launchd, Windows: scheduled task).
+    Service {
+        #[command(subcommand)]
+        action: ServiceAction,
+    },
 }
 
 pub async fn run() -> Result<()> {
@@ -91,6 +99,7 @@ pub async fn run() -> Result<()> {
         Commands::Start => cmd_start().await,
         Commands::Sandbox { child_args } => cmd_sandbox(child_args).await,
         Commands::Cron { action } => cmd_cron(action).await,
+        Commands::Service { action } => cmd_service(action).await,
     }
 }
 

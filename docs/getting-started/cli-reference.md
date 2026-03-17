@@ -86,6 +86,37 @@ synbot sandbox agent --message "Hello"
 
 See [Sandbox](/getting-started/sandbox) for configuration and platforms.
 
+### `synbot service` \<action\>
+
+Install, uninstall, start, stop, restart, or show status of the Synbot daemon as a system service. Supported platforms:
+
+- **Linux**: systemd user unit (`~/.config/systemd/user/synbot.service`). Use `synbot service install` then `synbot service start`; the service is enabled to start at user login.
+- **macOS**: launchd user agent (`~/Library/LaunchAgents/com.synbot.plist`). Use `synbot service install` then `synbot service start` (or rely on RunAtLoad to start at login).
+- **Windows**: Scheduled task named "Synbot" (runs at user logon). Use `synbot service install` then `synbot service start`. Stop uses the daemon PID file (`~/.synbot/synbot.pid`).
+
+If you use `--root-dir` when running `synbot service install`, the installed service will use that same root directory.
+
+**Actions:**
+
+| Action | Description |
+|--------|-------------|
+| `install` | Install the service (systemd unit, launchd plist, or scheduled task). |
+| `uninstall` | Remove the service. |
+| `start` | Start the service (or run the daemon under the service manager). |
+| `stop` | Stop the running service. |
+| `restart` | Stop then start the service. |
+| `status` | Print `active` or `inactive`. |
+
+Examples:
+
+```bash
+synbot service install
+synbot service start
+synbot service status
+synbot service stop
+synbot --root-dir /data/synbot service install
+```
+
 ### `synbot cron` \<action\>
 
 Manage cron jobs (list, add, remove). Jobs are stored under the config directory (e.g. `~/.synbot/cron/jobs.json`).

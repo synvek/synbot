@@ -2,10 +2,25 @@
 
 use anyhow::Result;
 use std::io::Write;
+use std::path::PathBuf;
 use tracing::{info, warn};
 use crate::config;
 use crate::logging;
 use super::helpers::{resolve_provider, build_rig_completion_model, build_default_tools};
+
+/// Removes the PID file when the daemon process exits (e.g. Ctrl+C).
+struct PidFileGuard(PathBuf);
+impl Drop for PidFileGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+fn write_pid_file() -> Result<PidFileGuard> {
+    let pid_path = config::config_dir().join("synbot.pid");
+    std::fs::write(&pid_path, std::process::id().to_string())?;
+    Ok(PidFileGuard(pid_path))
+}
 
 pub async fn cmd_start() -> Result<()> {
     // Immediate stderr so sandbox parent sees child has started (before any logging init)
@@ -19,6 +34,7 @@ pub async fn cmd_start() -> Result<()> {
     }
 
     let cfg = config::load_config(None)?;
+    let _pid_guard = write_pid_file()?;
     let shared_config = std::sync::Arc::new(tokio::sync::RwLock::new(cfg.clone()));
 
     // Create log buffer and channel for web UI before logging init
