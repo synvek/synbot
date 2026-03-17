@@ -422,8 +422,9 @@ async fn init_sandbox_if_configured(
     }
 
     let workspace_path = config::workspace_path(cfg);
+    let skills_dir = config::skills_dir();
     if let Some(ref tool_cfg) = cfg.tool_sandbox {
-        match config::build_tool_sandbox_config(tool_cfg, monitoring, &workspace_path) {
+        match config::build_tool_sandbox_config(tool_cfg, monitoring, &workspace_path, &skills_dir) {
             Ok(sandbox_config) => {
                 match manager.create_tool_sandbox(sandbox_config).await {
                     Ok(id) => {

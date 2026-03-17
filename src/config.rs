@@ -1272,6 +1272,9 @@ pub struct SandboxFilesystemConfig {
     pub writable_paths: Vec<String>,
     #[serde(default)]
     pub hidden_paths: Vec<String>,
+    /// When true (default), mount host skills dir into tool sandbox at /skills (read-only). When false, do not mount; exec in sandbox cannot access skills by path.
+    #[serde(default)]
+    pub mount_skills_dir: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -1553,6 +1556,7 @@ pub fn build_app_sandbox_config(
         readonly_paths: f.readonly_paths.clone(),
         writable_paths: f.writable_paths.clone(),
         hidden_paths: f.hidden_paths.clone(),
+        mount_skills_dir: f.mount_skills_dir,
     }).unwrap_or_default();
     let net = cfg
         .network
@@ -1610,17 +1614,21 @@ pub fn build_app_sandbox_config(
 
 /// Build SandboxConfig for tool sandbox from Config.
 /// When `workspace_path` is provided, it is mounted in the container at `/workspace` (tool sandbox exec cwd).
+/// When `skills_dir` is provided and mount_skills_dir is not false, it is mounted read-only at `/skills` so exec in the container can access skills.
 pub fn build_tool_sandbox_config(
     cfg: &ToolSandboxConfig,
     monitoring: &Option<SandboxMonitoringConfig>,
     workspace_path: &std::path::Path,
+    skills_dir: &std::path::Path,
 ) -> anyhow::Result<crate::sandbox::types::SandboxConfig> {
     let platform = "auto".to_string();
     let fs = cfg.filesystem.as_ref().map(|f| SandboxFilesystemConfig {
         readonly_paths: f.readonly_paths.clone(),
         writable_paths: f.writable_paths.clone(),
         hidden_paths: f.hidden_paths.clone(),
+        mount_skills_dir: f.mount_skills_dir,
     }).unwrap_or_default();
+    let mount_skills = fs.mount_skills_dir != Some(false) && skills_dir.exists();
     let net = cfg
         .network
         .as_ref()
@@ -1655,6 +1663,14 @@ pub fn build_tool_sandbox_config(
                 workspace_path.to_string_lossy().to_string(),
                 "/workspace".to_string(),
             )),
+            skills_mount: if mount_skills {
+                Some((
+                    skills_dir.to_string_lossy().to_string(),
+                    "/skills".to_string(),
+                ))
+            } else {
+                None
+            },
         },
         network: crate::sandbox::types::NetworkConfig {
             enabled: net.enabled,

@@ -115,6 +115,9 @@ synbot sandbox start
   - `"wsl2-gvisor"`：仅 Windows；在 WSL2 内使用 gVisor。
 - **image**：工具容器的 Docker 镜像（可选；Synbot 可能使用默认镜像）。
 - **filesystem / network / resources / process**：与应用沙箱类似，作用于工具容器。
+- **filesystem.mountSkillsDir**：为 `true`（默认）时，主机 skills 目录（`~/.synbot/skills`）会以**只读**方式挂载到容器内 **`/skills`**。在工具沙箱内通过 `exec` 运行的命令可访问 `/skills/<技能名>/SKILL.md`。设为 `false` 可关闭挂载（隔离更强，但 exec 无法按路径访问 skills）。
+
+**工具沙箱内的 skills 路径**：启用工具沙箱后，主进程仍从 `~/.synbot/skills` 发现和加载 skills（如通过 `list_system_skills` / `read_system_skill`）。容器内相同内容出现在 **`/skills`**，因此由 `exec` 执行的脚本或命令可使用统一路径（例如 `cat /skills/planning-with-files/SKILL.md`）。
 
 若未安装或不使用 gVisor，将 `sandboxType` 设为 `"plain-docker"` 可避免工具沙箱启动失败。
 

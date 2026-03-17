@@ -115,6 +115,9 @@ When `toolSandbox` is configured, tool execution (e.g. the `exec` tool) runs ins
   - `"wsl2-gvisor"`: Windows only; gVisor inside WSL2.
 - **image**: Docker image for the tool container (optional; Synbot may use a default).
 - **filesystem / network / resources / process**: Same idea as app sandbox; applied to the tool container.
+- **filesystem.mountSkillsDir**: When `true` (default), the host skills directory (`~/.synbot/skills`) is bind-mounted **read-only** into the container at **`/skills`**. Commands run via `exec` inside the tool sandbox can then read skills at `/skills/<skill-name>/SKILL.md`. Set to `false` to disable (stronger isolation; exec cannot access skills by path).
+
+**Skills path in tool sandbox**: When the tool sandbox is enabled, the main process still discovers and loads skills from `~/.synbot/skills` (e.g. via `list_system_skills` / `read_system_skill`). Inside the container, the same content is available at **`/skills`** so that scripts or commands run by `exec` can use a single, consistent path (e.g. `cat /skills/planning-with-files/SKILL.md`).
 
 If gVisor is not installed or not desired, set `sandboxType` to `"plain-docker"` to avoid tool sandbox startup failures.
 

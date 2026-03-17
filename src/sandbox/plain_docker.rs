@@ -122,6 +122,9 @@ impl PlainDockerSandbox {
         if let Some((ref host, ref guest)) = self.config.filesystem.workspace_mount {
             binds.push(format!("{}:{}", host, guest));
         }
+        if let Some((ref host, ref guest)) = self.config.filesystem.skills_mount {
+            binds.push(format!("{}:{}:ro", host, guest));
+        }
         binds
     }
 }

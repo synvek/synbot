@@ -38,6 +38,9 @@ pub struct FilesystemConfig {
     /// When set, bind-mount host path at container path (host, container). Used by tool sandbox to mount workspace at /workspace. Not from config; set at build time.
     #[serde(skip, default)]
     pub workspace_mount: Option<(String, String)>,
+    /// When set, bind-mount host skills dir at container path (host, container). Used by tool sandbox so exec can read skills at e.g. /skills. Read-only. Not from config; set at build time.
+    #[serde(skip, default)]
+    pub skills_mount: Option<(String, String)>,
 }
 
 /// Network configuration
