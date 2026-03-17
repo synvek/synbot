@@ -132,3 +132,40 @@ impl ContextBuilder {
         parts.join("\n\n")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_system_prompt_contains_synbot_and_workspace() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills_dir = dir.path().join("skills");
+        std::fs::create_dir_all(&skills_dir).unwrap();
+        let ctx = ContextBuilder::new(dir.path(), "main", &skills_dir, false);
+        let prompt = ctx.build_system_prompt();
+        assert!(prompt.contains("Synbot"));
+        assert!(prompt.contains("Workspace"));
+        assert!(prompt.contains("# Skills"));
+    }
+
+    #[test]
+    fn build_system_prompt_with_role_prompt_includes_role() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills_dir = dir.path().join("skills");
+        std::fs::create_dir_all(&skills_dir).unwrap();
+        let ctx = ContextBuilder::new(dir.path(), "main", &skills_dir, false);
+        let prompt = ctx.build_system_prompt_with_role_prompt("You are a helpful tester.");
+        assert!(prompt.contains("Synbot"));
+        assert!(prompt.contains("You are a helpful tester."));
+    }
+
+    #[test]
+    fn build_system_prompt_empty_agent_id_uses_main() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills_dir = dir.path().join("skills");
+        std::fs::create_dir_all(&skills_dir).unwrap();
+        let _ctx = ContextBuilder::new(dir.path(), "", &skills_dir, false);
+        // Just ensure it doesn't panic; agent_id "main" is used for memory path
+    }
+}

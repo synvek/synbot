@@ -1,11 +1,21 @@
-/// Common test utilities and helpers for integration tests.
-///
-/// This module provides shared test infrastructure including:
-/// - proptest configuration presets
-/// - common test data generators
-/// - helper functions for test setup/teardown
+//! Common test utilities and helpers for integration tests.
+//!
+//! Provides:
+//! - **Proptest**: `proptest_config()`, `non_empty_string()`, `positive_u32()`, `f64_in_range()`
+//! - **AppState**: `create_test_app_state_with_approval()` for API and approval tests
+//! - **Temp dirs**: `temp_workflow_root()`, `temp_workspace()` for workflow/session/store tests
+//! - **Config**: `default_test_config()` for a valid minimal `Config`
+//!
+//! Example (approval API test):
+//! ```ignore
+//! let (inbound_tx, _) = tokio::sync::mpsc::channel(100);
+//! let (outbound_tx, _) = tokio::sync::broadcast::channel(100);
+//! let approval_manager = Arc::new(ApprovalManager::new());
+//! let state = common::create_test_app_state_with_approval(inbound_tx, outbound_tx, approval_manager).await;
+//! ```
 
 use proptest::prelude::*;
+use std::path::PathBuf;
 
 /// Standard proptest configuration with minimum 100 iterations
 /// as specified in the design document.
@@ -31,7 +41,29 @@ pub fn f64_in_range(min: f64, max: f64) -> impl Strategy<Value = f64> {
     (0..=1000u32).prop_map(move |v| min + (max - min) * (v as f64 / 1000.0))
 }
 
-/// Create test AppState with approval manager for testing
+/// Returns a valid default `Config` for tests (all validation passes).
+pub fn default_test_config() -> synbot::config::Config {
+    synbot::config::Config::default()
+}
+
+/// Create a temporary directory for workflow state (e.g. `WorkflowStore::new(path)`).
+/// The returned `TempDir` must be held for the duration of the test so the directory is not removed.
+pub fn temp_workflow_root() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().expect("temp workflow root");
+    let path = dir.path().to_path_buf();
+    (dir, path)
+}
+
+/// Create a temporary directory for workspace/session storage.
+/// The returned `TempDir` must be held for the duration of the test.
+pub fn temp_workspace() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().expect("temp workspace");
+    let path = dir.path().to_path_buf();
+    (dir, path)
+}
+
+/// Create test AppState with approval manager for testing.
+/// Use for API tests (approval history, pending, respond) and any test that needs a full web AppState.
 pub async fn create_test_app_state_with_approval(
     inbound_tx: tokio::sync::mpsc::Sender<synbot::bus::InboundMessage>,
     outbound_tx: tokio::sync::broadcast::Sender<synbot::bus::OutboundMessage>,
@@ -64,7 +96,6 @@ pub async fn create_test_app_state_with_approval(
         outbound_tx,
         log_buffer,
         approval_manager,
-        None,
         None,
     )
 }

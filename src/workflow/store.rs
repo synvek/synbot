@@ -76,3 +76,85 @@ impl WorkflowStore {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::workflow::types::{WorkflowDef, WorkflowState, WorkflowStepDef};
+    use std::collections::HashMap;
+
+    fn sample_state(session_key: &str) -> WorkflowState {
+        let def = WorkflowDef {
+            id: "wf-1".to_string(),
+            name: "Test".to_string(),
+            description: String::new(),
+            inputs: vec![],
+            steps: vec![WorkflowStepDef {
+                id: "step1".to_string(),
+                step_type: "llm".to_string(),
+                description: "Do task".to_string(),
+                input_key: None,
+            }],
+        };
+        WorkflowState::new(
+            session_key.to_string(),
+            def,
+            HashMap::new(),
+            60,
+        )
+    }
+
+    #[tokio::test]
+    async fn save_load_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = WorkflowStore::new(dir.path());
+
+        let key = "agent:main:telegram";
+        let state = sample_state(key);
+        store.save_state(key, &state).await.unwrap();
+
+        let loaded = store.load_state(key).await.unwrap();
+        assert!(loaded.is_some());
+        let loaded = loaded.unwrap();
+        assert_eq!(loaded.session_key, state.session_key);
+        assert_eq!(loaded.workflow_id, state.workflow_id);
+        assert_eq!(loaded.definition.steps.len(), state.definition.steps.len());
+    }
+
+    #[tokio::test]
+    async fn load_nonexistent_returns_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = WorkflowStore::new(dir.path());
+        let loaded = store.load_state("nonexistent").await.unwrap();
+        assert!(loaded.is_none());
+    }
+
+    #[tokio::test]
+    async fn delete_state_removes_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = WorkflowStore::new(dir.path());
+        let key = "session:key";
+        store.save_state(key, &sample_state(key)).await.unwrap();
+        assert!(store.load_state(key).await.unwrap().is_some());
+
+        store.delete_state(key).await.unwrap();
+        assert!(store.load_state(key).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn safe_filename_colon_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = WorkflowStore::new(dir.path());
+        let key = "agent:main:chat_123";
+        store.save_state(key, &sample_state(key)).await.unwrap();
+        let path = dir.path().join("agent_main_chat_123.json");
+        assert!(path.exists(), "session key with colons should become underscores in filename");
+    }
+
+    #[tokio::test]
+    async fn delete_nonexistent_ok() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = WorkflowStore::new(dir.path());
+        store.delete_state("nonexistent").await.unwrap();
+    }
+}

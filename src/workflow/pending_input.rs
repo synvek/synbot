@@ -52,3 +52,50 @@ impl Default for PendingWorkflowInputStore {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn register_and_deliver() {
+        let store = PendingWorkflowInputStore::new();
+        let rx = store.register("session1").await;
+        assert!(store.is_waiting("session1").await);
+
+        let delivered = store.deliver("session1", "hello".to_string()).await;
+        assert!(delivered);
+        assert!(!store.is_waiting("session1").await);
+        let content = rx.await.unwrap();
+        assert_eq!(content, "hello");
+    }
+
+    #[tokio::test]
+    async fn deliver_nonexistent_returns_false() {
+        let store = PendingWorkflowInputStore::new();
+        let delivered = store.deliver("nobody", "x".to_string()).await;
+        assert!(!delivered);
+    }
+
+    #[tokio::test]
+    async fn remove_cancels_pending() {
+        let store = PendingWorkflowInputStore::new();
+        let rx = store.register("session1").await;
+        let removed = store.remove("session1").await;
+        assert!(removed);
+        assert!(!store.is_waiting("session1").await);
+        assert!(rx.await.is_err());
+    }
+
+    #[tokio::test]
+    async fn remove_nonexistent_returns_false() {
+        let store = PendingWorkflowInputStore::new();
+        assert!(!store.remove("nobody").await);
+    }
+
+    #[tokio::test]
+    async fn is_waiting_false_for_unknown() {
+        let store = PendingWorkflowInputStore::new();
+        assert!(!store.is_waiting("unknown").await);
+    }
+}

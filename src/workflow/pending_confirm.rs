@@ -49,3 +49,41 @@ impl Default for PendingConfirmStore {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::workflow::types::{WorkflowDef, WorkflowStepDef};
+
+    fn sample_def() -> WorkflowDef {
+        WorkflowDef {
+            id: "wf-1".to_string(),
+            name: "Test".to_string(),
+            description: String::new(),
+            inputs: vec![],
+            steps: vec![WorkflowStepDef {
+                id: "s1".to_string(),
+                step_type: "llm".to_string(),
+                description: "".to_string(),
+                input_key: None,
+            }],
+        }
+    }
+
+    #[tokio::test]
+    async fn set_and_remove() {
+        let store = PendingConfirmStore::new();
+        let def = sample_def();
+        store.set("session1", def.clone()).await;
+        let taken = store.remove("session1").await;
+        assert!(taken.is_some());
+        assert_eq!(taken.unwrap().id, def.id);
+        assert!(store.remove("session1").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn remove_nonexistent_returns_none() {
+        let store = PendingConfirmStore::new();
+        assert!(store.remove("nobody").await.is_none());
+    }
+}

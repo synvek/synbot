@@ -177,3 +177,31 @@ impl crate::channels::ChannelFactory for MatrixChannelFactory {
         Ok(Box::new(ch))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn register_builtin_channels_populates_registry() {
+        let mut registry = ChannelRegistry::new();
+        register_builtin_channels(&mut registry);
+        let names = registry.type_names();
+        assert!(names.contains(&"telegram".to_string()));
+        assert!(names.contains(&"feishu".to_string()));
+        assert!(names.contains(&"discord".to_string()));
+        assert!(names.contains(&"slack".to_string()));
+        assert!(names.contains(&"email".to_string()));
+        assert!(names.contains(&"matrix".to_string()));
+        assert!(names.contains(&"dingtalk".to_string()));
+        assert_eq!(names.len(), 7);
+    }
+
+    #[test]
+    fn registry_get_returns_factory_after_register() {
+        let mut registry = ChannelRegistry::new();
+        register_builtin_channels(&mut registry);
+        assert!(registry.get("telegram").is_some());
+        assert!(registry.get("nonexistent").is_none());
+    }
+}

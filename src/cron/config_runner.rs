@@ -124,3 +124,14 @@ impl ConfigCronRunner {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_cron_runner_new() {
+        let config = Arc::new(RwLock::new(Config::default()));
+        let _runner = ConfigCronRunner::new(config);
+    }
+}

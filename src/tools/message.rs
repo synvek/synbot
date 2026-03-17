@@ -74,3 +74,24 @@ impl DynTool for MessageTool {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn message_tool_name_and_description() {
+        let (tx, _) = broadcast::channel(1);
+        let tool = MessageTool {
+            outbound_tx: tx,
+            default_channel: "telegram".to_string(),
+            default_chat_id: "user1".to_string(),
+        };
+        assert_eq!(tool.name(), "message");
+        assert!(tool.description().contains("Send a message"));
+        let schema = tool.parameters_schema();
+        assert_eq!(schema["type"], "object");
+        assert!(schema["properties"]["content"].is_object());
+        assert!(schema["required"].as_array().unwrap().contains(&serde_json::json!("content")));
+    }
+}

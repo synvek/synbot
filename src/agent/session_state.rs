@@ -207,3 +207,72 @@ impl SharedSessionState {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent::session::SessionStore;
+    use tempfile::TempDir;
+
+    fn temp_store() -> (TempDir, SessionStore) {
+        let dir = TempDir::new().unwrap();
+        let store = SessionStore::new(dir.path());
+        (dir, store)
+    }
+
+    #[tokio::test]
+    async fn get_or_create_session_messages_returns_same_arc() {
+        let (_dir, store) = temp_store();
+        let state = SharedSessionState::new(store);
+        let a = state.get_or_create_session_messages("s1").await;
+        let b = state.get_or_create_session_messages("s1").await;
+        assert!(Arc::ptr_eq(&a, &b));
+    }
+
+    #[tokio::test]
+    async fn set_active_and_get_active_snapshot() {
+        let (_dir, store) = temp_store();
+        let state = SharedSessionState::new(store);
+        state.set_active("s1", "processing").await;
+        let snap = state.get_active_snapshot().await;
+        assert_eq!(snap.get("s1").map(|s| s.as_str()), Some("processing"));
+        state.clear_active("s1").await;
+        let snap = state.get_active_snapshot().await;
+        assert!(snap.is_empty());
+    }
+
+    #[tokio::test]
+    async fn append_user_and_assistant_message_then_load() {
+        let (_dir, store) = temp_store();
+        let state = SharedSessionState::new(store);
+        let key = "agent:main:telegram";
+        state.append_user_message_and_save(key, "hello").await.unwrap();
+        state.append_assistant_message_and_save(key, "hi there").await.unwrap();
+        let messages = state.get_or_create_session_messages(key).await;
+        let guard = messages.lock().await;
+        assert_eq!(guard.len(), 2);
+        // First is user, second is assistant (content checked via SessionMessage if needed)
+        use rig::message::Message;
+        match &guard[0] {
+            Message::User { content } => assert!(!content.is_empty()),
+            _ => panic!("expected user message"),
+        }
+        match &guard[1] {
+            Message::Assistant { content, .. } => assert!(!content.is_empty()),
+            _ => panic!("expected assistant message"),
+        }
+    }
+
+    #[tokio::test]
+    async fn clear_session_removes_from_memory_and_store() {
+        let (_dir, store) = temp_store();
+        let state = SharedSessionState::new(store);
+        let key = "agent:main:chat1";
+        state.append_user_message_and_save(key, "x").await.unwrap();
+        state.clear_session(key).await.unwrap();
+        let messages = state.get_or_create_session_messages(key).await;
+        assert!(messages.lock().await.is_empty());
+        let loaded = state.session_store.load_session(key).await.unwrap();
+        assert!(loaded.is_none());
+    }
+}

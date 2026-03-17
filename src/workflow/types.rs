@@ -148,3 +148,139 @@ impl WorkflowState {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn workflow_status_default_is_running() {
+        assert_eq!(WorkflowStatus::default(), WorkflowStatus::Running);
+    }
+
+    #[test]
+    fn workflow_status_serialization_roundtrip() {
+        for status in [
+            WorkflowStatus::Running,
+            WorkflowStatus::WaitingUserInput,
+            WorkflowStatus::Completed,
+            WorkflowStatus::Failed,
+        ] {
+            let json = serde_json::to_string(&status).unwrap();
+            let parsed: WorkflowStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(status, parsed);
+        }
+    }
+
+    #[test]
+    fn workflow_def_validate_empty_steps_rejected() {
+        let def = WorkflowDef {
+            id: String::new(),
+            name: String::new(),
+            description: String::new(),
+            inputs: vec![],
+            steps: vec![],
+        };
+        assert!(def.validate().is_err());
+    }
+
+    #[test]
+    fn workflow_def_validate_llm_step_ok() {
+        let def = WorkflowDef {
+            id: "w1".to_string(),
+            name: String::new(),
+            description: String::new(),
+            inputs: vec![],
+            steps: vec![WorkflowStepDef {
+                id: "s1".to_string(),
+                step_type: "llm".to_string(),
+                description: "Task".to_string(),
+                input_key: None,
+            }],
+        };
+        assert!(def.validate().is_ok());
+    }
+
+    #[test]
+    fn workflow_def_validate_user_input_requires_input_key() {
+        let def = WorkflowDef {
+            id: String::new(),
+            name: String::new(),
+            description: String::new(),
+            inputs: vec![],
+            steps: vec![WorkflowStepDef {
+                id: "s1".to_string(),
+                step_type: "user_input".to_string(),
+                description: "Wait".to_string(),
+                input_key: None,
+            }],
+        };
+        assert!(def.validate().is_err());
+    }
+
+    #[test]
+    fn workflow_def_validate_user_input_with_key_ok() {
+        let def = WorkflowDef {
+            id: String::new(),
+            name: String::new(),
+            description: String::new(),
+            inputs: vec![],
+            steps: vec![WorkflowStepDef {
+                id: "s1".to_string(),
+                step_type: "user_input".to_string(),
+                description: "Wait".to_string(),
+                input_key: Some("reply".to_string()),
+            }],
+        };
+        assert!(def.validate().is_ok());
+    }
+
+    #[test]
+    fn workflow_state_new_empty_id_gets_generated() {
+        let def = WorkflowDef {
+            id: String::new(),
+            name: String::new(),
+            description: String::new(),
+            inputs: vec![],
+            steps: vec![WorkflowStepDef {
+                id: "s1".to_string(),
+                step_type: "llm".to_string(),
+                description: "".to_string(),
+                input_key: None,
+            }],
+        };
+        let state = WorkflowState::new("sk".to_string(), def, HashMap::new(), 30);
+        assert!(!state.workflow_id.is_empty());
+        assert!(state.workflow_id.starts_with("wf-"));
+    }
+
+    #[test]
+    fn workflow_state_current_step_and_is_finished() {
+        let def = WorkflowDef {
+            id: "w1".to_string(),
+            name: String::new(),
+            description: String::new(),
+            inputs: vec![],
+            steps: vec![
+                WorkflowStepDef {
+                    id: "s1".to_string(),
+                    step_type: "llm".to_string(),
+                    description: "".to_string(),
+                    input_key: None,
+                },
+                WorkflowStepDef {
+                    id: "s2".to_string(),
+                    step_type: "llm".to_string(),
+                    description: "".to_string(),
+                    input_key: None,
+                },
+            ],
+        };
+        let state = WorkflowState::new("sk".to_string(), def.clone(), HashMap::new(), 30);
+        assert_eq!(state.current_step_index, 0);
+        assert!(!state.is_finished());
+        let step = state.current_step().unwrap();
+        assert_eq!(step.id, "s1");
+    }
+}

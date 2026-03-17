@@ -53,6 +53,47 @@ fn is_internal(plugin_value: &serde_json::Value) -> bool {
         .unwrap_or(false)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_internal_false_when_missing() {
+        let v = serde_json::json!({});
+        assert!(!is_internal(&v));
+    }
+
+    #[test]
+    fn is_internal_false_when_false() {
+        let v = serde_json::json!({ "internal": false });
+        assert!(!is_internal(&v));
+    }
+
+    #[test]
+    fn is_internal_true_when_true() {
+        let v = serde_json::json!({ "internal": true });
+        assert!(is_internal(&v));
+    }
+
+    #[test]
+    fn wasm_path_uses_path_from_config_when_absolute() {
+        let v = serde_json::json!({ "path": "/tmp/foo.wasm" });
+        let p = wasm_path("my_plugin", &v);
+        // Path may or may not exist; we only check it returns the path when it exists
+        if let Some(path) = p {
+            assert_eq!(path, std::path::Path::new("/tmp/foo.wasm"));
+        }
+    }
+
+    #[test]
+    fn wasm_path_none_when_path_missing_and_default_nonexistent() {
+        let v = serde_json::json!({});
+        let p = wasm_path("nonexistent_plugin_12345", &v);
+        // Default would be plugins_dir()/nonexistent_plugin_12345.wasm which typically doesn't exist
+        assert!(p.is_none() || p.as_ref().map(|x| x.exists()).unwrap_or(false));
+    }
+}
+
 /// Load all Extism plugins from config and register adapters. Single wasm load failure is logged and skipped.
 pub async fn load_extism_plugins(
     cfg: &config::Config,

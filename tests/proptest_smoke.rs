@@ -37,4 +37,16 @@ proptest! {
     fn smoke_test_f64_range_generator(v in common::f64_in_range(0.0, 2.0)) {
         prop_assert!(v >= 0.0 && v <= 2.0);
     }
+
+    /// SessionId roundtrip: parse a simple key "agent:X:Y" then format and parse again.
+    #[test]
+    fn session_id_simple_roundtrip(agent in common::non_empty_string(), channel in common::non_empty_string()) {
+        let key = format!("agent:{}:{}", agent, channel);
+        if let Ok(sid) = synbot::agent::session_id::SessionId::parse(&key) {
+            let formatted = sid.format();
+            prop_assert_eq!(&formatted, &key);
+            let parsed2 = synbot::agent::session_id::SessionId::parse(&formatted).unwrap();
+            prop_assert_eq!(sid, parsed2);
+        }
+    }
 }

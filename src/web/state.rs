@@ -50,3 +50,32 @@ impl AppState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent::skills::SkillsLoader;
+    use std::path::PathBuf;
+
+    #[test]
+    fn app_state_new_and_clone() {
+        let (inbound_tx, _) = mpsc::channel(10);
+        let (outbound_tx, _) = broadcast::channel(10);
+        let state = AppState::new(
+            Arc::new(Config::default()),
+            Arc::new(RwLock::new(SessionManager::new())),
+            Arc::new(RwLock::new(crate::cron::service::CronService::new(
+                PathBuf::from("test_cron.json"),
+            ))),
+            Arc::new(AgentRegistry::new()),
+            Arc::new(SkillsLoader::new(&PathBuf::from("."))),
+            inbound_tx,
+            outbound_tx,
+            Arc::new(RwLock::new(crate::web::log_buffer::LogBuffer::new(100))),
+            Arc::new(crate::tools::approval::ApprovalManager::new()),
+            None,
+        );
+        let cloned = state.clone();
+        assert!(Arc::ptr_eq(&state.config, &cloned.config));
+    }
+}

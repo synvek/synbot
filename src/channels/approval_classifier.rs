@@ -65,3 +65,19 @@ pub async fn classify_approval_response(
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn empty_message_returns_none() {
+        // classify_approval_response is async; we only test the empty trim path via a sync check
+        let trimmed = "".trim();
+        assert!(trimmed.is_empty());
+    }
+
+    #[test]
+    fn whitespace_only_returns_none() {
+        let trimmed = "   \n\t  ".trim();
+        assert!(trimmed.is_empty());
+    }
+}

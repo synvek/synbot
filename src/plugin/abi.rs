@@ -14,3 +14,25 @@ pub const FN_SKILL_LOAD: &str = "synbot_skill_load";
 pub const FN_BACKGROUND_RUN: &str = "synbot_background_run";
 /// Provider: completion request → response.
 pub const FN_COMPLETION: &str = "synbot_completion";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn abi_constants_non_empty_and_prefixed() {
+        let constants = [
+            FN_TOOL_MANIFEST,
+            FN_TOOL_CALL,
+            FN_HOOK_EVENT,
+            FN_SKILLS_LIST,
+            FN_SKILL_LOAD,
+            FN_BACKGROUND_RUN,
+            FN_COMPLETION,
+        ];
+        for c in constants {
+            assert!(!c.is_empty());
+            assert!(c.starts_with("synbot_"), "{}", c);
+        }
+    }
+}

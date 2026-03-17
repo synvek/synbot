@@ -80,3 +80,53 @@ pub struct CronStore {
 }
 
 fn default_version() -> u32 { 1 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cron_payload_default() {
+        let p = CronPayload::default();
+        assert_eq!(p.kind, "agent_turn");
+        assert!(p.message.is_empty());
+        assert!(!p.deliver);
+        assert!(p.channel.is_none());
+        assert!(p.to.is_none());
+    }
+
+    #[test]
+    fn cron_job_state_default() {
+        let s = CronJobState::default();
+        assert!(s.next_run_at_ms.is_none());
+        assert!(s.last_run_at_ms.is_none());
+        assert!(s.last_status.is_none());
+        assert!(s.last_error.is_none());
+    }
+
+    #[test]
+    fn schedule_serialization_cron() {
+        let s = Schedule::Cron {
+            expr: "0 9 * * *".to_string(),
+            tz: Some("UTC".to_string()),
+        };
+        let json = serde_json::to_string(&s).unwrap();
+        assert!(json.contains("cron"));
+        assert!(json.contains("0 9 * * *"));
+        let parsed: Schedule = serde_json::from_str(&json).unwrap();
+        match &parsed {
+            Schedule::Cron { expr, tz } => {
+                assert_eq!(expr, "0 9 * * *");
+                assert_eq!(tz.as_deref(), Some("UTC"));
+            }
+            _ => panic!("expected Cron variant"),
+        }
+    }
+
+    #[test]
+    fn cron_store_default() {
+        let store = CronStore::default();
+        assert_eq!(store.version, 0); // Default derive gives 0; serde uses default_version() for deserialization
+        assert!(store.jobs.is_empty());
+    }
+}
