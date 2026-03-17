@@ -21,6 +21,8 @@ Synbot supports multiple messaging channels, allowing you to interact with the A
 - **Email**: Poll IMAP for unread messages from a configured sender, reply via SMTP, and mark as read (configurable start time and poll interval; messages processed oldest-first).
 - **Matrix**: Decentralized real-time communication via the Matrix protocol (homeserver + username/password or access token).
 - **DingTalk (钉钉)**: Enterprise IM; Synbot uses **Stream mode** (self-implemented protocol) to receive robot messages and reply via **session webhook**. Single chat works without @; in groups only messages that **@ the robot** are delivered.
+- **WhatsApp**: WhatsApp Business Cloud API; receives messages via webhook and sends via REST API. Requires Meta app access token and phone number ID.
+- **IRC**: Connects to an IRC server (e.g. Libera); supports TLS, NickServ/auth, channels and private messages, and allowlist.
 
 ### Planned Support
 - WeChat
@@ -502,6 +504,84 @@ Synbot connects using **DingTalk Stream mode** with a **self-implemented protoco
 - Ensure the process can reach `api.dingtalk.com` (HTTPS) and the WebSocket host returned in `endpoint`.
 - If replies stop working, `sessionWebhook` may have expired; the user must send another message to obtain a fresh webhook.
 - In AppContainer/sandbox environments, WebSocket uses the same DNS path as other channels if `SYNBOT_IN_APP_SANDBOX` is set.
+
+## WhatsApp
+
+Synbot uses the **WhatsApp Business Cloud API**: inbound messages are received via a webhook (HTTP POST), and outbound messages are sent via the Meta Graph API. The web server must be reachable by Meta for webhook verification and delivery.
+
+### Prerequisites
+
+1. Create a Meta (Facebook) app and add the **WhatsApp** product.
+2. In WhatsApp → API Setup, obtain the **Phone number ID** and an **Access token** (Bearer token for the Cloud API).
+3. Configure a webhook URL (e.g. `https://your-domain.com/webhook/whatsapp`) and a **Verify token** in the Meta dashboard. Synbot serves the verify and webhook endpoints when the web dashboard is enabled and the WhatsApp channel is configured.
+
+### Configuration
+
+`channels.whatsapp` is an optional **array**. Example:
+
+```json
+{
+  "channels": {
+    "whatsapp": [
+      {
+        "name": "whatsapp",
+        "enabled": true,
+        "accessToken": "YOUR_ACCESS_TOKEN",
+        "phoneNumberId": "YOUR_PHONE_NUMBER_ID",
+        "verifyToken": "YOUR_WEBHOOK_VERIFY_TOKEN",
+        "allowlist": [],
+        "agent": "main"
+      }
+    ]
+  }
+}
+```
+
+- **accessToken**: WhatsApp Business API access token (Bearer token from Meta).
+- **phoneNumberId**: Phone number ID from the Meta WhatsApp API setup.
+- **verifyToken**: Token you set in the Meta webhook configuration; used for the GET verification handshake.
+- **allowlist**: Optional. Array of `{ "chatId", "chatAlias", "myName"? }`; `chatId` is the WhatsApp user phone number (e.g. `1234567890`). If empty, all senders are allowed.
+
+Run `synbot doctor` to verify WhatsApp credentials before starting.
+
+## IRC
+
+Synbot connects to an IRC server as a client, joins configured channels, and responds to channel messages and private messages. It supports TLS, optional NickServ (or server) password, and an allowlist of nicks.
+
+### Configuration
+
+`channels.irc` is an optional **array**. Example:
+
+```json
+{
+  "channels": {
+    "irc": [
+      {
+        "name": "irc",
+        "enabled": true,
+        "server": "irc.libera.chat",
+        "port": 6697,
+        "nickname": "synbot",
+        "channels": ["#general", "#dev"],
+        "useTls": true,
+        "password": null,
+        "allowlist": [],
+        "agent": "main"
+      }
+    ]
+  }
+}
+```
+
+- **server**: IRC server hostname (default if omitted: `irc.libera.chat`).
+- **port**: Port number (default 6697 for TLS).
+- **nickname**: Bot nickname (default `synbot`).
+- **channels**: List of channels to join (e.g. `["#general", "#dev"]`).
+- **useTls**: Whether to use TLS (default true).
+- **password**: Optional. NickServ password or server PASS; used for authentication.
+- **allowlist**: Optional. Array of `{ "chatId", "chatAlias", "myName"? }`; `chatId` is the IRC nick or channel name. If empty, all senders are allowed.
+
+Run `synbot doctor` to verify IRC server and nickname are set when the channel is enabled.
 
 ## Multi-Channel Configuration
 

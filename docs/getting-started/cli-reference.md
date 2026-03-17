@@ -51,7 +51,7 @@ synbot agent   # interactive (no -m)
 
 ### `synbot start` [options]
 
-Start the full daemon: channels (Telegram, Discord, Slack, Feishu, Email, Matrix), heartbeat, cron, and optional web dashboard. Loads config from the default root (`~/.synbot`) or from the directory given by `--root-dir`.
+Start the full daemon: channels (Telegram, Discord, Slack, Feishu, Email, Matrix, DingTalk, WhatsApp, IRC), heartbeat, cron, and optional web dashboard. Loads config from the default root (`~/.synbot`) or from the directory given by `--root-dir`.
 
 | Option | Description |
 |--------|-------------|
@@ -145,6 +145,17 @@ Examples:
 synbot cron list
 synbot cron add --name "daily report" --message "Summarize today's tasks" --cron "0 9 * * 1-5"
 synbot cron remove abc-123
+```
+
+### `synbot doctor`
+
+Run diagnostics on the current configuration and environment. Loads config from the default root (`~/.synbot`) or from `--root-dir`, then runs checks (e.g. config file exists, providers have API keys, enabled channels have required credentials, workspace and role paths) and prints a summary report with ✓ (pass), ✗ (fail), ⚠ (warn), or - (skip).
+
+Useful after install or after editing `config.json` to catch missing or invalid settings before starting the daemon.
+
+```bash
+synbot doctor
+synbot --root-dir /path/to/workspace doctor
 ```
 
 ## Config and paths

@@ -17,6 +17,8 @@ Synbot 支持多种消息渠道，允许您通过不同平台与 AI 助手交互
 - **电子邮件(Email)** 通过 IMAP 收信、SMTP 发信，仅处理来自指定发件人的未读邮件（可配置起始时间），按时间从旧到新逐条回复后标为已读。
 - **Matrix**: 基于 Matrix 协议的分布式实时通信（需 homeserver 地址及用户名/密码或 access token）。
 - **钉钉 (DingTalk)**：企业 IM；Synbot 使用**自研 Stream 协议**接收机器人回调，通过回调中的 **sessionWebhook** 按会话回复。单聊无需 @；群内仅 **@ 机器人** 的消息会送达。
+- **WhatsApp**：WhatsApp Business Cloud API；通过 Webhook 收消息、通过 REST API 发消息。需 Meta 应用 Access Token 与 Phone Number ID。
+- **IRC**：连接 IRC 服务器（如 Libera）；支持 TLS、NickServ/认证、频道与私聊及白名单。
 
 ### 计划支持
 - 微信
@@ -444,6 +446,84 @@ Synbot 通过 **钉钉 Stream 模式** 接入，协议为**项目内自研实现
 - 确保本机可访问 `api.dingtalk.com` 及返回的 WebSocket `endpoint`。
 - 若回复失败，可能是 **sessionWebhook 已过期**，需用户再发一条消息以获取新 webhook。
 - 在 AppContainer 等环境下，若设置了 `SYNBOT_IN_APP_SANDBOX`，WebSocket 会与其它渠道一样走自定义 DNS 解析。
+
+## WhatsApp
+
+Synbot 使用 **WhatsApp Business Cloud API**：入站消息通过 Webhook（HTTP POST）接收，出站消息通过 Meta Graph API 发送。Web 服务需可被 Meta 访问，以便完成 Webhook 验证与消息推送。
+
+### 准备
+
+1. 在 Meta (Facebook) 创建应用并添加 **WhatsApp** 产品。
+2. 在 WhatsApp → API 设置中获取 **Phone number ID** 和 **Access token**（Cloud API 的 Bearer 令牌）。
+3. 在 Meta 控制台配置 Webhook URL（如 `https://your-domain.com/webhook/whatsapp`）和 **Verify token**。启用 Web 控制台并配置 WhatsApp 渠道后，Synbot 会提供验证与 Webhook 端点。
+
+### 配置
+
+`channels.whatsapp` 为可选**数组**。示例：
+
+```json
+{
+  "channels": {
+    "whatsapp": [
+      {
+        "name": "whatsapp",
+        "enabled": true,
+        "accessToken": "YOUR_ACCESS_TOKEN",
+        "phoneNumberId": "YOUR_PHONE_NUMBER_ID",
+        "verifyToken": "YOUR_WEBHOOK_VERIFY_TOKEN",
+        "allowlist": [],
+        "agent": "main"
+      }
+    ]
+  }
+}
+```
+
+- **accessToken**：WhatsApp Business API 访问令牌（Meta 提供的 Bearer 令牌）。
+- **phoneNumberId**：Meta WhatsApp API 设置中的 Phone number ID。
+- **verifyToken**：在 Meta Webhook 配置中填写的验证令牌，用于 GET 验证握手。
+- **allowlist**：可选。`{ "chatId", "chatAlias", "myName"? }` 数组；`chatId` 为 WhatsApp 用户手机号（如 `1234567890`）。为空则允许所有发送方。
+
+启动前可使用 `synbot doctor` 检查 WhatsApp 凭证。
+
+## IRC
+
+Synbot 以客户端身份连接 IRC 服务器，加入配置的频道，并响应频道消息与私聊。支持 TLS、可选的 NickServ/服务器密码及昵称白名单。
+
+### 配置
+
+`channels.irc` 为可选**数组**。示例：
+
+```json
+{
+  "channels": {
+    "irc": [
+      {
+        "name": "irc",
+        "enabled": true,
+        "server": "irc.libera.chat",
+        "port": 6697,
+        "nickname": "synbot",
+        "channels": ["#general", "#dev"],
+        "useTls": true,
+        "password": null,
+        "allowlist": [],
+        "agent": "main"
+      }
+    ]
+  }
+}
+```
+
+- **server**：IRC 服务器主机名（省略时默认 `irc.libera.chat`）。
+- **port**：端口（TLS 时默认 6697）。
+- **nickname**：机器人昵称（默认 `synbot`）。
+- **channels**：要加入的频道列表（如 `["#general", "#dev"]`）。
+- **useTls**：是否使用 TLS（默认 true）。
+- **password**：可选。NickServ 密码或服务器 PASS，用于认证。
+- **allowlist**：可选。`{ "chatId", "chatAlias", "myName"? }` 数组；`chatId` 为 IRC 昵称或频道名。为空则允许所有发送方。
+
+启用 IRC 渠道时可用 `synbot doctor` 检查 server 与 nickname 是否已配置。
 
 ## 多渠道配置
 

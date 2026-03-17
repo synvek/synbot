@@ -233,6 +233,66 @@ cargo run --example generate_config_schema --features schema -- -o config.schema
 - **accessToken**：可选；设置后跳过登录。
 - **allowlist** / **enableAllowlist**：与其他渠道相同；`chatId` 可为 room ID 或 user ID。
 
+### WhatsApp
+
+可选渠道，用于 WhatsApp Business Cloud API；通过 Webhook 收消息，通过 REST API 发消息。
+
+```json
+{
+  "channels": {
+    "whatsapp": [
+      {
+        "name": "whatsapp",
+        "enabled": true,
+        "accessToken": "YOUR_ACCESS_TOKEN",
+        "phoneNumberId": "YOUR_PHONE_NUMBER_ID",
+        "verifyToken": "YOUR_WEBHOOK_VERIFY_TOKEN",
+        "allowlist": [],
+        "agent": "main"
+      }
+    ]
+  }
+}
+```
+
+- **accessToken**：WhatsApp Business API 访问令牌（Meta 提供的 Bearer 令牌）。
+- **phoneNumberId**：Meta WhatsApp API 设置中的 Phone number ID。
+- **verifyToken**：Webhook GET 验证用令牌（在 Meta 控制台设置）。
+- **allowlist**：结构与其他渠道相同；`chatId` 为用户手机号。
+
+### IRC
+
+可选渠道，连接 IRC 服务器（如 Libera）。支持 TLS、NickServ/服务器密码及白名单。
+
+```json
+{
+  "channels": {
+    "irc": [
+      {
+        "name": "irc",
+        "enabled": true,
+        "server": "irc.libera.chat",
+        "port": 6697,
+        "nickname": "synbot",
+        "channels": ["#general", "#dev"],
+        "useTls": true,
+        "password": null,
+        "allowlist": [],
+        "agent": "main"
+      }
+    ]
+  }
+}
+```
+
+- **server**：IRC 服务器主机名（省略时默认 `irc.libera.chat`）。
+- **port**：端口（默认 6697）。
+- **nickname**：机器人昵称（默认 `synbot`）。
+- **channels**：要加入的频道列表。
+- **useTls**：使用 TLS（默认 true）。
+- **password**：可选 NickServ 或服务器密码。
+- **allowlist**：结构同上；`chatId` 为 IRC 昵称或频道名。
+
 ## 提供商配置
 
 ### Anthropic
@@ -913,16 +973,47 @@ Synbot 在启动时验证您的配置。常见的验证错误包括：
 
 ## 环境变量
 
-您可以使用环境变量覆盖配置值：
+### 在 config.json 中的替换
+
+Synbot 支持在 `config.json` 内进行**环境变量替换**。加载配置文件时，任意**字符串值**（不包括对象的键）可使用：
+
+- **`${VAR_NAME}`** — 替换为环境变量 `VAR_NAME` 的值。若未设置该变量，加载将报错并退出。
+- **`${VAR_NAME:-默认值}`** — 若设置了 `VAR_NAME` 则用其值，否则用 `默认值`。
+- **`\${...}`** — 在反斜杠后写 `${...}` 可保留字面量，不进行替换。
+
+仅对 JSON 的字符串值（如 token、API key、主机名）做替换；数字、布尔和 `null` 不变。这样可将敏感信息从配置文件中剥离，并在不同环境中复用同一份配置。
+
+示例：
+
+```json
+{
+  "channels": {
+    "telegram": [
+      {
+        "enabled": true,
+        "token": "${TELEGRAM_BOT_TOKEN}"
+      }
+    ]
+  },
+  "providers": {
+    "anthropic": {
+      "apiKey": "${ANTHROPIC_API_KEY:-}"
+    }
+  }
+}
+```
+
+在启动 Synbot 前设置变量：
 
 ```bash
-# 覆盖日志级别
-export RUST_LOG=synbot=debug
-
-# 覆盖特定配置值
-export SYNBOT_CHANNELS_TELEGRAM_TOKEN="your_token"
-export SYNBOT_PROVIDERS_ANTHROPIC_APIKEY="your_api_key"
+export TELEGRAM_BOT_TOKEN="your_bot_token"
+export ANTHROPIC_API_KEY="sk-ant-..."
+synbot start
 ```
+
+### 日志级别（RUST_LOG）
+
+运行时的日志级别可通过标准环境变量 `RUST_LOG` 覆盖（如 `RUST_LOG=synbot=debug`）。该机制不使用 `${VAR}` 语法，由 tracing 在启动后读取。
 
 ## 配置重载
 
@@ -942,7 +1033,7 @@ curl -X POST http://localhost:18888/api/config/reload
 从最小配置开始，根据需要添加功能。
 
 ### 2. 对密钥使用环境变量
-将 API 密钥和令牌存储在环境变量或密钥管理系统中。
+在 `config.json` 中使用 `${VAR}` 或 `${VAR:-默认值}` 填写 API 密钥和令牌，避免明文写入配置文件。参见上文 [环境变量](#环境变量)。也可使用外部密钥管理，在启动 Synbot 前将值注入环境变量。
 
 ### 3. 为 Web 控制台启用身份验证
 `synbot onboard` 默认会启用 Web 控制台并开启身份验证（用户名 `admin`，密码为仅打印一次的随机 UUID）。若将 Web 控制台暴露给网络，请始终保持身份验证开启。
@@ -962,6 +1053,7 @@ curl -X POST http://localhost:18888/api/config/reload
 - 检查文件权限：`ls -la ~/.synbot/config.json`
 - 验证 JSON 语法：`python -m json.tool ~/.synbot/config.json`
 - 检查 JSON 中的重复键
+- 运行 `synbot doctor` 校验配置与环境（如 `${VAR}` 所需环境变量是否已设置）
 
 ### 配置错误
 - 在日志中查找验证错误消息

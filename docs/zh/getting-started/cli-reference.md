@@ -51,7 +51,7 @@ synbot agent   # 交互模式（不加 -m）
 
 ### `synbot start` [选项]
 
-启动完整守护进程：渠道（Telegram、Discord、Slack、飞书、Email、Matrix）、心跳、定时任务及可选 Web 控制台。从默认根目录 `~/.synbot` 或通过 `--root-dir` 指定的目录加载配置。
+启动完整守护进程：渠道（Telegram、Discord、Slack、飞书、Email、Matrix、钉钉、WhatsApp、IRC）、心跳、定时任务及可选 Web 控制台。从默认根目录 `~/.synbot` 或通过 `--root-dir` 指定的目录加载配置。
 
 | 选项 | 说明 |
 |------|------|
@@ -145,6 +145,17 @@ synbot --root-dir /data/synbot service install
 synbot cron list
 synbot cron add --name "日报" --message "总结今日任务" --cron "0 9 * * 1-5"
 synbot cron remove abc-123
+```
+
+### `synbot doctor`
+
+对当前配置与环境进行诊断。从默认根目录 `~/.synbot` 或通过 `--root-dir` 指定的目录加载配置，执行一系列检查（如配置文件存在、提供商 API 密钥、已启用渠道的必填凭证、工作区与角色路径等），并输出带 ✓（通过）、✗（失败）、⚠（警告）、-（跳过）的汇总报告。
+
+适用于安装后或修改 `config.json` 后，在启动守护进程前发现缺失或无效配置。
+
+```bash
+synbot doctor
+synbot --root-dir /path/to/workspace doctor
 ```
 
 ## 配置与路径

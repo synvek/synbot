@@ -236,6 +236,66 @@ Optional channel for Matrix protocol (decentralized real-time chat). Configure w
 - **accessToken**: Optional; when set, login is skipped.
 - **allowlist** / **enableAllowlist**: Same pattern as other channels; `chatId` can be room ID or user ID.
 
+### WhatsApp
+
+Optional channel for WhatsApp Business Cloud API. Receives messages via webhook, sends via REST API.
+
+```json
+{
+  "channels": {
+    "whatsapp": [
+      {
+        "name": "whatsapp",
+        "enabled": true,
+        "accessToken": "YOUR_ACCESS_TOKEN",
+        "phoneNumberId": "YOUR_PHONE_NUMBER_ID",
+        "verifyToken": "YOUR_WEBHOOK_VERIFY_TOKEN",
+        "allowlist": [],
+        "agent": "main"
+      }
+    ]
+  }
+}
+```
+
+- **accessToken**: WhatsApp Business API access token (Bearer token from Meta).
+- **phoneNumberId**: Phone number ID from Meta WhatsApp API setup.
+- **verifyToken**: Token for webhook GET verification (set in Meta dashboard).
+- **allowlist**: Same structure as other channels; `chatId` is the user's phone number.
+
+### IRC
+
+Optional channel to connect to an IRC server (e.g. Libera). Supports TLS, NickServ/server password, and allowlist.
+
+```json
+{
+  "channels": {
+    "irc": [
+      {
+        "name": "irc",
+        "enabled": true,
+        "server": "irc.libera.chat",
+        "port": 6697,
+        "nickname": "synbot",
+        "channels": ["#general", "#dev"],
+        "useTls": true,
+        "password": null,
+        "allowlist": [],
+        "agent": "main"
+      }
+    ]
+  }
+}
+```
+
+- **server**: IRC server hostname (default `irc.libera.chat` if omitted).
+- **port**: Port (default 6697).
+- **nickname**: Bot nickname (default `synbot`).
+- **channels**: List of channels to join.
+- **useTls**: Use TLS (default true).
+- **password**: Optional NickServ or server password.
+- **allowlist**: Same structure; `chatId` is IRC nick or channel name.
+
 ## Provider Configuration
 
 ### Anthropic
@@ -916,16 +976,47 @@ Synbot validates your configuration on startup. Common validation errors include
 
 ## Environment Variables
 
-You can override configuration values using environment variables:
+### Substitution in config.json
+
+Synbot supports **environment variable substitution** inside `config.json`. When the config file is loaded, any **string value** (not object keys) may use:
+
+- **`${VAR_NAME}`** — replaced by the value of the environment variable `VAR_NAME`. If the variable is not set, loading fails with an error.
+- **`${VAR_NAME:-default}`** — replaced by the value of `VAR_NAME` if set; otherwise replaced by `default`.
+- **`\${...}`** — escape with a backslash to keep the literal `${...}` in the config.
+
+Substitution is applied only to JSON string values (e.g. tokens, API keys, hostnames); numbers, booleans, and `null` are left unchanged. This lets you keep secrets out of the config file and use the same config across environments.
+
+Example:
+
+```json
+{
+  "channels": {
+    "telegram": [
+      {
+        "enabled": true,
+        "token": "${TELEGRAM_BOT_TOKEN}"
+      }
+    ]
+  },
+  "providers": {
+    "anthropic": {
+      "apiKey": "${ANTHROPIC_API_KEY:-}"
+    }
+  }
+}
+```
+
+Set the variables before starting Synbot:
 
 ```bash
-# Override log level
-export RUST_LOG=synbot=debug
-
-# Override specific configuration values
-export SYNBOT_CHANNELS_TELEGRAM_TOKEN="your_token"
-export SYNBOT_PROVIDERS_ANTHROPIC_APIKEY="your_api_key"
+export TELEGRAM_BOT_TOKEN="your_bot_token"
+export ANTHROPIC_API_KEY="sk-ant-..."
+synbot start
 ```
+
+### Log level (RUST_LOG)
+
+Tracing/log level can be overridden at runtime with the standard `RUST_LOG` environment variable (e.g. `RUST_LOG=synbot=debug`). This does not use the `${VAR}` syntax; it is read by the tracing subscriber after startup.
 
 ## Configuration Reload
 
@@ -945,7 +1036,7 @@ curl -X POST http://localhost:18888/api/config/reload
 Begin with a minimal configuration and add features as needed.
 
 ### 2. Use Environment Variables for Secrets
-Store API keys and tokens in environment variables or secret management systems.
+Use `${VAR}` or `${VAR:-default}` in `config.json` for API keys and tokens so secrets are not stored in the file. See [Environment Variables](#environment-variables) above. You can also use external secret management and inject values into the environment before starting Synbot.
 
 ### 3. Enable Authentication for Web Dashboard
 `synbot onboard` enables the web dashboard with auth by default (username `admin`, password a random UUID printed once). Always keep authentication enabled if exposing the web dashboard to networks.
@@ -965,6 +1056,7 @@ Consider keeping your configuration in version control (excluding secrets).
 - Check file permissions: `ls -la ~/.synbot/config.json`
 - Validate JSON syntax: `python -m json.tool ~/.synbot/config.json`
 - Check for duplicate keys in JSON
+- Run `synbot doctor` to validate config and environment (e.g. missing env vars for `${VAR}`)
 
 ### Configuration Errors
 - Look for validation error messages in logs
