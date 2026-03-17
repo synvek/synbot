@@ -1,4 +1,4 @@
-﻿---
+---
 title: Permission Guide
 description: How to configure and manage permissions in Synbot
 ---
@@ -337,11 +337,11 @@ curl -X POST http://localhost:18888/api/approvals/req_123456/deny \
 
 ### Approval Timeouts
 
-Approval requests have configurable timeouts:
+Approval requests have a configurable timeout. The default is **5 minutes (300 seconds)**. You can override it in config:
 
 ```json
 {
-  "approvalTimeoutSecs": 300  # 5 minutes
+  "approvalTimeoutSecs": 300
 }
 ```
 

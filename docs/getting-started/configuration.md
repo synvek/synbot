@@ -412,7 +412,7 @@ Example with an extra agent using the dev role:
 2. Under `tools.exec.permissions`, set:
    - **`"enabled": true`** — turn on permission/approval checks
    - **`"defaultLevel": "require_approval"`** — commands that do not match any rule will require approval (this is also the default)
-   - **`"approvalTimeoutSecs": 300`** — approval timeout in seconds (must be > 0)
+   - **`"approvalTimeoutSecs": 300`** — approval timeout in seconds (default 300 = 5 minutes; must be > 0 when permissions enabled)
 
 **Minimal example (all exec commands require approval):**
 
@@ -429,6 +429,8 @@ Example with an extra agent using the dev role:
   }
 }
 ```
+
+You can omit `approvalTimeoutSecs` to use the default of 5 minutes (300 seconds).
 
 If you already have `tools` or `tools.exec` in your config, just merge the `permissions` section. After editing, restart synbot or reload the configuration (if enabled in your deployment).
 

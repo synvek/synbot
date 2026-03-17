@@ -558,7 +558,7 @@ pub struct PermissionConfig {
     /// Default permission level when no rule matches.
     #[serde(default = "default_permission_level")]
     pub default_level: PermissionLevel,
-    /// Approval request timeout (seconds)
+    /// Approval request timeout (seconds). Default 300 (5 minutes).
     #[serde(default = "default_approval_timeout")]
     pub approval_timeout_secs: u64,
     /// List of permission rules (matched in order).

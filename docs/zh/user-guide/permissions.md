@@ -333,11 +333,11 @@ curl -X POST http://localhost:18888/api/approvals/req_123456/deny \
 
 ### 审批超时
 
-审批请求具有可配置的超时：
+审批请求的超时时间可配置，**默认 5 分钟（300 秒）**。可在配置中覆盖：
 
 ```json
 {
-  "approvalTimeoutSecs": 300  # 5 分钟
+  "approvalTimeoutSecs": 300
 }
 ```
 

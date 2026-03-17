@@ -409,7 +409,7 @@ cargo run --example generate_config_schema --features schema -- -o config.schema
 2. 在 `tools.exec.permissions` 中设置：
    - **`"enabled": true`** — 开启权限/审批；
    - **`"defaultLevel": "require_approval"`** — 未匹配规则的命令一律需审批（默认即此值）；
-   - **`"approvalTimeoutSecs": 300`** — 审批等待超时秒数（必填且 > 0）。
+   - **`"approvalTimeoutSecs": 300`** — 审批等待超时秒数（默认 300，即 5 分钟；开启权限时需 > 0）。
 
 **最小示例（所有 exec 命令均需审批）：**
 
@@ -426,6 +426,8 @@ cargo run --example generate_config_schema --features schema -- -o config.schema
   }
 }
 ```
+
+可省略 `approvalTimeoutSecs`，将使用默认 5 分钟（300 秒）。
 
 若已有 `tools` 或 `tools.exec`，只需补全或合并上述 `permissions` 段即可。修改后重启 synbot 或调用配置重载接口使配置生效。
 
