@@ -45,6 +45,7 @@ export default defineConfig({
               { text: 'Channels', link: '/user-guide/channels' },
               { text: 'Tools', link: '/user-guide/tools' },
               { text: 'Workflow', link: '/user-guide/workflow' },
+              { text: 'Slash Commands', link: '/user-guide/slash-commands' },
               { text: 'Permissions', link: '/user-guide/permissions' }
             ]
           },
@@ -94,6 +95,7 @@ export default defineConfig({
             { text: '渠道', link: '/zh/user-guide/channels' },
             { text: '工具', link: '/zh/user-guide/tools' },
             { text: '工作流', link: '/zh/user-guide/workflow' },
+            { text: '快捷命令', link: '/zh/user-guide/slash-commands' },
             { text: '权限', link: '/zh/user-guide/permissions' }
           ]
         },
