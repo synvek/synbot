@@ -5,6 +5,7 @@
 use anyhow::Result;
 
 mod agent;
+mod appcontainer_dns;
 mod background;
 mod bus;
 mod channels;
@@ -16,14 +17,12 @@ mod hooks;
 mod logging;
 mod plugin;
 mod rig_provider;
+mod sandbox;
+mod security;
 mod tools;
+mod url_utils;
 mod web;
 mod workflow;
-mod sandbox;
-
-mod url_utils;
-
-mod appcontainer_dns;
 
 #[tokio::main]
 async fn main() -> Result<()> {

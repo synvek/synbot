@@ -67,6 +67,9 @@ slack-morphism = { version = "2.18", features = ["hyper"] }
 # Matrix channel (matrix-sdk; minimal features, no E2EE/sqlite by default)
 matrix-sdk = { version = "0.16", default-features = false, features = ["rustls-tls"] }
 
+# IRC channel
+irc = { version = "1", default-features = false, features = ["tls-native"] }
+
 # Email channel (IMAP + SMTP)
 async-imap = { version = "0.11", default-features = false, features = ["runtime-tokio"] }
 imap-proto = "0.16"
@@ -160,6 +163,8 @@ tempfile = "3"
 criterion = { version = "0.5", features = ["async_tokio", "html_reports"] }
 # Async utilities
 futures-util = "0.3"
+# LLM types for mock completion model in tests
+rig-core = { version = "0.30", features = ["all"] }
 
 [[bench]]
 name = "sandbox_benchmarks"

@@ -5,15 +5,15 @@ use std::sync::Arc;
 use anyhow::Result;
 
 use crate::channels::{
-    dingtalk, discord, email, feishu, matrix, slack, telegram, Channel, ChannelRegistry,
-    ChannelStartContext,
+    dingtalk, discord, email, feishu, irc, matrix, slack, telegram, whatsapp, Channel,
+    ChannelRegistry, ChannelStartContext,
 };
 use crate::config::{
-    DingTalkConfig, DiscordConfig, EmailConfig, FeishuConfig, MatrixConfig, SlackConfig,
-    TelegramConfig,
+    DingTalkConfig, DiscordConfig, EmailConfig, FeishuConfig, IrcConfig, MatrixConfig, SlackConfig,
+    TelegramConfig, WhatsAppConfig,
 };
 
-/// Register all built-in channel factories (telegram, feishu, discord, slack, email, matrix, dingtalk).
+/// Register all built-in channel factories (telegram, feishu, discord, slack, email, matrix, dingtalk, whatsapp, irc).
 pub fn register_builtin_channels(registry: &mut ChannelRegistry) {
     registry.register("telegram", Arc::new(TelegramChannelFactory));
     registry.register("feishu", Arc::new(FeishuChannelFactory));
@@ -22,6 +22,8 @@ pub fn register_builtin_channels(registry: &mut ChannelRegistry) {
     registry.register("email", Arc::new(EmailChannelFactory));
     registry.register("matrix", Arc::new(MatrixChannelFactory));
     registry.register("dingtalk", Arc::new(DingTalkChannelFactory));
+    registry.register("whatsapp", Arc::new(WhatsAppChannelFactory));
+    registry.register("irc", Arc::new(IrcChannelFactory));
 }
 
 struct DingTalkChannelFactory;
@@ -178,6 +180,34 @@ impl crate::channels::ChannelFactory for MatrixChannelFactory {
     }
 }
 
+struct WhatsAppChannelFactory;
+
+impl crate::channels::ChannelFactory for WhatsAppChannelFactory {
+    fn create(
+        &self,
+        config: serde_json::Value,
+        ctx: ChannelStartContext,
+    ) -> Result<Box<dyn Channel>> {
+        let cfg: WhatsAppConfig = serde_json::from_value(config)?;
+        let ch = whatsapp::WhatsAppChannel::new(cfg, ctx.inbound_tx, ctx.outbound_rx);
+        Ok(Box::new(ch))
+    }
+}
+
+struct IrcChannelFactory;
+
+impl crate::channels::ChannelFactory for IrcChannelFactory {
+    fn create(
+        &self,
+        config: serde_json::Value,
+        ctx: ChannelStartContext,
+    ) -> Result<Box<dyn Channel>> {
+        let cfg: IrcConfig = serde_json::from_value(config)?;
+        let ch = irc::IrcChannel::new(cfg, ctx.inbound_tx, ctx.outbound_rx);
+        Ok(Box::new(ch))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -194,7 +224,9 @@ mod tests {
         assert!(names.contains(&"email".to_string()));
         assert!(names.contains(&"matrix".to_string()));
         assert!(names.contains(&"dingtalk".to_string()));
-        assert_eq!(names.len(), 7);
+        assert!(names.contains(&"whatsapp".to_string()));
+        assert!(names.contains(&"irc".to_string()));
+        assert_eq!(names.len(), 9);
     }
 
     #[test]

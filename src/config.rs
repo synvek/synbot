@@ -291,6 +291,79 @@ fn default_email_poll_interval_secs() -> u64 {
     120
 }
 
+/// WhatsApp Business Cloud API channel configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct WhatsAppConfig {
+    /// Whether this WhatsApp channel is enabled.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Unique channel name (default "whatsapp").
+    #[serde(default = "default_whatsapp_name")]
+    pub name: String,
+    /// WhatsApp Business API access token (Bearer token for Cloud API).
+    pub access_token: Option<String>,
+    /// WhatsApp phone number ID from the Meta developer console.
+    pub phone_number_id: Option<String>,
+    /// Webhook verify token (used during Meta webhook verification handshake).
+    pub verify_token: Option<String>,
+    /// Allowlist of phone numbers allowed to interact with the bot.
+    /// If empty, all senders are allowed.
+    #[serde(default)]
+    pub allowlist: Vec<AllowlistEntry>,
+    /// Agent to use for this channel (e.g. "main", "dev"). Default "main".
+    #[serde(default = "default_channel_agent")]
+    pub agent: String,
+}
+
+fn default_whatsapp_name() -> String {
+    "whatsapp".into()
+}
+
+/// IRC channel configuration.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct IrcConfig {
+    /// Whether this IRC channel is enabled.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Unique channel name (default "irc").
+    #[serde(default = "default_irc_name")]
+    pub name: String,
+    /// IRC server hostname or IP address.
+    pub server: Option<String>,
+    /// IRC server port (default 6697 for TLS, 6667 for plain).
+    #[serde(default = "default_irc_port")]
+    pub port: u16,
+    /// Bot nickname on the IRC server.
+    pub nickname: Option<String>,
+    /// List of IRC channels to join (e.g. ["#general", "#dev"]).
+    #[serde(default)]
+    pub channels: Vec<String>,
+    /// Whether to use TLS (default true).
+    #[serde(default = "default_true")]
+    pub use_tls: bool,
+    /// NickServ password or SASL password for authentication.
+    pub password: Option<String>,
+    /// Allowlist of IRC nicks allowed to interact with the bot.
+    /// If empty, all senders are allowed.
+    #[serde(default)]
+    pub allowlist: Vec<AllowlistEntry>,
+    /// Agent to use for this channel (e.g. "main", "dev"). Default "main".
+    #[serde(default = "default_channel_agent")]
+    pub agent: String,
+}
+
+fn default_irc_name() -> String {
+    "irc".into()
+}
+
+fn default_irc_port() -> u16 {
+    6697
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
@@ -309,6 +382,12 @@ pub struct ChannelsConfig {
     pub matrix: Vec<MatrixConfig>,
     #[serde(default)]
     pub dingtalk: Vec<DingTalkConfig>,
+    /// WhatsApp Business Cloud API channels.
+    #[serde(default)]
+    pub whatsapp: Option<Vec<WhatsAppConfig>>,
+    /// IRC channels.
+    #[serde(default)]
+    pub irc: Option<Vec<IrcConfig>>,
 }
 
 impl ChannelsConfig {
@@ -371,6 +450,24 @@ impl ChannelsConfig {
             .collect();
         if !dingtalk.is_empty() {
             out.push(("dingtalk".to_string(), dingtalk));
+        }
+        if let Some(whatsapp_list) = &self.whatsapp {
+            let whatsapp: Vec<serde_json::Value> = whatsapp_list
+                .iter()
+                .map(|c| serde_json::to_value(c).unwrap_or_default())
+                .collect();
+            if !whatsapp.is_empty() {
+                out.push(("whatsapp".to_string(), whatsapp));
+            }
+        }
+        if let Some(irc_list) = &self.irc {
+            let irc: Vec<serde_json::Value> = irc_list
+                .iter()
+                .map(|c| serde_json::to_value(c).unwrap_or_default())
+                .collect();
+            if !irc.is_empty() {
+                out.push(("irc".to_string(), irc));
+            }
         }
         out
     }
@@ -1489,6 +1586,13 @@ pub struct Config {
     /// Plugin-specific configuration. Keys are plugin names; values are arbitrary JSON for each plugin.
     #[serde(default)]
     pub plugins: std::collections::HashMap<String, serde_json::Value>,
+    /// Config file format version. Used by ConfigMigrator to apply incremental migrations.
+    #[serde(default = "default_config_version")]
+    pub config_version: u32,
+}
+
+fn default_config_version() -> u32 {
+    1
 }
 
 /// Generates the JSON Schema for the root config. Available only when the `schema` feature is enabled.
@@ -2325,6 +2429,340 @@ pub fn log_dir_path(cfg: &Config) -> PathBuf {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Environment variable substitutor
+// ---------------------------------------------------------------------------
+
+/// Substitutes `${VAR_NAME}` and `${VAR_NAME:-default}` patterns in JSON string values.
+/// Only operates on JSON string values; numbers, booleans, and null are left unchanged.
+/// The escape sequence `\${...}` is preserved as the literal `${...}`.
+pub struct EnvSubstitutor;
+
+impl EnvSubstitutor {
+    /// Perform environment variable substitution on a raw JSON string.
+    /// Only JSON string values are processed; other value types are unchanged.
+    pub fn substitute(raw_json: &str) -> Result<String> {
+        let mut result = String::with_capacity(raw_json.len());
+        let chars: Vec<char> = raw_json.chars().collect();
+        let len = chars.len();
+        let mut i = 0;
+
+        // State tracking for JSON structure
+        // We need to know if we're inside a string that is a VALUE (not a key).
+        // JSON structure: object keys are strings followed by ':', values follow ':' or ','.
+        // We track nesting depth and whether the next string is a key or value.
+        #[derive(Clone, Copy, PartialEq)]
+        enum Context {
+            TopLevel,
+            // Inside an object: tracks whether next string is a key or value
+            Object { expect_key: bool },
+            Array,
+        }
+
+        let mut context_stack: Vec<Context> = vec![Context::TopLevel];
+
+        while i < len {
+            let ch = chars[i];
+
+            match ch {
+                '{' => {
+                    result.push(ch);
+                    i += 1;
+                    // Next string in this object is a key
+                    context_stack.push(Context::Object { expect_key: true });
+                }
+                '[' => {
+                    result.push(ch);
+                    i += 1;
+                    context_stack.push(Context::Array);
+                }
+                '}' | ']' => {
+                    result.push(ch);
+                    i += 1;
+                    context_stack.pop();
+                    // After closing a nested value, the parent object expects a comma or end
+                    // We don't need to change parent state here
+                }
+                ':' => {
+                    result.push(ch);
+                    i += 1;
+                    // After a colon in an object, the next string is a value
+                    if let Some(Context::Object { expect_key }) = context_stack.last_mut() {
+                        *expect_key = false;
+                    }
+                }
+                ',' => {
+                    result.push(ch);
+                    i += 1;
+                    // After a comma in an object, the next string is a key
+                    if let Some(Context::Object { expect_key }) = context_stack.last_mut() {
+                        *expect_key = true;
+                    }
+                    // In an array, commas separate values — no state change needed
+                }
+                '"' => {
+                    // Determine if this string is a value we should substitute
+                    let is_value = match context_stack.last() {
+                        Some(Context::Object { expect_key }) => !expect_key,
+                        Some(Context::Array) => true,
+                        Some(Context::TopLevel) => true,
+                        None => true,
+                    };
+
+                    // Parse the JSON string, collecting its raw (JSON-escaped) content
+                    result.push('"');
+                    i += 1; // skip opening quote
+
+                    // Collect the raw string content (between the quotes)
+                    let mut raw_value = String::new();
+                    while i < len {
+                        let c = chars[i];
+                        if c == '"' {
+                            // End of string
+                            break;
+                        } else if c == '\\' && i + 1 < len {
+                            // JSON escape sequence
+                            raw_value.push(c);
+                            raw_value.push(chars[i + 1]);
+                            i += 2;
+                        } else {
+                            raw_value.push(c);
+                            i += 1;
+                        }
+                    }
+                    // i now points at closing '"' or end of input
+
+                    if is_value {
+                        // Perform env var substitution on the raw value
+                        let substituted = Self::substitute_value(&raw_value)?;
+                        result.push_str(&substituted);
+                    } else {
+                        result.push_str(&raw_value);
+                    }
+
+                    result.push('"');
+                    if i < len {
+                        i += 1; // skip closing quote
+                    }
+
+                    // After a string value in an object, next string will be a key
+                    if is_value {
+                        if let Some(Context::Object { expect_key }) = context_stack.last_mut() {
+                            *expect_key = true;
+                        }
+                    }
+                }
+                _ => {
+                    result.push(ch);
+                    i += 1;
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Substitute all `${VAR}` and `${VAR:-default}` patterns in a single string value.
+    /// `\${...}` is preserved as the literal `${...}`.
+    fn substitute_value(value: &str) -> Result<String> {
+        let mut result = String::with_capacity(value.len());
+        let chars: Vec<char> = value.chars().collect();
+        let len = chars.len();
+        let mut i = 0;
+
+        while i < len {
+            // Check for escape sequence: \${
+            if chars[i] == '\\' && i + 1 < len && chars[i + 1] == '$' && i + 2 < len && chars[i + 2] == '{' {
+                // Escaped: preserve as literal ${...}
+                // Skip the backslash, emit the rest literally until closing '}'
+                i += 1; // skip backslash
+                // Emit '${' and everything up to and including '}'
+                result.push('$');
+                result.push('{');
+                i += 2; // skip '${'
+                // Find the closing '}'
+                while i < len && chars[i] != '}' {
+                    result.push(chars[i]);
+                    i += 1;
+                }
+                if i < len {
+                    result.push('}');
+                    i += 1; // skip '}'
+                }
+            } else if chars[i] == '$' && i + 1 < len && chars[i + 1] == '{' {
+                // Start of ${...} pattern
+                i += 2; // skip '${'
+                let mut pattern = String::new();
+                while i < len && chars[i] != '}' {
+                    pattern.push(chars[i]);
+                    i += 1;
+                }
+                if i < len {
+                    i += 1; // skip '}'
+                }
+
+                // Parse VAR_NAME or VAR_NAME:-default
+                let (var_name, default_val) = if let Some(pos) = pattern.find(":-") {
+                    (&pattern[..pos], Some(&pattern[pos + 2..]))
+                } else {
+                    (pattern.as_str(), None)
+                };
+
+                match std::env::var(var_name) {
+                    Ok(val) => result.push_str(&val),
+                    Err(_) => {
+                        if let Some(default) = default_val {
+                            result.push_str(default);
+                        } else {
+                            anyhow::bail!(
+                                "environment variable '{}' is not set and no default value was provided",
+                                var_name
+                            );
+                        }
+                    }
+                }
+            } else {
+                result.push(chars[i]);
+                i += 1;
+            }
+        }
+
+        Ok(result)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Config migration system
+// ---------------------------------------------------------------------------
+
+/// Migration function type: takes old JSON Value, returns new JSON Value.
+pub type MigrationFn = fn(serde_json::Value) -> Result<serde_json::Value>;
+
+/// Registry of config migrations. Each entry is (from_version, to_version, migration_fn).
+pub struct ConfigMigrator {
+    migrations: Vec<(u32, u32, MigrationFn)>,
+    current_version: u32,
+}
+
+impl ConfigMigrator {
+    pub fn new(current_version: u32) -> Self {
+        Self {
+            migrations: Vec::new(),
+            current_version,
+        }
+    }
+
+    pub fn register(&mut self, from: u32, to: u32, f: MigrationFn) {
+        self.migrations.push((from, to, f));
+        // Keep sorted by from_version so the chain executes in order
+        self.migrations.sort_by_key(|(from, _, _)| *from);
+    }
+
+    /// Execute the migration chain:
+    /// 1. Backup the original file (filename includes timestamp)
+    /// 2. Apply each migration step in order
+    /// 3. Write the migrated config back to disk
+    /// 4. On any error, restore from backup and return an error
+    pub fn migrate(
+        &self,
+        config_path: &Path,
+        mut value: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let file_version = value
+            .get("configVersion")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32)
+            .unwrap_or(1);
+
+        if file_version >= self.current_version {
+            return Ok(value);
+        }
+
+        // --- Step 1: create timestamped backup ---
+        let backup_path = Self::backup_path(config_path);
+        if config_path.exists() {
+            std::fs::copy(config_path, &backup_path).with_context(|| {
+                format!(
+                    "creating migration backup at {}",
+                    backup_path.display()
+                )
+            })?;
+        }
+
+        // --- Step 2: run migration chain ---
+        let mut current = file_version;
+        let mut migration_error: Option<anyhow::Error> = None;
+        for &(from, to, f) in &self.migrations {
+            if from == current && to <= self.current_version {
+                // Use a sentinel to avoid partial-move issues: replace value with null temporarily
+                let old_value = std::mem::replace(&mut value, serde_json::Value::Null);
+                match f(old_value).with_context(|| format!("migration step {} -> {} failed", from, to)) {
+                    Ok(new_value) => {
+                        value = new_value;
+                        current = to;
+                    }
+                    Err(e) => {
+                        migration_error = Some(e);
+                        break;
+                    }
+                }
+            }
+        }
+
+        if let Some(e) = migration_error {
+            // --- Step 4: rollback from backup ---
+            if backup_path.exists() {
+                let _ = std::fs::copy(&backup_path, config_path);
+            }
+            return Err(e);
+        }
+
+        // Update config_version in the JSON value
+        if let serde_json::Value::Object(ref mut map) = value {
+            map.insert(
+                "configVersion".to_string(),
+                serde_json::Value::Number(self.current_version.into()),
+            );
+        }
+
+        // --- Step 3: write migrated config ---
+        if let Some(parent) = config_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let json = serde_json::to_string_pretty(&value)?;
+        std::fs::write(config_path, json).with_context(|| {
+            format!("writing migrated config to {}", config_path.display())
+        })?;
+        Ok(value)
+    }
+
+    fn backup_path(config_path: &Path) -> PathBuf {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let name = config_path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "config.json".to_string());
+        let backup_name = format!("{}.migration_backup_{}", name, ts);
+        config_path
+            .parent()
+            .map(|p| p.join(&backup_name))
+            .unwrap_or_else(|| PathBuf::from(&backup_name))
+    }
+}
+
+/// Build the application's ConfigMigrator with all registered migration steps.
+/// The current version is 1. Add new migration steps here as the config schema evolves.
+fn build_config_migrator() -> ConfigMigrator {
+    // Current version is 1; no migrations needed yet.
+    // Example of adding a migration in the future:
+    //   migrator.register(1, 2, |mut v| { /* transform v */ Ok(v) });
+    ConfigMigrator::new(1)
+}
+
 pub fn load_config(path: Option<&Path>) -> Result<Config> {
     let p = path
         .map(PathBuf::from)
@@ -2333,8 +2771,18 @@ pub fn load_config(path: Option<&Path>) -> Result<Config> {
     let cfg = if p.exists() {
         let text = std::fs::read_to_string(&p)
             .with_context(|| format!("reading config from {}", p.display()))?;
-        serde_json::from_str(&text)
-            .with_context(|| format!("parsing config from {}", p.display()))?
+        let text = EnvSubstitutor::substitute(&text)
+            .with_context(|| format!("substituting environment variables in config from {}", p.display()))?;
+
+        // Run config migration if needed
+        let mut value: serde_json::Value = serde_json::from_str(&text)
+            .with_context(|| format!("parsing config from {}", p.display()))?;
+
+        let migrator = build_config_migrator();
+        value = migrator.migrate(&p, value)?;
+
+        serde_json::from_value(value)
+            .with_context(|| format!("deserializing config from {}", p.display()))?
     } else {
         Config::default()
     };
@@ -2425,6 +2873,100 @@ pub fn save_config(cfg: &Config, path: Option<&Path>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- EnvSubstitutor tests ---
+
+    #[test]
+    fn env_substitutor_replaces_set_variable() {
+        std::env::set_var("TEST_ENV_SUB_VAR", "hello");
+        let json = r#"{"key": "${TEST_ENV_SUB_VAR}"}"#;
+        let result = EnvSubstitutor::substitute(json).unwrap();
+        assert_eq!(result, r#"{"key": "hello"}"#);
+        std::env::remove_var("TEST_ENV_SUB_VAR");
+    }
+
+    #[test]
+    fn env_substitutor_uses_default_when_var_unset() {
+        std::env::remove_var("TEST_ENV_SUB_UNSET_XYZ");
+        let json = r#"{"key": "${TEST_ENV_SUB_UNSET_XYZ:-fallback}"}"#;
+        let result = EnvSubstitutor::substitute(json).unwrap();
+        assert_eq!(result, r#"{"key": "fallback"}"#);
+    }
+
+    #[test]
+    fn env_substitutor_errors_on_unset_var_without_default() {
+        std::env::remove_var("TEST_ENV_SUB_MISSING_ABC");
+        let json = r#"{"key": "${TEST_ENV_SUB_MISSING_ABC}"}"#;
+        let result = EnvSubstitutor::substitute(json);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("TEST_ENV_SUB_MISSING_ABC"));
+    }
+
+    #[test]
+    fn env_substitutor_does_not_modify_numbers() {
+        let json = r#"{"count": 42, "ratio": 3.14}"#;
+        let result = EnvSubstitutor::substitute(json).unwrap();
+        assert_eq!(result, json);
+    }
+
+    #[test]
+    fn env_substitutor_does_not_modify_booleans_and_null() {
+        let json = r#"{"flag": true, "other": false, "nothing": null}"#;
+        let result = EnvSubstitutor::substitute(json).unwrap();
+        assert_eq!(result, json);
+    }
+
+    #[test]
+    fn env_substitutor_preserves_escaped_dollar_brace() {
+        let json = r#"{"key": "\${NOT_A_VAR}"}"#;
+        let result = EnvSubstitutor::substitute(json).unwrap();
+        assert_eq!(result, r#"{"key": "${NOT_A_VAR}"}"#);
+    }
+
+    #[test]
+    fn env_substitutor_does_not_substitute_in_object_keys() {
+        std::env::set_var("TEST_ENV_SUB_KEY_VAR", "replaced");
+        // The key itself should not be substituted
+        let json = r#"{"${TEST_ENV_SUB_KEY_VAR}": "value"}"#;
+        let result = EnvSubstitutor::substitute(json).unwrap();
+        assert_eq!(result, r#"{"${TEST_ENV_SUB_KEY_VAR}": "value"}"#);
+        std::env::remove_var("TEST_ENV_SUB_KEY_VAR");
+    }
+
+    #[test]
+    fn env_substitutor_substitutes_in_array_values() {
+        std::env::set_var("TEST_ENV_SUB_ARR", "item");
+        let json = r#"{"list": ["${TEST_ENV_SUB_ARR}", "static"]}"#;
+        let result = EnvSubstitutor::substitute(json).unwrap();
+        assert_eq!(result, r#"{"list": ["item", "static"]}"#);
+        std::env::remove_var("TEST_ENV_SUB_ARR");
+    }
+
+    #[test]
+    fn env_substitutor_multiple_patterns_in_one_value() {
+        std::env::set_var("TEST_ENV_SUB_A", "foo");
+        std::env::set_var("TEST_ENV_SUB_B", "bar");
+        let json = r#"{"key": "${TEST_ENV_SUB_A}-${TEST_ENV_SUB_B}"}"#;
+        let result = EnvSubstitutor::substitute(json).unwrap();
+        assert_eq!(result, r#"{"key": "foo-bar"}"#);
+        std::env::remove_var("TEST_ENV_SUB_A");
+        std::env::remove_var("TEST_ENV_SUB_B");
+    }
+
+    #[test]
+    fn load_config_substitutes_env_vars() {
+        std::env::set_var("TEST_LOAD_CFG_TOKEN", "bot123:abc");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config_env.json");
+        std::fs::write(
+            &path,
+            r#"{"channels":{"telegram":[{"name":"telegram","enabled":true,"token":"${TEST_LOAD_CFG_TOKEN}"}]},"mainChannel":"telegram"}"#,
+        ).unwrap();
+        let cfg = load_config(Some(&path)).unwrap();
+        assert_eq!(cfg.channels.telegram[0].token, "bot123:abc");
+        std::env::remove_var("TEST_LOAD_CFG_TOKEN");
+    }
 
     /// Helper: build a valid default config (all defaults pass validation).
     fn valid_config() -> Config {

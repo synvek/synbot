@@ -124,6 +124,7 @@ pub mod logging;
 pub mod plugin;
 pub mod rig_provider;
 pub mod sandbox;
+pub mod security;
 pub mod tools;
 pub mod url_utils;
 pub mod web;

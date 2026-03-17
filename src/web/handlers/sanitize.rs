@@ -315,6 +315,8 @@ mod tests {
                 email: vec![],
                 matrix: vec![],
                 dingtalk: vec![],
+                whatsapp: None,
+                irc: None,
             },
             providers: ProvidersConfig {
                 anthropic: ProviderEntry {

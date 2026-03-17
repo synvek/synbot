@@ -16,6 +16,7 @@
 
 use proptest::prelude::*;
 use std::path::PathBuf;
+use std::pin::Pin;
 
 /// Standard proptest configuration with minimum 100 iterations
 /// as specified in the design document.
@@ -98,4 +99,61 @@ pub async fn create_test_app_state_with_approval(
         approval_manager,
         None,
     )
+}
+
+// ---------------------------------------------------------------------------
+// Mock completion model for AgentLoop tests
+// ---------------------------------------------------------------------------
+
+/// A mock completion model that always returns a fixed text response.
+/// Used in AgentLoop e2e tests to avoid real LLM calls.
+pub struct MockCompletionModel {
+    response: String,
+}
+
+impl MockCompletionModel {
+    pub fn new(response: impl Into<String>) -> Self {
+        Self {
+            response: response.into(),
+        }
+    }
+}
+
+impl synbot::rig_provider::SynbotCompletionModel for MockCompletionModel {
+    fn completion(
+        &self,
+        _request: rig::completion::request::CompletionRequest,
+    ) -> Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = Result<
+                        rig::completion::request::CompletionResponse<()>,
+                        rig::completion::request::CompletionError,
+                    >,
+                > + Send
+                + '_,
+        >,
+    > {
+        let text = self.response.clone();
+        Box::pin(async move {
+            use rig::message::AssistantContent;
+            let choice = rig::OneOrMany::one(AssistantContent::text(&text));
+            Ok(rig::completion::request::CompletionResponse {
+                choice,
+                usage: rig::completion::Usage {
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    total_tokens: 0,
+                    cached_input_tokens: 0,
+                },
+                raw_response: (),
+            })
+        })
+    }
+}
+
+/// Create a mock completion model that returns a fixed text response.
+/// Use this in AgentLoop e2e tests.
+pub fn mock_completion_model(response: &str) -> MockCompletionModel {
+    MockCompletionModel::new(response)
 }

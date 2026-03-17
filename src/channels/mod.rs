@@ -12,6 +12,8 @@ pub mod factory;
 pub mod matrix;
 pub mod slack;
 pub mod telegram;
+pub mod whatsapp;
+pub mod irc;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
