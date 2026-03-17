@@ -103,7 +103,7 @@ impl DingTalkChannel {
             inbound_tx,
             outbound_rx: Some(outbound_rx),
             sessions: Arc::new(RwLock::new(HashMap::new())),
-            http: reqwest::Client::new(),
+            http: crate::appcontainer_dns::build_reqwest_client(),
             workspace_dir,
         }
     }
@@ -221,7 +221,7 @@ impl Channel for DingTalkChannel {
             let default_agent = default_agent.clone();
             let allowlist_enforce = allowlist_enforce;
             let allowlist = allowlist.clone();
-            let http = reqwest::Client::new();
+            let http = crate::appcontainer_dns::build_reqwest_client();
             let workspace_dir = workspace_dir.clone();
             let app_key = app_key_file.clone();
             let app_secret = app_secret_file.clone();

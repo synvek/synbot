@@ -92,11 +92,19 @@ impl Resolve for GoogleDnsResolver {
 /// - Inside app sandbox (when `SYNBOT_IN_APP_SANDBOX` is set): injects `GoogleDnsResolver`
 ///   and on macOS uses rustls with webpki-roots only (no system certs) to avoid Security
 ///   framework / OSStatus -9808 in Seatbelt.
+/// - On macOS (even without env): uses rustls with webpki-roots only so macOS App Sandbox
+///   works when the process cannot access the system keychain ("no native root CA certificates found").
 /// - Otherwise: returns the default client.
 ///
 /// Callers can use this function directly without conditional compilation.
 pub fn build_reqwest_client() -> reqwest::Client {
-    if std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some() {
+    let in_sandbox = std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some();
+    #[cfg(target_os = "macos")]
+    let use_webpki_only = true;
+    #[cfg(not(target_os = "macos"))]
+    let use_webpki_only = in_sandbox;
+
+    if in_sandbox {
         let mut b = reqwest::Client::builder().dns_resolver(Arc::new(GoogleDnsResolver));
         #[cfg(target_os = "macos")]
         {
@@ -106,6 +114,20 @@ pub fn build_reqwest_client() -> reqwest::Client {
                 .tls_built_in_webpki_certs(true);
         }
         b.build().unwrap_or_default()
+    } else if use_webpki_only {
+        #[cfg(target_os = "macos")]
+        {
+            reqwest::Client::builder()
+                .use_rustls_tls()
+                .tls_built_in_root_certs(false)
+                .tls_built_in_webpki_certs(true)
+                .build()
+                .unwrap_or_default()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            reqwest::Client::new()
+        }
     } else {
         reqwest::Client::new()
     }
@@ -113,7 +135,13 @@ pub fn build_reqwest_client() -> reqwest::Client {
 
 /// Builds a `reqwest::Client` with a custom default User-Agent (same DNS/TLS behavior as `build_reqwest_client`).
 pub fn build_reqwest_client_with_user_agent(user_agent: &str) -> reqwest::Client {
-    if std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some() {
+    let in_sandbox = std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some();
+    #[cfg(target_os = "macos")]
+    let use_webpki_only = true;
+    #[cfg(not(target_os = "macos"))]
+    let use_webpki_only = in_sandbox;
+
+    if in_sandbox {
         let mut b = reqwest::Client::builder()
             .dns_resolver(Arc::new(GoogleDnsResolver))
             .user_agent(user_agent);
@@ -125,6 +153,24 @@ pub fn build_reqwest_client_with_user_agent(user_agent: &str) -> reqwest::Client
                 .tls_built_in_webpki_certs(true);
         }
         b.build().unwrap_or_default()
+    } else if use_webpki_only {
+        #[cfg(target_os = "macos")]
+        {
+            reqwest::Client::builder()
+                .user_agent(user_agent)
+                .use_rustls_tls()
+                .tls_built_in_root_certs(false)
+                .tls_built_in_webpki_certs(true)
+                .build()
+                .unwrap_or_default()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            reqwest::Client::builder()
+                .user_agent(user_agent)
+                .build()
+                .unwrap_or_default()
+        }
     } else {
         reqwest::Client::builder()
             .user_agent(user_agent)
@@ -135,7 +181,13 @@ pub fn build_reqwest_client_with_user_agent(user_agent: &str) -> reqwest::Client
 
 /// Builds a `reqwest::Client` with a timeout (Google DNS and macOS rustls/webpki same as above).
 pub fn build_reqwest_client_with_timeout(timeout: std::time::Duration) -> reqwest::Client {
-    if std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some() {
+    let in_sandbox = std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some();
+    #[cfg(target_os = "macos")]
+    let use_webpki_only = true;
+    #[cfg(not(target_os = "macos"))]
+    let use_webpki_only = in_sandbox;
+
+    if in_sandbox {
         let mut b = reqwest::Client::builder()
             .dns_resolver(Arc::new(GoogleDnsResolver))
             .timeout(timeout);
@@ -147,6 +199,24 @@ pub fn build_reqwest_client_with_timeout(timeout: std::time::Duration) -> reqwes
                 .tls_built_in_webpki_certs(true);
         }
         b.build().unwrap_or_default()
+    } else if use_webpki_only {
+        #[cfg(target_os = "macos")]
+        {
+            reqwest::Client::builder()
+                .timeout(timeout)
+                .use_rustls_tls()
+                .tls_built_in_root_certs(false)
+                .tls_built_in_webpki_certs(true)
+                .build()
+                .unwrap_or_default()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            reqwest::Client::builder()
+                .timeout(timeout)
+                .build()
+                .unwrap_or_default()
+        }
     } else {
         reqwest::Client::builder()
             .timeout(timeout)

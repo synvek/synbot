@@ -81,9 +81,9 @@ chrono = { version = "0.4", features = ["serde"] }
 # Async trait
 async-trait = "0.1"
 
-# WebSocket (use rustls + webpki-roots so macOS app sandbox works without Security framework / -9808)
-# 0.28 shared with slack-morphism; rustls-tls-native-roots fixes wss Url(TlsFeatureNotEnabled)
-tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
+# WebSocket: use webpki-roots (not native-roots) so macOS App Sandbox works (no Security framework / "no native root CA certificates found")
+# 0.28 shared with slack-morphism
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
 url = "2"
 idna = "0.2"
