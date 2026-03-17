@@ -1,6 +1,6 @@
 [package]
 name = "synbot"
-version = "0.7.5"
+version = "0.7.6"
 edition = "2021"
 description = "Personal AI assistant"
 license = "MIT"
