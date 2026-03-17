@@ -6,7 +6,7 @@ export default defineConfig({
   description: 'Personal AI Assistant built with Rust',
   // Head configuration
   head: [
-    ['link', { rel: 'icon', href: '/favicon.ico' }],
+    ['link', { rel: 'icon', type: 'image/png', href: '/favicon.png' }],
     ['meta', { name: 'theme-color', content: '#3eaf7c' }],
     ['meta', { name: 'og:type', content: 'website' }],
     ['meta', { name: 'og:locale', content: 'en_US' }],
