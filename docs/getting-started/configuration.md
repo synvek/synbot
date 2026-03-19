@@ -238,7 +238,7 @@ Optional channel for Matrix protocol (decentralized real-time chat). Configure w
 
 ### WhatsApp
 
-Optional channel for WhatsApp Business Cloud API. Receives messages via webhook, sends via REST API.
+Optional channel: **WhatsApp Web multi-device** (personal Messenger account) via **[wa-rs](https://crates.io/crates/wa-rs)**. Link with QR or pair code on first run; session is stored under **sessionDir**.
 
 ```json
 {
@@ -247,9 +247,7 @@ Optional channel for WhatsApp Business Cloud API. Receives messages via webhook,
       {
         "name": "whatsapp",
         "enabled": true,
-        "accessToken": "YOUR_ACCESS_TOKEN",
-        "phoneNumberId": "YOUR_PHONE_NUMBER_ID",
-        "verifyToken": "YOUR_WEBHOOK_VERIFY_TOKEN",
+        "sessionDir": "/var/lib/synbot/whatsapp",
         "allowlist": [],
         "agent": "main"
       }
@@ -258,10 +256,9 @@ Optional channel for WhatsApp Business Cloud API. Receives messages via webhook,
 }
 ```
 
-- **accessToken**: WhatsApp Business API access token (Bearer token from Meta).
-- **phoneNumberId**: Phone number ID from Meta WhatsApp API setup.
-- **verifyToken**: Token for webhook GET verification (set in Meta dashboard).
-- **allowlist**: Same structure as other channels; `chatId` is the user's phone number.
+- **sessionDir**: Writable directory for SQLite session data (required when enabled).
+- **allowlist**: Same structure as other channels; matching uses best-effort sender IDs from the protocol.
+- Legacy key **`whatsappPersonal`** in JSON is accepted as an alias for **`whatsapp`** (same array shape).
 
 ### IRC
 

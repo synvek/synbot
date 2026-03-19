@@ -21,7 +21,7 @@ Synbot supports multiple messaging channels, allowing you to interact with the A
 - **Email**: Poll IMAP for unread messages from a configured sender, reply via SMTP, and mark as read (configurable start time and poll interval; messages processed oldest-first).
 - **Matrix**: Decentralized real-time communication via the Matrix protocol (homeserver + username/password or access token).
 - **DingTalk (钉钉)**: Enterprise IM; Synbot uses **Stream mode** (self-implemented protocol) to receive robot messages and reply via **session webhook**. Single chat works without @; in groups only messages that **@ the robot** are delivered.
-- **WhatsApp**: WhatsApp Business Cloud API; receives messages via webhook and sends via REST API. Requires Meta app access token and phone number ID.
+- **WhatsApp**: **WhatsApp Web multi-device** (personal Messenger account) via **[wa-rs](https://crates.io/crates/wa-rs)**; QR / pair code linking, session in **sessionDir**. Standard `cargo build` (stable Rust).
 - **IRC**: Connects to an IRC server (e.g. Libera); supports TLS, NickServ/auth, channels and private messages, and allowlist.
 
 ### Planned Support
@@ -507,13 +507,7 @@ Synbot connects using **DingTalk Stream mode** with a **self-implemented protoco
 
 ## WhatsApp
 
-Synbot uses the **WhatsApp Business Cloud API**: inbound messages are received via a webhook (HTTP POST), and outbound messages are sent via the Meta Graph API. The web server must be reachable by Meta for webhook verification and delivery.
-
-### Prerequisites
-
-1. Create a Meta (Facebook) app and add the **WhatsApp** product.
-2. In WhatsApp → API Setup, obtain the **Phone number ID** and an **Access token** (Bearer token for the Cloud API).
-3. Configure a webhook URL (e.g. `https://your-domain.com/webhook/whatsapp`) and a **Verify token** in the Meta dashboard. Synbot serves the verify and webhook endpoints when the web dashboard is enabled and the WhatsApp channel is configured.
+Synbot connects a **personal WhatsApp (Messenger)** account as a **linked device**, same model as WhatsApp Web, using **[wa-rs](https://github.com/homunbot/wa-rs)** (stable Rust). On first start, follow the **QR code** or **pairing code** in the logs; the session is persisted under **`sessionDir`**.
 
 ### Configuration
 
@@ -526,9 +520,7 @@ Synbot uses the **WhatsApp Business Cloud API**: inbound messages are received v
       {
         "name": "whatsapp",
         "enabled": true,
-        "accessToken": "YOUR_ACCESS_TOKEN",
-        "phoneNumberId": "YOUR_PHONE_NUMBER_ID",
-        "verifyToken": "YOUR_WEBHOOK_VERIFY_TOKEN",
+        "sessionDir": "/var/lib/synbot/whatsapp",
         "allowlist": [],
         "agent": "main"
       }
@@ -537,12 +529,13 @@ Synbot uses the **WhatsApp Business Cloud API**: inbound messages are received v
 }
 ```
 
-- **accessToken**: WhatsApp Business API access token (Bearer token from Meta).
-- **phoneNumberId**: Phone number ID from the Meta WhatsApp API setup.
-- **verifyToken**: Token you set in the Meta webhook configuration; used for the GET verification handshake.
-- **allowlist**: Optional. Array of `{ "chatId", "chatAlias", "myName"? }`; `chatId` is the WhatsApp user phone number (e.g. `1234567890`). If empty, all senders are allowed.
+- **sessionDir**: Directory for the wa-rs SQLite session (required when enabled; must be persistent and writable).
+- **allowlist**: Optional. Array of `{ "chatId", "chatAlias", "myName"? }`. If empty, all senders are allowed. Matching uses best-effort sender IDs from the protocol.
+- **Legacy key:** `whatsappPersonal` in JSON is accepted as an alias for `whatsapp` (same shape).
 
-Run `synbot doctor` to verify WhatsApp credentials before starting.
+Run `synbot doctor` to verify **sessionDir** when the channel is enabled. Outbound replies from the agent may still be incomplete; see release notes.
+
+**Compliance:** use only on accounts you own and in line with WhatsApp’s terms of service.
 
 ## IRC
 

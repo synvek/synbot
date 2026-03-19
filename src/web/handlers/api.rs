@@ -471,6 +471,19 @@ pub async fn get_channels(state: web::Data<AppState>) -> Result<HttpResponse> {
             },
         });
     }
+    if let Some(list) = &state.config.channels.whatsapp {
+        for c in list {
+            channels.push(ChannelInfo {
+                name: c.name.clone(),
+                enabled: c.enabled,
+                status: if c.enabled {
+                    ChannelStatus::Connected
+                } else {
+                    ChannelStatus::Disabled
+                },
+            });
+        }
+    }
     Ok(HttpResponse::Ok().json(ApiResponse::success(channels)))
 }
 

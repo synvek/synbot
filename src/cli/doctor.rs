@@ -214,10 +214,8 @@ impl DoctorCheck for ChannelCredentialCheck {
             for c in wa_list {
                 if c.enabled {
                     checked += 1;
-                    if c.access_token.as_deref().map(|s| s.is_empty()).unwrap_or(true)
-                        || c.phone_number_id.as_deref().map(|s| s.is_empty()).unwrap_or(true)
-                    {
-                        issues.push(format!("whatsapp/{}: access_token or phone_number_id is empty", c.name));
+                    if c.session_dir.is_empty() {
+                        issues.push(format!("whatsapp/{}: session_dir is empty", c.name));
                     }
                 }
             }

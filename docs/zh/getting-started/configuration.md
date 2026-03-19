@@ -235,7 +235,7 @@ cargo run --example generate_config_schema --features schema -- -o config.schema
 
 ### WhatsApp
 
-可选渠道，用于 WhatsApp Business Cloud API；通过 Webhook 收消息，通过 REST API 发消息。
+可选渠道：**WhatsApp Web 多设备**（个人 Messenger 账号），基于 **[wa-rs](https://crates.io/crates/wa-rs)**。首次运行按日志扫码或配对；会话保存在 **sessionDir**。
 
 ```json
 {
@@ -244,9 +244,7 @@ cargo run --example generate_config_schema --features schema -- -o config.schema
       {
         "name": "whatsapp",
         "enabled": true,
-        "accessToken": "YOUR_ACCESS_TOKEN",
-        "phoneNumberId": "YOUR_PHONE_NUMBER_ID",
-        "verifyToken": "YOUR_WEBHOOK_VERIFY_TOKEN",
+        "sessionDir": "/var/lib/synbot/whatsapp",
         "allowlist": [],
         "agent": "main"
       }
@@ -255,10 +253,9 @@ cargo run --example generate_config_schema --features schema -- -o config.schema
 }
 ```
 
-- **accessToken**：WhatsApp Business API 访问令牌（Meta 提供的 Bearer 令牌）。
-- **phoneNumberId**：Meta WhatsApp API 设置中的 Phone number ID。
-- **verifyToken**：Webhook GET 验证用令牌（在 Meta 控制台设置）。
-- **allowlist**：结构与其他渠道相同；`chatId` 为用户手机号。
+- **sessionDir**：可写目录，存放 SQLite 会话（启用时必填）。
+- **allowlist**：结构与其他渠道相同；匹配依赖协议层发送者标识。
+- 旧配置键 **`whatsappPersonal`** 可作为 **`whatsapp`** 的别名（数组结构相同）。
 
 ### IRC
 

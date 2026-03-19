@@ -32,17 +32,28 @@ fn registry() -> ChannelRegistry {
 }
 
 // ---------------------------------------------------------------------------
-// Requirement 11.1 — all 9 channel types are registered
+// Requirement 11.1 — all built-in channel types are registered
 // ---------------------------------------------------------------------------
 
 #[test]
 fn all_builtin_channel_types_are_registered() {
     let r = registry();
     let names = r.type_names();
-    for expected in &["telegram", "discord", "feishu", "slack", "email", "matrix", "dingtalk", "whatsapp", "irc"] {
-        assert!(names.contains(&expected.to_string()), "missing channel type: {}", expected);
+    let expected = [
+        "telegram",
+        "discord",
+        "feishu",
+        "slack",
+        "email",
+        "matrix",
+        "dingtalk",
+        "whatsapp",
+        "irc",
+    ];
+    for e in expected {
+        assert!(names.contains(&e.to_string()), "missing channel type: {}", e);
     }
-    assert_eq!(names.len(), 9);
+    assert_eq!(names.len(), expected.len());
 }
 
 // ---------------------------------------------------------------------------
@@ -249,9 +260,7 @@ fn whatsapp_factory_creates_channel_from_valid_config() {
     let config = serde_json::json!({
         "name": "whatsapp",
         "enabled": true,
-        "accessToken": "EAAtest",
-        "phoneNumberId": "123456789",
-        "verifyToken": "my-verify-token",
+        "sessionDir": "/tmp/synbot-test-whatsapp-session",
         "allowlist": [],
         "agent": "main"
     });
@@ -262,7 +271,7 @@ fn whatsapp_factory_creates_channel_from_valid_config() {
 
 #[test]
 fn whatsapp_factory_accepts_config_without_optional_fields() {
-    // access_token, phone_number_id, verify_token are all Option<String>
+    // session_dir defaults to ""; factory still builds (runtime warns if enabled without dir)
     let r = registry();
     let factory = r.get("whatsapp").expect("whatsapp factory");
     let config = serde_json::json!({ "enabled": false });

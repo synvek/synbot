@@ -291,7 +291,9 @@ fn default_email_poll_interval_secs() -> u64 {
     120
 }
 
-/// WhatsApp Business Cloud API channel configuration.
+/// WhatsApp channel configuration (WhatsApp Web multi-device via wa-rs).
+///
+/// Link the account with QR or pair code; session is persisted under `session_dir`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
@@ -302,13 +304,11 @@ pub struct WhatsAppConfig {
     /// Unique channel name (default "whatsapp").
     #[serde(default = "default_whatsapp_name")]
     pub name: String,
-    /// WhatsApp Business API access token (Bearer token for Cloud API).
-    pub access_token: Option<String>,
-    /// WhatsApp phone number ID from the Meta developer console.
-    pub phone_number_id: Option<String>,
-    /// Webhook verify token (used during Meta webhook verification handshake).
-    pub verify_token: Option<String>,
-    /// Allowlist of phone numbers allowed to interact with the bot.
+    /// Directory used to persist the wa-rs session (SQLite DB, creds, etc.).
+    /// Example: "~/.synbot/sessions/whatsapp".
+    #[serde(default)]
+    pub session_dir: String,
+    /// Allowlist of sender IDs / phone numbers allowed to interact with the bot.
     /// If empty, all senders are allowed.
     #[serde(default)]
     pub allowlist: Vec<AllowlistEntry>,
@@ -382,8 +382,9 @@ pub struct ChannelsConfig {
     pub matrix: Vec<MatrixConfig>,
     #[serde(default)]
     pub dingtalk: Vec<DingTalkConfig>,
-    /// WhatsApp Business Cloud API channels.
-    #[serde(default)]
+    /// WhatsApp channels (WhatsApp Web multi-device via wa-rs).
+    /// `whatsappPersonal` is accepted as a legacy config key (same shape).
+    #[serde(default, alias = "whatsappPersonal")]
     pub whatsapp: Option<Vec<WhatsAppConfig>>,
     /// IRC channels.
     #[serde(default)]
@@ -2176,6 +2177,24 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
             });
         }
     }
+    if let Some(wa_list) = &config.channels.whatsapp {
+        for (i, c) in wa_list.iter().enumerate() {
+            if c.enabled && c.session_dir.trim().is_empty() {
+                errors.push(ValidationError {
+                    field: format!("channels.whatsapp[{}].sessionDir", i),
+                    value: String::new(),
+                    constraint: "must be non-empty when enabled (wa-rs session persistence)".into(),
+                });
+            }
+            if !c.name.is_empty() && !all_channel_names.insert(c.name.clone()) {
+                errors.push(ValidationError {
+                    field: format!("channels.whatsapp[{}].name", i),
+                    value: c.name.clone(),
+                    constraint: "channel name must be globally unique".into(),
+                });
+            }
+        }
+    }
 
     // --- Collect enabled channel names for main_channel validation ---
     let enabled_channels: Vec<String> = {
@@ -2213,6 +2232,20 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
         for c in &config.channels.dingtalk {
             if c.enabled && !c.name.is_empty() {
                 ch.push(c.name.clone());
+            }
+        }
+        if let Some(list) = &config.channels.whatsapp {
+            for c in list {
+                if c.enabled && !c.name.is_empty() {
+                    ch.push(c.name.clone());
+                }
+            }
+        }
+        if let Some(list) = &config.channels.irc {
+            for c in list {
+                if c.enabled && !c.name.is_empty() {
+                    ch.push(c.name.clone());
+                }
             }
         }
         ch

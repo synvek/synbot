@@ -5,8 +5,8 @@ use std::sync::Arc;
 use anyhow::Result;
 
 use crate::channels::{
-    dingtalk, discord, email, feishu, irc, matrix, slack, telegram, whatsapp, Channel,
-    ChannelRegistry, ChannelStartContext,
+    dingtalk, discord, email, feishu, irc, matrix, slack, telegram, whatsapp, Channel, ChannelRegistry,
+    ChannelStartContext,
 };
 use crate::config::{
     DingTalkConfig, DiscordConfig, EmailConfig, FeishuConfig, IrcConfig, MatrixConfig, SlackConfig,
