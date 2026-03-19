@@ -136,6 +136,7 @@ synbot sandbox start
 - Email
 - Matrix
 - 钉钉 (DingTalk)
+- IRC
 - 更多渠道开发中
 
 ## 模型提供商

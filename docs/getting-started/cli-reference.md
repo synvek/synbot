@@ -51,7 +51,7 @@ synbot agent   # interactive (no -m)
 
 ### `synbot start` [options]
 
-Start the full daemon: channels (Telegram, Discord, Slack, Feishu, Email, Matrix, DingTalk, WhatsApp, IRC), heartbeat, cron, and optional web dashboard. Loads config from the default root (`~/.synbot`) or from the directory given by `--root-dir`.
+Start the full daemon: channels (Telegram, Discord, Slack, Feishu, Email, Matrix, DingTalk, IRC), heartbeat, cron, and optional web dashboard. Loads config from the default root (`~/.synbot`) or from the directory given by `--root-dir`.
 
 | Option | Description |
 |--------|-------------|

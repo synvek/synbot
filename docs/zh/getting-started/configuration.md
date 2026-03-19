@@ -236,30 +236,6 @@ cargo run --example generate_config_schema --features schema -- -o templates/con
 - **accessToken**：可选；设置后跳过登录。
 - **allowlist** / **enableAllowlist**：与其他渠道相同；`chatId` 可为 room ID 或 user ID。
 
-### WhatsApp
-
-可选渠道：**WhatsApp Web 多设备**（个人 Messenger 账号），基于 **[wa-rs](https://crates.io/crates/wa-rs)**。首次运行按日志扫码或配对；会话保存在 **sessionDir**。
-
-```json
-{
-  "channels": {
-    "whatsapp": [
-      {
-        "name": "whatsapp",
-        "enabled": true,
-        "sessionDir": "/var/lib/synbot/whatsapp",
-        "allowlist": [],
-        "agent": "main"
-      }
-    ]
-  }
-}
-```
-
-- **sessionDir**：可写目录，存放 SQLite 会话（启用时必填）。
-- **allowlist**：结构与其他渠道相同；匹配依赖协议层发送者标识。
-- 旧配置键 **`whatsappPersonal`** 可作为 **`whatsapp`** 的别名（数组结构相同）。
-
 ### IRC
 
 可选渠道，连接 IRC 服务器（如 Libera）。支持 TLS、NickServ/服务器密码及白名单。

@@ -51,7 +51,7 @@ synbot agent   # 交互模式（不加 -m）
 
 ### `synbot start` [选项]
 
-启动完整守护进程：渠道（Telegram、Discord、Slack、飞书、Email、Matrix、钉钉、WhatsApp、IRC）、心跳、定时任务及可选 Web 控制台。从默认根目录 `~/.synbot` 或通过 `--root-dir` 指定的目录加载配置。
+启动完整守护进程：渠道（Telegram、Discord、Slack、飞书、Email、Matrix、钉钉、IRC）、心跳、定时任务及可选 Web 控制台。从默认根目录 `~/.synbot` 或通过 `--root-dir` 指定的目录加载配置。
 
 | 选项 | 说明 |
 |------|------|

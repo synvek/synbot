@@ -137,6 +137,7 @@ On Windows, run `synbot sandbox setup` once as Administrator to add network rule
 - Email
 - Matrix
 - DingTalk (钉钉)
+- IRC
 - More are still in progress
 
 ## Providers

@@ -239,30 +239,6 @@ Optional channel for Matrix protocol (decentralized real-time chat). Configure w
 - **accessToken**: Optional; when set, login is skipped.
 - **allowlist** / **enableAllowlist**: Same pattern as other channels; `chatId` can be room ID or user ID.
 
-### WhatsApp
-
-Optional channel: **WhatsApp Web multi-device** (personal Messenger account) via **[wa-rs](https://crates.io/crates/wa-rs)**. Link with QR or pair code on first run; session is stored under **sessionDir**.
-
-```json
-{
-  "channels": {
-    "whatsapp": [
-      {
-        "name": "whatsapp",
-        "enabled": true,
-        "sessionDir": "/var/lib/synbot/whatsapp",
-        "allowlist": [],
-        "agent": "main"
-      }
-    ]
-  }
-}
-```
-
-- **sessionDir**: Writable directory for SQLite session data (required when enabled).
-- **allowlist**: Same structure as other channels; matching uses best-effort sender IDs from the protocol.
-- Legacy key **`whatsappPersonal`** in JSON is accepted as an alias for **`whatsapp`** (same array shape).
-
 ### IRC
 
 Optional channel to connect to an IRC server (e.g. Libera). Supports TLS, NickServ/server password, and allowlist.

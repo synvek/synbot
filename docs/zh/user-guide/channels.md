@@ -17,7 +17,6 @@ Synbot 支持多种消息渠道，允许您通过不同平台与 AI 助手交互
 - **电子邮件(Email)** 通过 IMAP 收信、SMTP 发信，仅处理来自指定发件人的未读邮件（可配置起始时间），按时间从旧到新逐条回复后标为已读。
 - **Matrix**: 基于 Matrix 协议的分布式实时通信（需 homeserver 地址及用户名/密码或 access token）。
 - **钉钉 (DingTalk)**：企业 IM；Synbot 使用**自研 Stream 协议**接收机器人回调，通过回调中的 **sessionWebhook** 按会话回复。单聊无需 @；群内仅 **@ 机器人** 的消息会送达。
-- **WhatsApp**：**WhatsApp Web 多设备**（个人 Messenger），**[wa-rs](https://crates.io/crates/wa-rs)** 实现；扫码 / 配对码，会话目录 **sessionDir**。常规 `cargo build`（stable）。
 - **IRC**：连接 IRC 服务器（如 Libera）；支持 TLS、NickServ/认证、频道与私聊及白名单。
 
 ### 计划支持
@@ -446,38 +445,6 @@ Synbot 通过 **钉钉 Stream 模式** 接入，协议为**项目内自研实现
 - 确保本机可访问 `api.dingtalk.com` 及返回的 WebSocket `endpoint`。
 - 若回复失败，可能是 **sessionWebhook 已过期**，需用户再发一条消息以获取新 webhook。
 - 在 AppContainer 等环境下，若设置了 `SYNBOT_IN_APP_SANDBOX`，WebSocket 会与其它渠道一样走自定义 DNS 解析。
-
-## WhatsApp
-
-Synbot 将 **个人 WhatsApp（Messenger）** 作为 **已关联设备** 连接（与 WhatsApp Web 相同），使用 **[wa-rs](https://github.com/homunbot/wa-rs)**（stable Rust）。首次启动按日志中的 **二维码** 或 **配对码** 操作；会话保存在 **`sessionDir`**。
-
-### 配置
-
-`channels.whatsapp` 为可选**数组**。示例：
-
-```json
-{
-  "channels": {
-    "whatsapp": [
-      {
-        "name": "whatsapp",
-        "enabled": true,
-        "sessionDir": "/var/lib/synbot/whatsapp",
-        "allowlist": [],
-        "agent": "main"
-      }
-    ]
-  }
-}
-```
-
-- **sessionDir**：wa-rs SQLite 会话目录（启用时必填；需持久、可写）。
-- **allowlist**：可选，`{ "chatId", "chatAlias", "myName"? }`；为空则允许所有发送方（匹配为协议层发送者近似标识）。
-- **兼容：** JSON 中仍可使用旧键 **`whatsappPersonal`**，与 **`whatsapp`** 等价。
-
-启用时可用 `synbot doctor` 检查 **sessionDir**。Agent 出站回复可能尚未完整，见发行说明。
-
-**合规：** 请仅在你有权使用的账号上使用，并遵守 WhatsApp 服务条款。
 
 ## IRC
 
