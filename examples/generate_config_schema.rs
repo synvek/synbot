@@ -3,8 +3,10 @@
 //! Run with:
 //!   cargo run --example generate_config_schema --features schema
 //!
-//! Save to file:
-//!   cargo run --example generate_config_schema --features schema -- --output config.schema.json
+//! Save to file (refresh the schema shipped in the repo for `synbot onboard` / IDE):
+//!   cargo run --example generate_config_schema --features schema -- -o templates/config.schema.json
+//! Other paths:
+//!   cargo run --example generate_config_schema --features schema -- -o config.schema.json
 //!   cargo run --example generate_config_schema --features schema -- -o docs/config.schema.json
 
 use std::env;

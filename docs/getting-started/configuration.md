@@ -36,6 +36,9 @@ cargo run --example generate_config_schema --features schema
 
 # Write to a file (e.g. for VS Code / Cursor JSON validation)
 cargo run --example generate_config_schema --features schema -- -o config.schema.json
+
+# Refresh the schema bundled in the repo (used by `synbot onboard` / default templates)
+cargo run --example generate_config_schema --features schema -- -o templates/config.schema.json
 ```
 
 This requires the optional `schema` feature. The generated schema describes all top-level keys (`channels`, `providers`, `mainAgent`, `memory`, `tools`, `web`, `log`, `heartbeat`, `cron`, `appSandbox`, `toolSandbox`, etc.) and their nested structure.

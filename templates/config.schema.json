@@ -17,18 +17,28 @@
     },
     "channels": {
       "default": {
+        "dingtalk": [],
         "discord": [],
         "email": [],
         "feishu": [],
+        "irc": null,
         "matrix": [],
         "slack": [],
-        "telegram": []
+        "telegram": [],
+        "whatsapp": null
       },
       "allOf": [
         {
           "$ref": "#/definitions/ChannelsConfig"
         }
       ]
+    },
+    "configVersion": {
+      "description": "Config file format version. Used by ConfigMigrator to apply incremental migrations.",
+      "default": 1,
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
     },
     "cron": {
       "description": "Cron: scheduled tasks from config (schedule, description, enabled, command, channel, userId).",
@@ -92,13 +102,14 @@
             "tools": []
           }
         ],
+        "maxChatHistoryMessages": 20,
         "maxConcurrentSubagents": 5,
-        "subagentTaskTimeoutSecs": 600,
+        "maxConsecutiveToolErrors": 8,
         "maxTokens": 8192,
         "maxToolIterations": 99,
-        "maxConsecutiveToolErrors": 8,
         "model": "claude-sonnet-4-5",
         "provider": "anthropic",
+        "subagentTaskTimeoutSecs": 600,
         "temperature": 0.699999988079071,
         "workspace": "~/.synbot/workspace"
       },
@@ -148,6 +159,10 @@
           "apiKey": ""
         },
         "extra": {},
+        "gemini": {
+          "apiBase": null,
+          "apiKey": ""
+        },
         "kimiCode": {
           "apiBase": null,
           "apiKey": ""
@@ -161,10 +176,6 @@
           "apiKey": ""
         },
         "openai": {
-          "apiBase": null,
-          "apiKey": ""
-        },
-        "gemini": {
           "apiBase": null,
           "apiKey": ""
         },
@@ -200,7 +211,8 @@
       "description": "Max length (chars) of tool result preview sent to users (default 2048).",
       "default": 2048,
       "type": "integer",
-      "minimum": 1
+      "format": "uint32",
+      "minimum": 0.0
     },
     "toolSandbox": {
       "description": "Optional tool sandbox (exec and other tools run inside this).",
@@ -242,13 +254,38 @@
           "restrictToWorkspace": false,
           "timeoutSecs": 300
         },
+        "generation": {
+          "image": {
+            "enabled": false,
+            "model": "",
+            "outputDir": "",
+            "provider": "",
+            "quality": "",
+            "size": ""
+          },
+          "speech": {
+            "enabled": false,
+            "format": "",
+            "model": "",
+            "outputDir": "",
+            "provider": "",
+            "voice": ""
+          },
+          "video": {
+            "enabled": false,
+            "model": "",
+            "outputDir": "",
+            "provider": ""
+          }
+        },
         "mcp": null,
         "web": {
           "braveApiKey": "",
           "firecrawlApiKey": "",
           "searchBackend": "duckDuckGo",
           "searchCount": 0,
-          "searxngUrl": ""
+          "searxngUrl": "",
+          "tavilyApiKey": ""
         }
       },
       "allOf": [
@@ -269,6 +306,18 @@
       "allOf": [
         {
           "$ref": "#/definitions/WebConfig"
+        }
+      ]
+    },
+    "workflow": {
+      "description": "TurboWorkflow: persistent resumable workflows (user_input_timeout_secs, workflows_root).",
+      "default": {
+        "userInputTimeoutSecs": 1800,
+        "workflowsRoot": null
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/WorkflowConfig"
         }
       ]
     }
@@ -467,6 +516,13 @@
     "ChannelsConfig": {
       "type": "object",
       "properties": {
+        "dingtalk": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/DingTalkConfig"
+          }
+        },
         "discord": {
           "default": [],
           "type": "array",
@@ -488,6 +544,17 @@
             "$ref": "#/definitions/FeishuConfig"
           }
         },
+        "irc": {
+          "description": "IRC channels.",
+          "default": null,
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/IrcConfig"
+          }
+        },
         "matrix": {
           "default": [],
           "type": "array",
@@ -507,6 +574,17 @@
           "type": "array",
           "items": {
             "$ref": "#/definitions/TelegramConfig"
+          }
+        },
+        "whatsapp": {
+          "description": "WhatsApp channels (WhatsApp Web multi-device via wa-rs). `whatsappPersonal` is accepted as a legacy config key (same shape).",
+          "default": null,
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "$ref": "#/definitions/WhatsAppConfig"
           }
         }
       }
@@ -569,6 +647,73 @@
         }
       }
     },
+    "DingTalkConfig": {
+      "description": "DingTalk Stream robot — clientId/clientSecret from open platform; receives via Stream CALLBACK, replies via sessionWebhook.",
+      "type": "object",
+      "properties": {
+        "allowlist": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AllowlistEntry"
+          }
+        },
+        "appKey": {
+          "description": "Alias for clientId (console may show \"AppKey\"). Ignored if clientId is set.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "appSecret": {
+          "description": "Alias for clientSecret (console may show \"AppSecret\"). Ignored if clientSecret is set.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "clientId": {
+          "description": "OAuth ClientID (formerly AppKey). Use this or appKey.",
+          "default": "",
+          "type": "string"
+        },
+        "clientSecret": {
+          "description": "OAuth ClientSecret (formerly AppSecret). Use this or appSecret.",
+          "default": "",
+          "type": "string"
+        },
+        "defaultAgent": {
+          "description": "Agent to use for this channel (e.g. \"main\", \"dev\"). Default \"main\".",
+          "default": "main",
+          "type": "string"
+        },
+        "enableAllowlist": {
+          "description": "When true (default), only allowlist chats are accepted.",
+          "default": true,
+          "type": "boolean"
+        },
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "name": {
+          "description": "Unique channel name (default \"dingtalk\").",
+          "default": "dingtalk",
+          "type": "string"
+        },
+        "robotCode": {
+          "description": "Robot code from open platform (机器人 → robotCode). Required for file/image download API if callback omits it.",
+          "default": "",
+          "type": "string"
+        },
+        "showToolCalls": {
+          "default": true,
+          "type": "boolean"
+        }
+      }
+    },
     "DiscordConfig": {
       "type": "object",
       "properties": {
@@ -578,6 +723,11 @@
           "items": {
             "$ref": "#/definitions/AllowlistEntry"
           }
+        },
+        "defaultAgent": {
+          "description": "Agent to use for this channel (e.g. \"main\", \"dev\"). Default \"main\".",
+          "default": "main",
+          "type": "string"
         },
         "enableAllowlist": {
           "description": "When true (default), only chats in allowlist are accepted; when false, allowlist is not checked.",
@@ -609,17 +759,17 @@
         "token": {
           "default": "",
           "type": "string"
-        },
-        "defaultAgent": {
-          "description": "Agent to use for this channel (e.g. \"main\", \"dev\"). Default \"main\".",
-          "default": "main",
-          "type": "string"
         }
       }
     },
     "EmailConfig": {
       "type": "object",
       "properties": {
+        "defaultAgent": {
+          "description": "Agent to use for this channel (e.g. \"main\", \"dev\"). Default \"main\".",
+          "default": "main",
+          "type": "string"
+        },
         "enabled": {
           "default": false,
           "type": "boolean"
@@ -660,11 +810,6 @@
           "description": "When true (default), push tool execution progress to this channel.",
           "default": true,
           "type": "boolean"
-        },
-        "defaultAgent": {
-          "description": "Agent to use for this channel (e.g. \"main\", \"dev\"). Default \"main\".",
-          "default": "main",
-          "type": "string"
         },
         "smtp": {
           "description": "SMTP send server (host, port, username, password).",
@@ -789,6 +934,11 @@
           "default": "",
           "type": "string"
         },
+        "defaultAgent": {
+          "description": "Agent to use for this channel (e.g. \"main\", \"dev\"). Default \"main\".",
+          "default": "main",
+          "type": "string"
+        },
         "enableAllowlist": {
           "description": "When true (default), only chats in allowlist are accepted; when false, allowlist is not checked.",
           "default": true,
@@ -815,11 +965,54 @@
           "description": "When true (default), push tool execution progress to this channel.",
           "default": true,
           "type": "boolean"
+        }
+      }
+    },
+    "GenerationConfig": {
+      "type": "object",
+      "properties": {
+        "image": {
+          "default": {
+            "enabled": false,
+            "model": "",
+            "outputDir": "",
+            "provider": "",
+            "quality": "",
+            "size": ""
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/ImageGenConfig"
+            }
+          ]
         },
-        "defaultAgent": {
-          "description": "Agent to use for this channel (e.g. \"main\", \"dev\"). Default \"main\".",
-          "default": "main",
-          "type": "string"
+        "speech": {
+          "default": {
+            "enabled": false,
+            "format": "",
+            "model": "",
+            "outputDir": "",
+            "provider": "",
+            "voice": ""
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/SpeechGenConfig"
+            }
+          ]
+        },
+        "video": {
+          "default": {
+            "enabled": false,
+            "model": "",
+            "outputDir": "",
+            "provider": ""
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/VideoGenConfig"
+            }
+          ]
         }
       }
     },
@@ -872,6 +1065,110 @@
         "userId": {
           "description": "User id of the task creator (for display / reply_to).",
           "type": "string"
+        }
+      }
+    },
+    "ImageGenConfig": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "model": {
+          "description": "Model (e.g. \"dall-e-3\", \"gpt-image-1\").",
+          "default": "dall-e-3",
+          "type": "string"
+        },
+        "outputDir": {
+          "description": "Output directory relative to workspace (e.g. \"generated/images\").",
+          "default": "generated/images",
+          "type": "string"
+        },
+        "provider": {
+          "description": "Provider name (e.g. \"openai\" or a key in providers.extra).",
+          "default": "",
+          "type": "string"
+        },
+        "quality": {
+          "description": "Quality: \"standard\" or \"hd\" (dall-e-3).",
+          "default": "standard",
+          "type": "string"
+        },
+        "size": {
+          "description": "Size (e.g. \"1024x1024\", \"1792x1024\" for dall-e-3).",
+          "default": "1024x1024",
+          "type": "string"
+        }
+      }
+    },
+    "IrcConfig": {
+      "description": "IRC channel configuration.",
+      "type": "object",
+      "properties": {
+        "agent": {
+          "description": "Agent to use for this channel (e.g. \"main\", \"dev\"). Default \"main\".",
+          "default": "main",
+          "type": "string"
+        },
+        "allowlist": {
+          "description": "Allowlist of IRC nicks allowed to interact with the bot. If empty, all senders are allowed.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AllowlistEntry"
+          }
+        },
+        "channels": {
+          "description": "List of IRC channels to join (e.g. [\"#general\", \"#dev\"]).",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "enabled": {
+          "description": "Whether this IRC channel is enabled.",
+          "default": false,
+          "type": "boolean"
+        },
+        "name": {
+          "description": "Unique channel name (default \"irc\").",
+          "default": "irc",
+          "type": "string"
+        },
+        "nickname": {
+          "description": "Bot nickname on the IRC server.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "password": {
+          "description": "NickServ password or SASL password for authentication.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "port": {
+          "description": "IRC server port (default 6697 for TLS, 6667 for plain).",
+          "default": 6697,
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "server": {
+          "description": "IRC server hostname or IP address.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "useTls": {
+          "description": "Whether to use TLS (default true).",
+          "default": true,
+          "type": "boolean"
         }
       }
     },
@@ -982,18 +1279,25 @@
             "$ref": "#/definitions/AgentConfig"
           }
         },
+        "maxChatHistoryMessages": {
+          "description": "Maximum number of chat history messages to send to the model (most recent N). Default 20.",
+          "default": 20,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
         "maxConcurrentSubagents": {
           "default": 5,
           "type": "integer",
           "format": "uint",
           "minimum": 0.0
         },
-        "subagentTaskTimeoutSecs": {
-          "description": "Timeout in seconds for each subagent/directive task. When exceeded, the task is marked failed and the slot is freed. Default 600 (10 min).",
-          "default": 600,
+        "maxConsecutiveToolErrors": {
+          "description": "Maximum consecutive tool failures before stopping. Default 8.",
+          "default": 8,
           "type": "integer",
-          "format": "uint64",
-          "minimum": 1.0
+          "format": "uint32",
+          "minimum": 0.0
         },
         "maxTokens": {
           "default": 8192,
@@ -1007,12 +1311,6 @@
           "format": "uint32",
           "minimum": 0.0
         },
-        "maxConsecutiveToolErrors": {
-          "default": 8,
-          "type": "integer",
-          "format": "uint32",
-          "minimum": 0.0
-        },
         "model": {
           "default": "claude-sonnet-4-5",
           "type": "string"
@@ -1020,6 +1318,13 @@
         "provider": {
           "default": "anthropic",
           "type": "string"
+        },
+        "subagentTaskTimeoutSecs": {
+          "description": "Timeout in seconds for each subagent/directive task. When exceeded, the task is marked failed and the slot is freed. Default 600 (10 min).",
+          "default": 600,
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
         },
         "temperature": {
           "default": 0.699999988079071,
@@ -1049,6 +1354,11 @@
           "items": {
             "$ref": "#/definitions/AllowlistEntry"
           }
+        },
+        "defaultAgent": {
+          "description": "Agent to use for this channel (e.g. \"main\", \"dev\"). Default \"main\".",
+          "default": "main",
+          "type": "string"
         },
         "enableAllowlist": {
           "default": true,
@@ -1088,11 +1398,6 @@
         "username": {
           "description": "Bot user ID (e.g. \"@bot:example.org\") or localpart for login.",
           "default": "",
-          "type": "string"
-        },
-        "defaultAgent": {
-          "description": "Agent to use for this channel (e.g. \"main\", \"dev\"). Default \"main\".",
-          "default": "main",
           "type": "string"
         }
       }
@@ -1229,7 +1534,7 @@
       "type": "object",
       "properties": {
         "approvalTimeoutSecs": {
-          "description": "Approval request timeout in seconds. Default 300 (5 minutes).",
+          "description": "Approval request timeout (seconds). Default 300 (5 minutes).",
           "default": 300,
           "type": "integer",
           "format": "uint64",
@@ -1336,6 +1641,17 @@
             "$ref": "#/definitions/ProviderEntry"
           }
         },
+        "gemini": {
+          "default": {
+            "apiBase": null,
+            "apiKey": ""
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProviderEntry"
+            }
+          ]
+        },
         "kimiCode": {
           "description": "Kimi Code (Moonshot coding API). Uses OpenAI-compatible chat completions; set api_base if using a custom endpoint.",
           "default": {
@@ -1381,17 +1697,6 @@
             }
           ]
         },
-        "gemini": {
-          "default": {
-            "apiBase": null,
-            "apiKey": ""
-          },
-          "allOf": [
-            {
-              "$ref": "#/definitions/ProviderEntry"
-            }
-          ]
-        },
         "openrouter": {
           "default": {
             "apiBase": null,
@@ -1414,6 +1719,14 @@
           "items": {
             "type": "string"
           }
+        },
+        "mountSkillsDir": {
+          "description": "When true (default), mount host skills dir into tool sandbox at /skills (read-only). When false, do not mount; exec in sandbox cannot access skills by path.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "readonlyPaths": {
           "default": [],
@@ -1588,6 +1901,11 @@
           "default": "",
           "type": "string"
         },
+        "defaultAgent": {
+          "description": "Agent to use for this channel (e.g. \"main\", \"dev\"). Default \"main\".",
+          "default": "main",
+          "type": "string"
+        },
         "enableAllowlist": {
           "description": "When true (default), only chats in allowlist are accepted; when false, allowlist is not checked.",
           "default": true,
@@ -1619,10 +1937,36 @@
           "description": "Bot token (xoxb-...) for Web API (e.g. chat.postMessage). Required for sending messages.",
           "default": "",
           "type": "string"
+        }
+      }
+    },
+    "SpeechGenConfig": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "type": "boolean"
         },
-        "defaultAgent": {
-          "description": "Agent to use for this channel (e.g. \"main\", \"dev\"). Default \"main\".",
-          "default": "main",
+        "format": {
+          "description": "Output format: \"mp3\", \"opus\", \"aac\", \"flac\".",
+          "default": "mp3",
+          "type": "string"
+        },
+        "model": {
+          "default": "tts-1",
+          "type": "string"
+        },
+        "outputDir": {
+          "default": "generated/speech",
+          "type": "string"
+        },
+        "provider": {
+          "default": "",
+          "type": "string"
+        },
+        "voice": {
+          "description": "Voice (e.g. \"alloy\", \"echo\", \"fable\", \"onyx\", \"nova\", \"shimmer\" for OpenAI TTS).",
+          "default": "alloy",
           "type": "string"
         }
       }
@@ -1636,6 +1980,11 @@
           "items": {
             "$ref": "#/definitions/AllowlistEntry"
           }
+        },
+        "defaultAgent": {
+          "description": "Agent to use for this channel (e.g. \"main\", \"dev\"). Default \"main\".",
+          "default": "main",
+          "type": "string"
         },
         "enableAllowlist": {
           "description": "When true (default), only chats in allowlist are accepted; when false, allowlist is not checked.",
@@ -1672,11 +2021,6 @@
         },
         "token": {
           "default": "",
-          "type": "string"
-        },
-        "defaultAgent": {
-          "description": "Agent to use for this channel (e.g. \"main\", \"dev\"). Default \"main\".",
-          "default": "main",
           "type": "string"
         }
       }
@@ -1804,6 +2148,38 @@
             }
           ]
         },
+        "generation": {
+          "description": "Image, video, and speech generation tools (provider + output_dir per type).",
+          "default": {
+            "image": {
+              "enabled": false,
+              "model": "",
+              "outputDir": "",
+              "provider": "",
+              "quality": "",
+              "size": ""
+            },
+            "speech": {
+              "enabled": false,
+              "format": "",
+              "model": "",
+              "outputDir": "",
+              "provider": "",
+              "voice": ""
+            },
+            "video": {
+              "enabled": false,
+              "model": "",
+              "outputDir": "",
+              "provider": ""
+            }
+          },
+          "allOf": [
+            {
+              "$ref": "#/definitions/GenerationConfig"
+            }
+          ]
+        },
         "mcp": {
           "description": "MCP servers to connect; their tools are registered as synbot tools.",
           "default": null,
@@ -1822,48 +2198,37 @@
             "firecrawlApiKey": "",
             "searchBackend": "duckDuckGo",
             "searchCount": 0,
-            "searxngUrl": ""
+            "searxngUrl": "",
+            "tavilyApiKey": ""
           },
           "allOf": [
             {
               "$ref": "#/definitions/WebToolConfig"
             }
           ]
+        }
+      }
+    },
+    "VideoGenConfig": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "type": "boolean"
         },
-        "mcp": {
-          "description": "MCP (Model Context Protocol) servers; their tools are registered as synbot tools.",
-          "default": null,
-          "anyOf": [
-            { "$ref": "#/definitions/McpConfig" },
-            { "type": "null" }
-          ]
+        "model": {
+          "default": "",
+          "type": "string"
+        },
+        "outputDir": {
+          "default": "generated/video",
+          "type": "string"
+        },
+        "provider": {
+          "default": "",
+          "type": "string"
         }
       }
-    },
-    "McpConfig": {
-      "type": "object",
-      "properties": {
-        "servers": {
-          "type": "array",
-          "items": { "$ref": "#/definitions/McpServerConfig" },
-          "default": []
-        }
-      }
-    },
-    "McpServerConfig": {
-      "type": "object",
-      "properties": {
-        "id": { "type": "string", "description": "Unique id for this server" },
-        "transport": { "$ref": "#/definitions/McpTransport", "default": "stdio" },
-        "command": { "type": "string", "description": "For stdio: command to run", "default": "" },
-        "args": { "type": "array", "items": { "type": "string" }, "description": "For stdio: arguments", "default": [] },
-        "url": { "type": "string", "description": "For SSE: server URL", "default": "" },
-        "toolNamePrefix": { "type": ["string", "null"], "description": "Optional prefix for tool names", "default": null }
-      }
-    },
-    "McpTransport": {
-      "type": "string",
-      "enum": ["stdio", "sse"]
     },
     "WebAuthConfig": {
       "type": "object",
@@ -1970,13 +2335,8 @@
           "default": "",
           "type": "string"
         },
-        "tavilyApiKey": {
-          "description": "Tavily Search API key (used when searchBackend is tavily). Get one at https://app.tavily.com/",
-          "default": "",
-          "type": "string"
-        },
         "firecrawlApiKey": {
-          "description": "Firecrawl API key (used when searchBackend is firecrawl). Get one at https://firecrawl.dev",
+          "description": "Firecrawl API key (used when backend == Firecrawl). Get one at https://firecrawl.dev",
           "default": "",
           "type": "string"
         },
@@ -2000,6 +2360,45 @@
           "description": "SearxNG instance base URL, e.g. \"https://searx.example.com\".",
           "default": "",
           "type": "string"
+        },
+        "tavilyApiKey": {
+          "description": "Tavily Search API key (used when backend == Tavily). Get one at https://app.tavily.com/",
+          "default": "",
+          "type": "string"
+        }
+      }
+    },
+    "WhatsAppConfig": {
+      "description": "WhatsApp channel configuration (WhatsApp Web multi-device via wa-rs).\n\nLink the account with QR or pair code; session is persisted under `session_dir`.",
+      "type": "object",
+      "properties": {
+        "agent": {
+          "description": "Agent to use for this channel (e.g. \"main\", \"dev\"). Default \"main\".",
+          "default": "main",
+          "type": "string"
+        },
+        "allowlist": {
+          "description": "Allowlist of sender IDs / phone numbers allowed to interact with the bot. If empty, all senders are allowed.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/AllowlistEntry"
+          }
+        },
+        "enabled": {
+          "description": "Whether this WhatsApp channel is enabled.",
+          "default": false,
+          "type": "boolean"
+        },
+        "name": {
+          "description": "Unique channel name (default \"whatsapp\").",
+          "default": "whatsapp",
+          "type": "string"
+        },
+        "sessionDir": {
+          "description": "Directory used to persist the wa-rs session (SQLite DB, creds, etc.). Example: \"~/.synbot/sessions/whatsapp\".",
+          "default": "",
+          "type": "string"
         }
       }
     },
@@ -2007,6 +2406,27 @@
       "type": "object",
       "properties": {
         "type": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "WorkflowConfig": {
+      "description": "TurboWorkflow config: persistent resumable workflows.",
+      "type": "object",
+      "properties": {
+        "userInputTimeoutSecs": {
+          "description": "Timeout in seconds when a step waits for user input (default 1800 = 30 min).",
+          "default": 1800,
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "workflowsRoot": {
+          "description": "Root directory for workflow state files. When empty, uses config_dir/workflows.",
           "default": null,
           "type": [
             "string",

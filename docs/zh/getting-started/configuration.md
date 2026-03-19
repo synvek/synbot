@@ -30,8 +30,11 @@ synbot --root-dir /path/to/workspace onboard   # 先初始化该工作区
 # Print schema to stdout
 cargo run --example generate_config_schema --features schema
 
-# Write to a file (e.g. for VS Code / Cursor JSON validation)
+# 写入文件（例如给 VS Code / Cursor 做 JSON 校验）
 cargo run --example generate_config_schema --features schema -- -o config.schema.json
+
+# 更新仓库内随 synbot 分发的 schema（`synbot onboard` / 默认模板会用到）
+cargo run --example generate_config_schema --features schema -- -o templates/config.schema.json
 ```
 
 需要启用可选的 `schema` 特性。生成的 schema 描述所有顶层键（`channels`、`providers`、`mainAgent`、`memory`、`tools`、`web`、`log`、`heartbeat`、`cron`、`appSandbox`、`toolSandbox` 等）及其嵌套结构。
