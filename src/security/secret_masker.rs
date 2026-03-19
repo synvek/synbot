@@ -173,10 +173,10 @@ impl SecretMaskerLayer {
         // 1. Mask config-level runtime secrets (exact substring match).
         if let Ok(secrets) = self.config_secrets.read() {
             for secret in secrets.iter() {
-                if secret.len() < 4 || !result.contains(secret.as_str()) {
+                if secret.chars().count() < 4 || !result.contains(secret.as_str()) {
                     continue;
                 }
-                let keep = &secret[..4];
+                let keep: String = secret.chars().take(4).collect();
                 let placeholder = format!("{}[REDACTED:config_secret]", keep);
                 result = result.replace(secret.as_str(), &placeholder);
             }
@@ -227,9 +227,11 @@ fn mask_pattern(input: &str, prefix: &str, label: &str) -> String {
 
         let full_match = &remaining[pos..pos + prefix.len() + token_len];
 
-        if full_match.len() >= 4 {
-            let keep = &full_match[..4];
-            output.push_str(keep);
+        // Use character indices: `&str[..4]` is byte-based and panics on UTF-8
+        // boundaries (e.g. `bot，` where the comma is multi-byte).
+        if full_match.chars().count() >= 4 {
+            let keep: String = full_match.chars().take(4).collect();
+            output.push_str(&keep);
             output.push_str(&format!("[REDACTED:{}]", label));
         } else {
             // Too short to be a real secret — emit as-is.
@@ -347,6 +349,19 @@ mod tests {
         // "bot" prefix but only 3 chars total — should not be masked
         let result = m.mask("bot");
         assert_eq!(result, "bot");
+    }
+
+    #[test]
+    fn test_mask_utf8_first_four_chars_not_bytes() {
+        let m = masker();
+        // Regression: `bot` + full-width comma is 4 chars but >4 bytes; byte
+        // slice `&s[..4]` used to panic mid-codepoint.
+        let result = m.mask("bot，很高兴为你服务");
+        assert!(
+            result.contains("[REDACTED:bot_token]"),
+            "expected redaction, got: {result}"
+        );
+        assert!(!result.contains("很高兴"));
     }
 
     #[test]
