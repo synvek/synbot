@@ -14,7 +14,7 @@
 
 - Single small portable execution program for deployment
 
-- No Gateway required
+- No gateway port exposed
 
 - Support run app and tool in independent isolated sandbox.   
 
