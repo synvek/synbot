@@ -66,15 +66,24 @@ impl IrcChannel {
         }
     }
 
-    /// Check if a sender is allowed (allowlist empty → allow all).
-    fn is_sender_allowed(&self, sender_id: &str) -> bool {
-        if self.config.allowlist.is_empty() {
+    /// Check whether a PRIVMSG is allowed under the allowlist.
+    ///
+    /// - **Channel** (`#foo`, `&bar`, …): match `allowlist[].chatId` to the channel name.
+    /// - **Direct message** (target is the bot nick): match `allowlist[].chatId` to the **sender's nick**.
+    fn is_target_allowed(
+        enable_allowlist: bool,
+        allowlist: &[crate::config::AllowlistEntry],
+        target: &str,
+        sender_nick: &str,
+    ) -> bool {
+        if !enable_allowlist {
             return true;
         }
-        self.config
-            .allowlist
-            .iter()
-            .any(|entry| entry.chat_id == sender_id)
+        if Self::is_channel_target(target) {
+            allowlist.iter().any(|entry| entry.chat_id == target)
+        } else {
+            allowlist.iter().any(|entry| entry.chat_id == sender_nick)
+        }
     }
 
     /// True if PRIVMSG `target` is a channel (RFC 2812: `#`, `&`, `+`, `!` prefixes).
@@ -142,9 +151,11 @@ impl Channel for IrcChannel {
         let agent = self.config.agent.clone();
         let inbound_tx = self.inbound_tx.clone();
         let allowlist = self.config.allowlist.clone();
+        let enable_allowlist = self.config.enable_allowlist;
 
         // Outbound dispatcher — runs in background
         let sender = client.sender();
+        let sender_out = sender.clone();
         let channel_name_out = channel_name.clone();
         let mut outbound_rx = self.outbound_rx.take().unwrap();
 
@@ -166,7 +177,7 @@ impl Channel for IrcChannel {
 
                 // IRC has a 512-byte line limit; split long messages
                 for line in content.lines() {
-                    if let Err(e) = sender.send_privmsg(&msg.chat_id, line) {
+                    if let Err(e) = sender_out.send_privmsg(&msg.chat_id, line) {
                         error!(
                             channel = %channel_name_out,
                             error = %e,
@@ -221,13 +232,24 @@ impl Channel for IrcChannel {
                             continue;
                         }
 
-                        if !allowlist.is_empty()
-                            && !allowlist.iter().any(|e| e.chat_id == sender_nick)
-                        {
+                        if !Self::is_target_allowed(
+                            enable_allowlist,
+                            &allowlist,
+                            target,
+                            sender_nick,
+                        ) {
                             warn!(
                                 sender = %sender_nick,
-                                "IRC: sender not in allowlist, ignoring"
+                                target = %target,
+                                "IRC: conversation not permitted by allowlist"
                             );
+                            // DM only: reply to the user. Never post allowlist errors to a channel (spam).
+                            if !Self::is_channel_target(target) {
+                                let _ = sender.send_privmsg(
+                                    sender_nick,
+                                    "Conversation not allowed. Please configure allowlist.",
+                                );
+                            }
                             continue;
                         }
 
@@ -325,6 +347,7 @@ mod tests {
             use_tls: true,
             password: None,
             allowlist: vec![],
+            enable_allowlist: true,
             agent: "main".to_string(),
         }
     }
@@ -342,25 +365,53 @@ mod tests {
     }
 
     #[test]
-    fn is_sender_allowed_empty_allowlist_allows_all() {
-        let ch = make_channel();
-        assert!(ch.is_sender_allowed("alice"));
-        assert!(ch.is_sender_allowed("anyone"));
+    fn is_target_allowed_when_allowlist_disabled() {
+        let allowlist = vec![];
+        assert!(IrcChannel::is_target_allowed(false, &allowlist, "#general", "anyone"));
+        assert!(IrcChannel::is_target_allowed(false, &allowlist, "synbot", "alice"));
     }
 
     #[test]
-    fn is_sender_allowed_with_allowlist() {
-        let (inbound_tx, _) = mpsc::channel(16);
-        let (_, outbound_rx) = broadcast::channel(16);
-        let mut cfg = make_config();
-        cfg.allowlist = vec![AllowlistEntry {
-            chat_id: "alice".to_string(),
-            chat_alias: "Alice".to_string(),
+    fn is_target_allowed_requires_channel_match() {
+        let allowlist = vec![AllowlistEntry {
+            chat_id: "#general".to_string(),
+            chat_alias: "General".to_string(),
             my_name: None,
         }];
-        let ch = IrcChannel::new(cfg, inbound_tx, outbound_rx);
-        assert!(ch.is_sender_allowed("alice"));
-        assert!(!ch.is_sender_allowed("bob"));
+        assert!(IrcChannel::is_target_allowed(true, &allowlist, "#general", "anyone"));
+        assert!(!IrcChannel::is_target_allowed(true, &allowlist, "#random", "anyone"));
+        // DM (target = bot nick): not in list by channel; sender not listed
+        assert!(!IrcChannel::is_target_allowed(true, &allowlist, "synbot", "alice"));
+    }
+
+    #[test]
+    fn is_target_allowed_empty_allowlist_denies_when_enabled() {
+        let allowlist = vec![];
+        assert!(!IrcChannel::is_target_allowed(true, &allowlist, "#general", "anyone"));
+        assert!(!IrcChannel::is_target_allowed(true, &allowlist, "synbot", "alice"));
+    }
+
+    #[test]
+    fn is_target_allowed_with_channel_allowlist() {
+        let allowlist = vec![AllowlistEntry {
+            chat_id: "#general".to_string(),
+            chat_alias: "General".to_string(),
+            my_name: None,
+        }];
+        assert!(IrcChannel::is_target_allowed(true, &allowlist, "#general", "anyone"));
+        assert!(!IrcChannel::is_target_allowed(true, &allowlist, "#random", "anyone"));
+        assert!(!IrcChannel::is_target_allowed(true, &allowlist, "synbot", "alice"));
+    }
+
+    #[test]
+    fn is_target_allowed_dm_matches_sender_nick() {
+        let allowlist = vec![AllowlistEntry {
+            chat_id: "halloy1905".to_string(),
+            chat_alias: "user".to_string(),
+            my_name: None,
+        }];
+        assert!(IrcChannel::is_target_allowed(true, &allowlist, "synbot", "halloy1905"));
+        assert!(!IrcChannel::is_target_allowed(true, &allowlist, "synbot", "stranger"));
     }
 
     #[test]
@@ -390,6 +441,7 @@ mod tests {
             use_tls: false,
             password: None,
             allowlist: vec![],
+            enable_allowlist: true,
             agent: "main".to_string(),
         };
         let ch = IrcChannel::new(cfg, inbound_tx, outbound_rx);

@@ -347,7 +347,7 @@ impl SlackChannel {
 /// Socket Mode push-events callback: reads state from user_state, converts event to InboundMessage, forwards to bus.
 async fn slack_push_events_handler(
     event: SlackPushEventCallback,
-    _client: Arc<SlackHyperClient>,
+    client: Arc<SlackHyperClient>,
     states: SlackClientEventsUserState,
 ) -> UserCallbackResult<()> {
     let event_type = slack_push_event_type_name(&event);
@@ -365,7 +365,7 @@ async fn slack_push_events_handler(
         }
     };
     drop(guard);
-    if let Some(inbound) = slack_push_to_inbound(
+    match slack_push_to_inbound(
         &event,
         &state_inner.channel_name,
         &state_inner.default_agent,
@@ -374,18 +374,37 @@ async fn slack_push_events_handler(
         state_inner.group_my_name.as_deref(),
         state_inner.workspace_dir.as_deref(),
         Some(state_inner.token.as_str()),
-    )
-    .await
-    {
-        info!(
-            channel = %inbound.channel,
-            chat_id = %inbound.chat_id,
-            sender_id = %inbound.sender_id,
-            "Slack message received, forwarding to agent"
-        );
-        if let Err(e) = state_inner.inbound_tx.send(inbound).await {
-            error!("Slack: failed to forward inbound message to bus: {e}");
+    ).await {
+        SlackInboundOutcome::Accepted(inbound) => {
+            info!(
+                channel = %inbound.channel,
+                chat_id = %inbound.chat_id,
+                sender_id = %inbound.sender_id,
+                "Slack message received, forwarding to agent"
+            );
+            if let Err(e) = state_inner.inbound_tx.send(inbound).await {
+                error!("Slack: failed to forward inbound message to bus: {e}");
+            }
         }
+        SlackInboundOutcome::Denied {
+            chat_id,
+            notify_user,
+        } => {
+            if !notify_user {
+                return Ok(());
+            }
+            let raw_channel_id = slack_channel_id_raw(&chat_id);
+            let session_token = SlackApiToken::new(state_inner.token.clone().into());
+            let session = client.open_session(&session_token);
+            let req = SlackApiChatPostMessageRequest::new(
+                raw_channel_id.into(),
+                SlackMessageContent::new().with_text("Conversation not allowed. Please configure allowlist.".into()),
+            );
+            if let Err(e) = session.chat_post_message(&req).await {
+                warn!(chat_id = %chat_id, error = %e, "Slack: failed to send allowlist denial hint");
+            }
+        }
+        SlackInboundOutcome::Ignored => {}
     }
     Ok(())
 }
@@ -405,7 +424,17 @@ fn slack_push_event_type_name(event: &SlackPushEventCallback) -> &'static str {
 
 /// Convert Slack push event (Message or AppMention) to InboundMessage.
 /// When the message has file attachments and workspace_dir + token are set, downloads each file to workspace (using file_handler naming) and sets media.
-/// Returns None if from bot, no text/files, or not allowed.
+/// Returns ignored/denied/accepted outcome.
+enum SlackInboundOutcome {
+    Accepted(InboundMessage),
+    /// `notify_user` is true for IMs (e.g. `D…`); false for channels so we do not spam the room.
+    Denied {
+        chat_id: String,
+        notify_user: bool,
+    },
+    Ignored,
+}
+
 async fn slack_push_to_inbound(
     event: &SlackPushEventCallback,
     channel_name: &str,
@@ -415,14 +444,14 @@ async fn slack_push_to_inbound(
     group_my_name: Option<&str>,
     workspace_dir: Option<&std::path::Path>,
     token: Option<&str>,
-) -> Option<InboundMessage> {
+) -> SlackInboundOutcome {
     use slack_morphism::events::SlackEventCallbackBody;
 
     let (chat_id, sender_id, mut content, is_group, files_opt) = match &event.event {
         SlackEventCallbackBody::Message(msg) => {
             if msg.sender.bot_id.is_some() || msg.hidden == Some(true) {
                 info!("Slack: ignoring message (from bot or hidden)");
-                return None;
+                return SlackInboundOutcome::Ignored;
             }
             let sender_id = msg
                 .sender
@@ -445,7 +474,7 @@ async fn slack_push_to_inbound(
                 .unwrap_or(false);
             if text.is_empty() && !has_files {
                 info!("Slack: ignoring message (empty text and no attachments)");
-                return None;
+                return SlackInboundOutcome::Ignored;
             }
             let content = if text.is_empty() {
                 let n = msg
@@ -480,7 +509,7 @@ async fn slack_push_to_inbound(
                 .unwrap_or("")
                 .trim();
             if text.is_empty() {
-                return None;
+                return SlackInboundOutcome::Ignored;
             }
             let channel_id = slack_channel_id_raw(&mention.channel.to_slack_format());
             (
@@ -495,7 +524,7 @@ async fn slack_push_to_inbound(
             info!(
                 "Slack: push event is not message/app_mention (got another type). In Slack app enable Event Subscriptions → Subscribe to bot events → add: message.channels, message.im, app_mention"
             );
-            return None;
+            return SlackInboundOutcome::Ignored;
         }
     };
 
@@ -540,11 +569,16 @@ async fn slack_push_to_inbound(
     }
 
     // Allowlist check
-    if enable_allowlist && !allowlist.is_empty() {
+    if enable_allowlist {
         let allowed = allowlist.iter().any(|e| e.chat_id == chat_id);
         if !allowed {
             warn!(chat_id = %chat_id, "Slack: chat not in allowlist, ignoring");
-            return None;
+            // Only DM / IM (`D…`): do not post allowlist errors to public/private channels (`C…`/`G…`).
+            let notify_user = slack_channel_id_raw(&chat_id).starts_with('D');
+            return SlackInboundOutcome::Denied {
+                chat_id,
+                notify_user,
+            };
         }
     }
 
@@ -555,7 +589,7 @@ async fn slack_push_to_inbound(
             let trimmed = content.trim_start();
             if !trimmed.starts_with(&mention_prefix) {
                 info!(chat_id = %chat_id, "Slack: group message not @bot, ignoring");
-                return None;
+                return SlackInboundOutcome::Ignored;
             }
             content = trimmed
                 .strip_prefix(&mention_prefix)
@@ -565,7 +599,7 @@ async fn slack_push_to_inbound(
         }
     }
 
-    Some(InboundMessage {
+    SlackInboundOutcome::Accepted(InboundMessage {
         channel: channel_name.to_string(),
         sender_id,
         chat_id,

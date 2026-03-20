@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use tokio::sync::{broadcast, mpsc, RwLock};
 use tracing::{info, warn};
 
@@ -20,6 +20,19 @@ use crate::channels::file_handler;
 use crate::channels::Channel;
 use crate::config::DingTalkConfig;
 
+/// DingTalk may send `conversationType` as string `"1"` / `"2"` or as JSON number.
+fn deserialize_conversation_type<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let v: Option<serde_json::Value> = Option::deserialize(deserializer)?;
+    Ok(v.and_then(|x| match x {
+        serde_json::Value::String(s) => Some(s),
+        serde_json::Value::Number(n) => n.as_i64().map(|i| i.to_string()),
+        _ => None,
+    }))
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct BotMessageData {
@@ -29,6 +42,8 @@ struct BotMessageData {
     session_webhook: Option<String>,
     #[serde(default)]
     session_webhook_expired_time: Option<i64>,
+    #[serde(default, deserialize_with = "deserialize_conversation_type")]
+    conversation_type: Option<String>,
     #[serde(default)]
     sender_id: Option<String>,
     #[serde(default)]
@@ -243,13 +258,29 @@ impl Channel for DingTalkChannel {
                     return;
                 }
                 let sender_id = data.sender_id.clone().unwrap_or_default();
-                if allowlist_enforce && !allowlist.is_empty() {
+                if allowlist_enforce {
                     let ok = allowlist.iter().any(|e| {
                         e.chat_id == conversation_id
                             || e.chat_id == sender_id
                             || (!sender_id.is_empty() && e.chat_id.contains(&sender_id))
                     });
                     if !ok {
+                        // DingTalk: "1" = single chat, "2" = group — only notify in single chat.
+                        let is_single = data
+                            .conversation_type
+                            .as_deref()
+                            .map(|t| t == "1")
+                            .unwrap_or(false);
+                        if is_single {
+                            if let Some(ref wh) = data.session_webhook {
+                                let _ = post_session_text_http(
+                                    &http,
+                                    wh,
+                                    "Conversation not allowed. Please configure allowlist.",
+                                )
+                                .await;
+                            }
+                        }
                         return;
                     }
                 }

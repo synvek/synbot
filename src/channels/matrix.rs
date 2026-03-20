@@ -239,12 +239,21 @@ impl Channel for MatrixChannel {
                         return;
                     }
 
-                    if enable_allowlist && !allowlist.is_empty() {
+                    if enable_allowlist {
                         let allowed = allowlist.iter().any(|e| {
                             e.chat_id == room_id || e.chat_id == sender
                         });
                         if !allowed {
                             warn!(room_id = %room_id, "Matrix: room/user not in allowlist, ignoring");
+                            // Only reply in DMs; avoid spamming group rooms.
+                            let is_dm = !room.direct_targets().is_empty();
+                            if is_dm {
+                                let _ = room
+                                    .send(RoomMessageEventContent::text_plain(
+                                        "Conversation not allowed. Please configure allowlist.",
+                                    ))
+                                    .await;
+                            }
                             return;
                         }
                     }

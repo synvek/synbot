@@ -726,13 +726,15 @@ impl DiscordChannel {
                                                             chat_id = %inbound.chat_id,
                                                             "Discord: chat not in allowlist, saving to session only"
                                                         );
-                                                        let _ = Self::send_text_to_channel(
-                                                            client,
-                                                            token,
-                                                            &inbound.chat_id,
-                                                            "Chat not in allowlist. Please configure allowlist.",
-                                                        )
-                                                        .await;
+                                                        if !is_group {
+                                                            let _ = Self::send_text_to_channel(
+                                                                client,
+                                                                token,
+                                                                &inbound.chat_id,
+                                                                "Conversation not allowed. Please configure allowlist.",
+                                                            )
+                                                            .await;
+                                                        }
                                                         inbound.metadata["trigger_agent"] =
                                                             serde_json::json!(false);
                                                         (false, true)

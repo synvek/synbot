@@ -253,6 +253,7 @@ cargo run --example generate_config_schema --features schema -- -o templates/con
         "channels": ["#general", "#dev"],
         "useTls": true,
         "password": null,
+        "enableAllowlist": true,
         "allowlist": [],
         "agent": "main"
       }
@@ -267,7 +268,11 @@ cargo run --example generate_config_schema --features schema -- -o templates/con
 - **channels**：要加入的频道列表。
 - **useTls**：使用 TLS（默认 true）。
 - **password**：可选 NickServ 或服务器密码。
-- **allowlist**：结构同上；`chatId` 为 IRC 昵称或频道名。
+- **enableAllowlist**：为 false 时不校验白名单，频道消息和私聊都会正常处理。
+  为 true（默认）时按 IRC 特殊交互处理：不在白名单的**频道**消息只记日志（不在频道回提示），不在白名单的**私聊**会回复提示。
+- **allowlist**：结构同上；IRC 中：
+  - 频道消息：`chatId` 填**频道名**（如 `#general`）
+  - 私聊消息：`chatId` 填**对方 nick**（如 `halloy1905`）
 
 ## 提供商配置
 

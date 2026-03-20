@@ -401,9 +401,14 @@ impl Channel for TelegramChannel {
                                                 chat_id = %chat_id_str,
                                                 "Telegram: chat not in allowlist, saving to session only"
                                             );
-                                            let _ = self
-                                                .send_text(m.chat.id, "Chat not in allowlist. Please configure allowlist.")
-                                                .await;
+                                            if !is_group {
+                                                let _ = self
+                                                    .send_text(
+                                                        m.chat.id,
+                                                        "Conversation not allowed. Please configure allowlist.",
+                                                    )
+                                                    .await;
+                                            }
                                             let _ = self.inbound_tx.send(InboundMessage {
                                                 channel: self.config.name.clone(),
                                                 sender_id: sender.clone(),

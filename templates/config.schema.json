@@ -1112,7 +1112,7 @@
           "type": "string"
         },
         "allowlist": {
-          "description": "Allowlist of IRC nicks allowed to interact with the bot. If empty, all senders are allowed.",
+          "description": "Allowlist of IRC channel names allowed to interact with the bot (e.g. `#general`, `#dev`).",
           "default": [],
           "type": "array",
           "items": {
@@ -1126,6 +1126,11 @@
           "items": {
             "type": "string"
           }
+        },
+        "enableAllowlist": {
+          "description": "When true (default), only nicks in allowlist are accepted; when false, allowlist is not checked.",
+          "default": true,
+          "type": "boolean"
         },
         "enabled": {
           "description": "Whether this IRC channel is enabled.",

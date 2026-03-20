@@ -256,6 +256,7 @@ Optional channel to connect to an IRC server (e.g. Libera). Supports TLS, NickSe
         "channels": ["#general", "#dev"],
         "useTls": true,
         "password": null,
+        "enableAllowlist": true,
         "allowlist": [],
         "agent": "main"
       }
@@ -270,7 +271,11 @@ Optional channel to connect to an IRC server (e.g. Libera). Supports TLS, NickSe
 - **channels**: List of channels to join.
 - **useTls**: Use TLS (default true).
 - **password**: Optional NickServ or server password.
-- **allowlist**: Same structure; `chatId` is IRC nick or channel name.
+- **enableAllowlist**: When false, allowlist is not checked and both channel messages and DMs are processed normally.
+  When true (default), allowlist is enforced with IRC-specific UX: denied **channel** messages are logged only (no in-channel hint), while denied **DMs** receive a reply hint.
+- **allowlist**: Same structure. For IRC:
+  - `chatId` = **channel name** for channel messages (e.g. `#general`)
+  - `chatId` = **sender nick** for DMs to the bot (e.g. `halloy1905`)
 
 ## Provider Configuration
 

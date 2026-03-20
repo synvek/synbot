@@ -347,10 +347,13 @@ pub struct IrcConfig {
     pub use_tls: bool,
     /// NickServ password or SASL password for authentication.
     pub password: Option<String>,
-    /// Allowlist of IRC nicks allowed to interact with the bot.
-    /// If empty, all senders are allowed.
+    /// Allowlist entries: **channel** messages match `chatId` to the channel name (e.g. `#dev`);
+    /// **direct messages** to the bot match `chatId` to the sender's **IRC nick** (e.g. `halloy1905`).
     #[serde(default)]
     pub allowlist: Vec<AllowlistEntry>,
+    /// When true (default), only nicks in allowlist are accepted; when false, allowlist is not checked.
+    #[serde(default = "default_true")]
+    pub enable_allowlist: bool,
     /// Agent to use for this channel (e.g. "main", "dev"). Default "main".
     #[serde(default = "default_channel_agent")]
     pub agent: String,

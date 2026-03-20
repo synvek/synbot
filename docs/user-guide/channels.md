@@ -525,6 +525,7 @@ Synbot connects to an IRC server as a client, joins configured channels, and res
         "channels": ["#general", "#dev"],
         "useTls": true,
         "password": null,
+        "enableAllowlist": true,
         "allowlist": [],
         "agent": "main"
       }
@@ -539,7 +540,12 @@ Synbot connects to an IRC server as a client, joins configured channels, and res
 - **channels**: List of channels to join (e.g. `["#general", "#dev"]`).
 - **useTls**: Whether to use TLS (default true).
 - **password**: Optional. NickServ password or server PASS; used for authentication.
-- **allowlist**: Optional. Array of `{ "chatId", "chatAlias", "myName"? }`; `chatId` is the IRC nick or channel name. If empty, all senders are allowed.
+- **enableAllowlist**: Optional. Default `true`.
+  - `false`: allowlist is bypassed; channel messages and DMs are both processed.
+  - `true`: allowlist is enforced with IRC-specific UX: denied channel messages are only logged (no in-channel permission hint), denied DMs receive the permission hint.
+- **allowlist**: Optional. Array of `{ "chatId", "chatAlias", "myName"? }`; for IRC:
+  - channel message: `chatId` is the channel name (e.g. `#general`)
+  - DM to bot: `chatId` is the sender nick (e.g. `halloy1905`)
 
 Run `synbot doctor` to verify IRC server and nickname are set when the channel is enabled.
 

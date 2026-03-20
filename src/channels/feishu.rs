@@ -674,9 +674,17 @@ async fn process_im_message_receive(
         match entry {
             None => {
                 warn!(chat_id = %chat_id, "Feishu: chat not in allowlist");
-                let _ = client
-                    .send_message("chat_id", &chat_id, "text", &serde_json::json!({ "text": "Chat not in allowlist. Please configure allowlist." }).to_string())
-                    .await;
+                if chat_type == "p2p" {
+                    let _ = client
+                        .send_message(
+                            "chat_id",
+                            &chat_id,
+                            "text",
+                            &serde_json::json!({ "text": "Conversation not allowed. Please configure allowlist." })
+                                .to_string(),
+                        )
+                        .await;
+                }
                 let _ = inbound_tx.try_send(InboundMessage {
                     channel: channel_name.to_string(),
                     sender_id: sender_open_id.clone(),
