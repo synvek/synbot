@@ -18,8 +18,16 @@ impl WorkflowStore {
         }
     }
 
+    /// Same rules as session file names: one flat path segment (`:` / `/` / `\` etc. → `_`).
     fn safe_filename(key: &str) -> String {
-        key.replace(':', "_")
+        key.chars()
+            .map(|c| match c {
+                ':' => '_',
+                '/' | '\\' | '<' | '>' | '"' | '|' | '?' | '*' => '_',
+                c if c.is_control() => '_',
+                _ => c,
+            })
+            .collect()
     }
 
     fn state_path(&self, session_key: &str) -> PathBuf {
@@ -149,6 +157,20 @@ mod tests {
         store.save_state(key, &sample_state(key)).await.unwrap();
         let path = dir.path().join("agent_main_chat_123.json");
         assert!(path.exists(), "session key with colons should become underscores in filename");
+    }
+
+    #[tokio::test]
+    async fn safe_filename_slash_does_not_create_subdir() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = WorkflowStore::new(dir.path());
+        let key = "agent:main:dingtalk:dm:a/b+c=";
+        store.save_state(key, &sample_state(key)).await.unwrap();
+        let flat = dir.path().join("agent_main_dingtalk_dm_a_b+c=.json");
+        assert!(
+            flat.exists(),
+            "expected single file in workflows root, not nested dirs"
+        );
+        assert_eq!(dir.path().read_dir().unwrap().count(), 1);
     }
 
     #[tokio::test]

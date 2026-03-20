@@ -200,9 +200,21 @@ impl SessionStore {
 
     // ── helpers ──────────────────────────────────────────────────────
 
-    /// Turn a session key into a safe filename (replace `:` with `_`).
+    /// Turn a session key into a safe single path segment for `.json` filenames.
+    ///
+    /// - Historically, `:` → `_` (session keys use colons as delimiters).
+    /// - `/` and `\` must be stripped or they create nested paths and `write` fails
+    ///   (e.g. DingTalk `conversationId` is base64-like and often contains `/` and `=`).
+    /// - Other characters invalid on common OSes are mapped to `_`.
     fn safe_filename(key: &str) -> String {
-        key.replace(':', "_")
+        key.chars()
+            .map(|c| match c {
+                ':' => '_',
+                '/' | '\\' | '<' | '>' | '"' | '|' | '?' | '*' => '_',
+                c if c.is_control() => '_',
+                _ => c,
+            })
+            .collect()
     }
 
     /// Determine the sessions directory for a given session key.
@@ -702,6 +714,38 @@ mod tests {
         // The target file should exist
         let target = store.session_path("agent:main:key1");
         assert!(target.exists());
+    }
+
+    /// DingTalk (and similar) `conversationId` values are base64-like and may contain `/` and `+`.
+    /// Those must not appear in filenames or the path splits and `write` fails.
+    #[tokio::test]
+    async fn save_session_sanitizes_slash_in_session_key() {
+        let (_dir, store) = temp_store();
+        let ding_like = "cid4pp8+kNtu4pvXirARKMTO29RH+hR4OJl8/hF55vpOMA=";
+        let key = format!("agent:main:dingtalk:dm:{ding_like}");
+        let messages = vec![Message::user("hi")];
+        let meta = SessionMeta {
+            id: SessionId::full("main", "dingtalk", SessionScope::Dm, ding_like),
+            participants: vec![],
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+
+        store
+            .save_session(&key, &messages, Some(&meta))
+            .await
+            .expect("save must succeed; slash in id must not create nested paths");
+
+        let path = store.session_path(&key);
+        assert!(
+            path.exists(),
+            "expected flat file under main/: {}",
+            path.display()
+        );
+        assert_eq!(
+            path.parent().and_then(|p| p.file_name()),
+            Some(std::ffi::OsStr::new("main"))
+        );
     }
 
     #[tokio::test]
