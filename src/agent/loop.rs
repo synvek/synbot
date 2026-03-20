@@ -27,6 +27,18 @@ use crate::workflow::{
     PendingWorkflowInputStore, WorkflowDef, WorkflowState, WorkflowStore, WorkflowTrigger,
 };
 
+/// Prefix user text when a channel sets `metadata.sender_display` (e.g. DingTalk group: nick + id).
+fn apply_sender_display_prefix(content: &str, metadata: &serde_json::Value) -> String {
+    match metadata
+        .get("sender_display")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+    {
+        Some(label) if !label.is_empty() => format!("[{label}]\n{content}"),
+        _ => content.to_string(),
+    }
+}
+
 pub struct AgentLoop {
     model: Arc<dyn SynbotCompletionModel>,
     workspace: PathBuf,
@@ -623,7 +635,7 @@ impl AgentLoop {
         };
         let session_key = session_id.format();
 
-        let user_content = msg.content.clone();
+        let user_content = apply_sender_display_prefix(&msg.content, &msg.metadata);
         let session_messages = self.session_state.get_or_create_session_messages(&session_key).await;
         {
             let mut history = session_messages.lock().await;
@@ -715,6 +727,7 @@ impl AgentLoop {
             } else {
                 format!("@@{} {}", agent_id, directive.content)
             };
+            let base_content = apply_sender_display_prefix(&base_content, &msg.metadata);
             let user_content = if let Some(rid) = msg.metadata.get("pending_approval_request_id").and_then(|v| v.as_str()) {
                 format!(
                     "[Context: The user is responding to a pending command approval request (request_id: {}). Interpret their message as approve or reject and call submit_approval_response with request_id \"{}\" and approved (true or false).]\n\nUser: {}",
@@ -879,6 +892,7 @@ impl AgentLoop {
             } else {
                 format!("@@{} {}", agent_id, directive.content)
             };
+            let base_content = apply_sender_display_prefix(&base_content, &msg.metadata);
             let user_content = if let Some(rid) = msg.metadata.get("pending_approval_request_id").and_then(|v| v.as_str()) {
                 format!(
                     "[Context: The user is responding to a pending command approval request (request_id: {}). Interpret their message as approve or reject and call submit_approval_response with request_id \"{}\" and approved (true or false).]\n\nUser: {}",

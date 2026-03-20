@@ -50,8 +50,9 @@ impl SessionManager {
     /// Determine the [`SessionId`] for an incoming message based on the
     /// agent, channel, chat_id, and optional metadata.
     ///
-    /// If metadata contains a truthy `"group"` key (e.g. from channel allowlist),
-    /// uses `Group` scope; otherwise `Dm` scope. Identifier is always `chat_id`.
+    /// If metadata contains a truthy `"group"` key (e.g. Telegram/Discord/Feishu, or
+    /// DingTalk when `conversationType` is group), uses `Group` scope; otherwise `Dm`.
+    /// Identifier is always `chat_id` (for DingTalk, the `conversationId`).
     pub fn resolve_session(
         &self,
         agent_id: &str,

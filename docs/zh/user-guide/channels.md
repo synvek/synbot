@@ -432,8 +432,12 @@ Synbot 通过 **钉钉 Stream 模式** 接入，协议为**项目内自研实现
 ```
 
 - **clientId** / **clientSecret**：开放平台应用凭证（启用时必填）。
-- **allowlist**：可选。`enableAllowlist` 为 true 时，仅当会话 id（可用回调中的 `conversationId` 或发送者 id）与 allowlist 中 `chatId` 匹配时才处理。
+- **allowlist**：可选。`enableAllowlist` 为 true 时，仅匹配的会话会处理；**群内不会发提示**（只打日志），**单聊**可能收到英文 allowlist 提示。
+  - **单聊**：`chatId` 可填回调里的 **`conversationId`** 或发送方 **`senderId`**。
+  - **群聊**：必须把该群的 **`conversationId`** 配进 allowlist 的 `chatId`；只配用户 id **不能**放行群消息。未放行时机器人不会回复（日志里会有 `not in allowlist`）。
 - **群聊**：平台仅推送 **@ 机器人** 的消息。
+- **会话范围**：回调里带 **`conversationType`**（`"1"` 单聊、`"2"` 群聊）时，Synbot 会区分 **`dm` / `group`** 会话，避免群与私聊历史混在一起。若缺少该字段，可能仍按单聊会话处理。
+- **群内发言人**：群消息在写入会话历史时，若回调含 **`senderNick` / `senderId`**，会在正文前加 **`[昵称 (senderId)]`**，便于区分不同成员（角色列仍是 `user`，内容为带前缀的文本）。
 
 ### 文件收发（与飞书类似）
 

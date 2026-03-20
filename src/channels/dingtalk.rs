@@ -46,6 +46,9 @@ struct BotMessageData {
     conversation_type: Option<String>,
     #[serde(default)]
     sender_id: Option<String>,
+    /// Group/single-chat sender display name from Stream callback (`senderNick`).
+    #[serde(default)]
+    sender_nick: Option<String>,
     #[serde(default)]
     msg_id: Option<String>,
     #[serde(default)]
@@ -84,6 +87,48 @@ pub struct DingTalkChannel {
 }
 
 /// Resolve clientId/clientSecret with optional appKey/appSecret fallback; trims whitespace.
+/// `conversationType` / `conversation_type`: `"1"` single chat, `"2"` group (per DingTalk docs).
+fn dingtalk_is_group_chat(conversation_type: Option<&str>) -> bool {
+    conversation_type.map(|t| t == "2").unwrap_or(false)
+}
+
+/// Metadata for inbound messages: `group` for session scope, `sender_display` in groups for history attribution.
+fn dingtalk_inbound_metadata(
+    default_agent: &str,
+    data: &BotMessageData,
+    msg_id: &Option<String>,
+) -> serde_json::Value {
+    let is_group = dingtalk_is_group_chat(data.conversation_type.as_deref());
+    let mut m = serde_json::json!({
+        "default_agent": default_agent,
+        "trigger_agent": true,
+    });
+    if is_group {
+        m["group"] = serde_json::json!(true);
+    }
+    if let Some(ref mid) = msg_id {
+        m["msgId"] = serde_json::Value::String(mid.clone());
+    }
+    if is_group {
+        let sid = data.sender_id.as_deref().unwrap_or("").trim();
+        let nick = data
+            .sender_nick
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let display = match (nick, sid.is_empty()) {
+            (Some(n), false) => Some(format!("{n} ({sid})")),
+            (Some(n), true) => Some(n.to_string()),
+            (None, false) => Some(sid.to_string()),
+            (None, true) => None,
+        };
+        if let Some(d) = display {
+            m["sender_display"] = serde_json::Value::String(d);
+        }
+    }
+    m
+}
+
 fn effective_credentials(config: &DingTalkConfig) -> (String, String) {
     let id = config.client_id.trim();
     let id = if id.is_empty() {
@@ -265,6 +310,12 @@ impl Channel for DingTalkChannel {
                             || (!sender_id.is_empty() && e.chat_id.contains(&sender_id))
                     });
                     if !ok {
+                        warn!(
+                            conversation_id = %conversation_id,
+                            sender_id = %sender_id,
+                            conversation_type = ?data.conversation_type,
+                            "DingTalk: not in allowlist (no bot reply). Single chat: add allowlist chatId = conversationId or senderId. Group chat: add chatId = this conversationId; mentioning the bot is still required for the platform to deliver the message."
+                        );
                         // DingTalk: "1" = single chat, "2" = group — only notify in single chat.
                         let is_single = data
                             .conversation_type
@@ -313,10 +364,7 @@ impl Channel for DingTalkChannel {
                 if let Some((download_code, file_name)) = download {
                     if workspace.is_none() {
                         warn!("DingTalk file message: no workspace; set main_agent.workspace so files can be saved");
-                        let mut metadata = serde_json::json!({ "default_agent": default_agent });
-                        if let Some(ref mid) = data.msg_id {
-                            metadata["msgId"] = serde_json::Value::String(mid.clone());
-                        }
+                        let metadata = dingtalk_inbound_metadata(&default_agent, &data, &data.msg_id);
                         let _ = inbound_tx
                             .send(InboundMessage {
                                 channel: channel_name.clone(),
@@ -365,8 +413,7 @@ impl Channel for DingTalkChannel {
                             &conversation_id,
                             &sender_id,
                             &file_name,
-                            &default_agent,
-                            &data.msg_id,
+                            dingtalk_inbound_metadata(&default_agent, &data, &data.msg_id),
                             "robotCode missing: set robotCode in config (开放平台 → 机器人 → robotCode) or ensure Stream callback includes robotCode",
                         )
                         .await;
@@ -383,8 +430,7 @@ impl Channel for DingTalkChannel {
                                 &conversation_id,
                                 &sender_id,
                                 &file_name,
-                                &default_agent,
-                                &data.msg_id,
+                                dingtalk_inbound_metadata(&default_agent, &data, &data.msg_id),
                                 &format!("token: {}", e),
                             )
                             .await;
@@ -408,8 +454,7 @@ impl Channel for DingTalkChannel {
                                 &conversation_id,
                                 &sender_id,
                                 &file_name,
-                                &default_agent,
-                                &data.msg_id,
+                                dingtalk_inbound_metadata(&default_agent, &data, &data.msg_id),
                                 &e,
                             )
                             .await;
@@ -426,8 +471,7 @@ impl Channel for DingTalkChannel {
                                     &conversation_id,
                                     &sender_id,
                                     &file_name,
-                                    &default_agent,
-                                    &data.msg_id,
+                                    dingtalk_inbound_metadata(&default_agent, &data, &data.msg_id),
                                     &e.to_string(),
                                 )
                                 .await;
@@ -441,8 +485,7 @@ impl Channel for DingTalkChannel {
                                 &conversation_id,
                                 &sender_id,
                                 &file_name,
-                                &default_agent,
-                                &data.msg_id,
+                                dingtalk_inbound_metadata(&default_agent, &data, &data.msg_id),
                                 &format!("HTTP {}", r.status()),
                             )
                             .await;
@@ -455,8 +498,7 @@ impl Channel for DingTalkChannel {
                                 &conversation_id,
                                 &sender_id,
                                 &file_name,
-                                &default_agent,
-                                &data.msg_id,
+                                dingtalk_inbound_metadata(&default_agent, &data, &data.msg_id),
                                 &e.to_string(),
                             )
                             .await;
@@ -464,10 +506,7 @@ impl Channel for DingTalkChannel {
                         }
                     };
                     let path_result = file_handler::save_incoming_file(ws, &file_name, &bytes);
-                    let mut metadata = serde_json::json!({ "default_agent": default_agent });
-                    if let Some(ref mid) = data.msg_id {
-                        metadata["msgId"] = serde_json::Value::String(mid.clone());
-                    }
+                    let metadata = dingtalk_inbound_metadata(&default_agent, &data, &data.msg_id);
                     match path_result {
                         Ok(path) => {
                             info!(path = %path.display(), "DingTalk incoming file saved");
@@ -477,13 +516,13 @@ impl Channel for DingTalkChannel {
                                     sender_id: if sender_id.is_empty() {
                                         conversation_id.clone()
                                     } else {
-                                        sender_id
+                                        sender_id.clone()
                                     },
-                                    chat_id: conversation_id,
+                                    chat_id: conversation_id.clone(),
                                     content: format!("[File] {}", file_name),
                                     timestamp: chrono::Utc::now(),
                                     media: vec![path.to_string_lossy().into_owned()],
-                                    metadata,
+                                    metadata: metadata.clone(),
                                 })
                                 .await;
                         }
@@ -495,7 +534,7 @@ impl Channel for DingTalkChannel {
                                     sender_id: if sender_id.is_empty() {
                                         conversation_id.clone()
                                     } else {
-                                        sender_id
+                                        sender_id.clone()
                                     },
                                     chat_id: conversation_id,
                                     content: format!("[File] {} save failed: {}", file_name, e),
@@ -513,12 +552,7 @@ impl Channel for DingTalkChannel {
                     return;
                 }
 
-                let mut metadata = serde_json::json!({
-                    "default_agent": default_agent,
-                });
-                if let Some(ref mid) = data.msg_id {
-                    metadata["msgId"] = serde_json::Value::String(mid.clone());
-                }
+                let metadata = dingtalk_inbound_metadata(&default_agent, &data, &data.msg_id);
                 let msg = InboundMessage {
                     channel: channel_name,
                     sender_id: if sender_id.is_empty() {
@@ -556,14 +590,9 @@ async fn send_file_error(
     conversation_id: &str,
     sender_id: &str,
     file_name: &str,
-    default_agent: &str,
-    msg_id: &Option<String>,
+    metadata: serde_json::Value,
     err: &str,
 ) {
-    let mut metadata = serde_json::json!({ "default_agent": default_agent });
-    if let Some(ref mid) = msg_id {
-        metadata["msgId"] = serde_json::Value::String(mid.clone());
-    }
     let _ = inbound_tx
         .send(InboundMessage {
             channel: channel_name.to_string(),

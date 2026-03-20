@@ -490,8 +490,12 @@ Synbot connects using **DingTalk Stream mode** with a **self-implemented protoco
 ```
 
 - **clientId** / **clientSecret**: From the open platform (required when enabled).
-- **allowlist**: Optional. When `enableAllowlist` is true, only conversations whose `chatId` matches an entry (use `conversationId` or sender id from DingTalk) are processed.
+- **allowlist**: Optional. When `enableAllowlist` is true, only matching conversations are processed; there is **no in-chat hint in groups** (only logs), and **single chat** may receive the English allowlist hint.
+  - **Single chat (私聊)**: `chatId` can be the callback **`conversationId`** or the sender’s **`senderId`**.
+  - **Group chat (群聊)**: You must add the group’s **`conversationId`** as `chatId`. Listing only user IDs is not enough for group messages. If the group is not allowlisted, the bot will not reply (check logs for `not in allowlist`).
 - **Group chats**: Only messages that **@ the robot** are received by the platform.
+- **Sessions**: When the callback includes **`conversationType`** (`"1"` = single, `"2"` = group), Synbot sets session scope accordingly (`dm` vs `group`) so group and DM histories are not merged. If `conversationType` is missing, the session may default to `dm` scope.
+- **Who said what in groups**: For group messages, Synbot prefixes stored user text with **`[senderNick (senderId)]`** when the callback provides `senderNick` / `senderId`, so session history and the model see which member spoke.
 
 ### Files (like Feishu)
 
