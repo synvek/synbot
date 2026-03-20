@@ -77,10 +77,18 @@ impl IrcChannel {
             .any(|entry| entry.chat_id == sender_id)
     }
 
+    /// True if PRIVMSG `target` is a channel (RFC 2812: `#`, `&`, `+`, `!` prefixes).
+    fn is_channel_target(target: &str) -> bool {
+        matches!(
+            target.chars().next(),
+            Some('#' | '&' | '+' | '!')
+        )
+    }
+
     /// Derive the chat_id for a message: for channel messages use the channel
     /// name, for private messages use the sender's nick.
     fn chat_id_for(target: &str, sender_nick: &str) -> String {
-        if target.starts_with('#') || target.starts_with('&') {
+        if Self::is_channel_target(target) {
             target.to_string()
         } else {
             sender_nick.to_string()
@@ -224,6 +232,7 @@ impl Channel for IrcChannel {
                         }
 
                         let chat_id = Self::chat_id_for(target, sender_nick);
+                        let is_group = Self::is_channel_target(target);
 
                         let inbound = InboundMessage {
                             channel: channel_name.clone(),
@@ -236,6 +245,7 @@ impl Channel for IrcChannel {
                                 "trigger_agent": true,
                                 "default_agent": agent,
                                 "irc_target": target,
+                                "group": is_group,
                             }),
                         };
 
@@ -357,6 +367,8 @@ mod tests {
     fn chat_id_for_channel_message_returns_channel() {
         assert_eq!(IrcChannel::chat_id_for("#general", "alice"), "#general");
         assert_eq!(IrcChannel::chat_id_for("&local", "alice"), "&local");
+        assert_eq!(IrcChannel::chat_id_for("+modeless", "alice"), "+modeless");
+        assert_eq!(IrcChannel::chat_id_for("!abcdechan", "alice"), "!abcdechan");
     }
 
     #[test]
