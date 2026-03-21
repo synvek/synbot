@@ -14,7 +14,7 @@ use async_trait::async_trait;
 use crate::channels::feishu_ws::Frame;
 use serde::Deserialize;
 use tokio::sync::{broadcast, mpsc, RwLock};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::bus::{InboundMessage, OutboundMessage};
 use crate::channels::file_handler;
@@ -74,6 +74,9 @@ pub struct FeishuChannel {
 pub struct FeishuImMessageEvent {
     pub sender: Option<FeishuSender>,
     pub message: Option<FeishuMessage>,
+    /// Some Feishu payloads attach mentions on the event; prefer `message.mentions` when present.
+    #[serde(default)]
+    pub mentions: Option<Vec<FeishuMention>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -89,12 +92,197 @@ pub struct FeishuSenderId {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct FeishuMention {
+    /// Placeholder in `text`, e.g. `@_user_1`.
+    #[serde(default)]
+    pub key: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Flat string or nested `{"open_id":"ou_..."}` (Feishu `im.message.receive_v1` schema).
+    #[serde(default)]
+    pub id: Option<serde_json::Value>,
+    #[serde(default)]
+    pub open_id: Option<String>,
+}
+
+fn feishu_mention_id_open_id(id: &serde_json::Value) -> Option<&str> {
+    match id {
+        serde_json::Value::String(s) => Some(s.as_str()),
+        serde_json::Value::Object(obj) => obj
+            .get("open_id")
+            .and_then(|v| v.as_str())
+            .or_else(|| obj.get("user_id").and_then(|v| v.as_str()))
+            .or_else(|| obj.get("union_id").and_then(|v| v.as_str())),
+        _ => None,
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct FeishuMessage {
     pub message_id: Option<String>,
     pub chat_id: Option<String>,
     pub chat_type: Option<String>,
     pub message_type: Option<String>,
     pub content: Option<String>,
+    #[serde(default)]
+    pub mentions: Option<Vec<FeishuMention>>,
+}
+
+/// True if this mention refers to the app bot (`open_id` from bot info) or matches configured display name.
+fn feishu_mention_is_bot(m: &FeishuMention, bot_open_id: Option<&str>, expect_name: &str) -> bool {
+    if let Some(b) = bot_open_id {
+        if m.open_id.as_deref() == Some(b) {
+            return true;
+        }
+        if let Some(ref idv) = m.id {
+            if feishu_mention_id_open_id(idv) == Some(b) || idv.as_str() == Some(b) {
+                return true;
+            }
+        }
+    }
+    m.name.as_deref() == Some(expect_name)
+}
+
+fn strip_leading_feishu_user_placeholder(s: &str) -> Option<String> {
+    let s = s.trim_start();
+    let prefix = "@_user_";
+    if !s.starts_with(prefix) {
+        return None;
+    }
+    let after = &s[prefix.len()..];
+    let end = after
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(after.len());
+    if end == 0 {
+        return None;
+    }
+    Some(after[end..].trim_start().to_string())
+}
+
+/// Strip every leading Feishu `@_user_N` token so the agent never sees transport placeholders.
+fn strip_feishu_leading_user_placeholders(s: &str) -> String {
+    let mut cur = s.trim_start().to_string();
+    loop {
+        match strip_leading_feishu_user_placeholder(cur.trim_start()) {
+            Some(next) => cur = next,
+            None => return cur,
+        }
+    }
+}
+
+fn strip_leading_feishu_at_open_id(text: &str, bot_open_id: &str) -> Option<String> {
+    let t = text.trim_start();
+    if !t.starts_with("<at") {
+        return None;
+    }
+    let needle = format!("user_id=\"{bot_open_id}\"");
+    if !t.contains(&needle) {
+        return None;
+    }
+    let end = t.find("</at>")?;
+    Some(t[end + "</at>".len()..].trim_start().to_string())
+}
+
+fn strip_leading_feishu_placeholder_for_bot(
+    trimmed: &str,
+    mentions: &[FeishuMention],
+    bot_open_id: Option<&str>,
+    expect_name: &str,
+) -> Option<String> {
+    let mut keys: Vec<&str> = mentions
+        .iter()
+        .filter(|m| feishu_mention_is_bot(m, bot_open_id, expect_name))
+        .filter_map(|m| m.key.as_deref())
+        .collect();
+    keys.sort_by_key(|k| std::cmp::Reverse(k.len()));
+    for key in keys {
+        if trimmed.starts_with(key) {
+            return Some(trimmed[key.len()..].trim_start().to_string());
+        }
+    }
+    let bot_mentions: Vec<&FeishuMention> = mentions
+        .iter()
+        .filter(|m| feishu_mention_is_bot(m, bot_open_id, expect_name))
+        .collect();
+    if bot_mentions.len() == 1 && bot_mentions[0].key.is_none() {
+        return strip_leading_feishu_user_placeholder(trimmed);
+    }
+    None
+}
+
+/// Resolves group @-bot: Feishu uses `@_user_1` + `mentions[]`, not literal `@显示名`.
+fn feishu_resolve_group_mention(
+    text: &str,
+    expect_name: &str,
+    bot_open_id: Option<&str>,
+    mentions: Option<&[FeishuMention]>,
+) -> Option<String> {
+    let trimmed = text.trim_start();
+    if let Some(b) = bot_open_id {
+        if let Some(rest) = strip_leading_feishu_at_open_id(trimmed, b) {
+            return Some(rest);
+        }
+    }
+    let at_name = format!("@{expect_name}");
+    if trimmed.starts_with(&at_name) {
+        return Some(
+            trimmed
+                .strip_prefix(&at_name)
+                .map(str::trim_start)
+                .unwrap_or("")
+                .to_string(),
+        );
+    }
+    if let Some(stripped_at) = trimmed.strip_prefix('@') {
+        let rest = stripped_at.trim_start();
+        if rest.starts_with(expect_name) {
+            let after = rest[expect_name.len()..].trim_start();
+            return Some(after.to_string());
+        }
+    }
+    if let Some(list) = mentions.filter(|l| !l.is_empty()) {
+        if let Some(s) = strip_leading_feishu_placeholder_for_bot(trimmed, list, bot_open_id, expect_name) {
+            return Some(s);
+        }
+    }
+    None
+}
+
+/// Parse Feishu `message_type == "text"` `content` JSON: plain string or rich array (`tag: text|at`).
+fn feishu_extract_text_message_body(content_str: &str) -> String {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(content_str) else {
+        return String::new();
+    };
+    match v.get("text") {
+        Some(serde_json::Value::String(s)) => s.clone(),
+        Some(serde_json::Value::Array(parts)) => {
+            let mut out = String::new();
+            for el in parts {
+                let Some(obj) = el.as_object() else {
+                    continue;
+                };
+                match obj.get("tag").and_then(|t| t.as_str()) {
+                    Some("text") => {
+                        if let Some(t) = obj.get("text").and_then(|x| x.as_str()) {
+                            out.push_str(t);
+                        }
+                    }
+                    Some("at") => {
+                        if let Some(t) = obj
+                            .get("text")
+                            .or_else(|| obj.get("user_name"))
+                            .and_then(|x| x.as_str())
+                        {
+                            out.push_str(t);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            out
+        }
+        _ => String::new(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -380,6 +568,7 @@ async fn attempt_ws_connection(
     channel_name: String,
     enable_allowlist: bool,
     group_my_name: Option<String>,
+    bot_open_id: Option<String>,
     default_agent: String,
     app_id: String,
     app_secret: String,
@@ -417,12 +606,14 @@ async fn attempt_ws_connection(
     };
 
     info!("Feishu WebSocket connecting...");
+    let bot_open_id_for_cb = bot_open_id.clone();
     let result = run_ws_loop(ws_url, client_config, move |frame: Frame| {
         let inbound_tx = inbound_tx.clone();
         let channel_name = channel_name.clone();
         let config = config.clone();
         let approval_manager = approval_manager.clone();
         let event_state = event_state.clone();
+        let bot_open_id_cb = bot_open_id_for_cb.clone();
         async move {
             let start = Instant::now();
             let payload = frame.payload.as_ref().and_then(|p| {
@@ -447,6 +638,7 @@ async fn attempt_ws_connection(
                 &inbound_tx,
                 approval_manager.as_ref(),
                 Some(&event_state),
+                bot_open_id_cb.as_deref(),
             )
             .await;
             let elapsed = start.elapsed().as_millis();
@@ -477,6 +669,7 @@ async fn process_im_message_receive(
     inbound_tx: &mpsc::Sender<InboundMessage>,
     approval_manager: Option<&Arc<ApprovalManager>>,
     event_state: Option<&FeishuChannelEventState>,
+    bot_open_id: Option<&str>,
 ) {
     let sender = match &event.sender {
         Some(s) => s,
@@ -610,16 +803,21 @@ async fn process_im_message_receive(
     }
 
     let text = if message_type == "text" {
-        serde_json::from_str::<serde_json::Value>(content_str)
-            .ok()
-            .and_then(|v| v.get("text").and_then(|t| t.as_str().map(String::from)))
-            .unwrap_or_default()
+        let extracted = feishu_extract_text_message_body(content_str);
+        if extracted.is_empty() && !content_str.is_empty() {
+            content_str.to_string()
+        } else {
+            extracted
+        }
     } else {
         content_str.to_string()
     };
 
     if text.is_empty() {
-        warn!("Feishu message text is empty, skipping");
+        warn!(
+            message_type = %message_type,
+            "Feishu message text is empty, skipping"
+        );
         return;
     }
 
@@ -628,17 +826,23 @@ async fn process_im_message_receive(
     let enable_allowlist = config.enable_allowlist;
     let group_my_name = &config.group_my_name;
 
+    let mentions_slice = msg
+        .mentions
+        .as_deref()
+        .or(event.mentions.as_deref());
     let (_trigger_agent, content, is_group_meta) = if !enable_allowlist {
         if is_group {
             if let Some(ref my_name) = group_my_name {
-                let trimmed = text.trim_start();
-                let mention = format!("@{}", my_name);
-                let starts = trimmed.starts_with(&mention)
-                    || trimmed
-                        .strip_prefix('@')
-                        .map(|s| s.trim_start().starts_with(my_name))
-                        .unwrap_or(false);
-                if !starts {
+                if let Some(stripped) =
+                    feishu_resolve_group_mention(&text, my_name, bot_open_id, mentions_slice)
+                {
+                    (true, stripped, true)
+                } else {
+                    debug!(
+                        chat_id = %chat_id,
+                        mention_count = msg.mentions.as_ref().map(|m| m.len()).unwrap_or(0),
+                        "Feishu group message skipped: no @bot match (Feishu uses @_user_N in text; ensure group_my_name matches mention name or bot open_id is known)"
+                    );
                     let _ = inbound_tx
                         .try_send(InboundMessage {
                             channel: channel_name.to_string(),
@@ -658,11 +862,6 @@ async fn process_im_message_receive(
                         });
                     return;
                 }
-                let stripped = trimmed
-                    .strip_prefix(&mention)
-                    .map(str::trim_start)
-                    .unwrap_or_else(|| trimmed.strip_prefix('@').map(str::trim_start).unwrap_or(trimmed));
-                (true, stripped.to_string(), true)
             } else {
                 (true, text.clone(), true)
             }
@@ -704,43 +903,53 @@ async fn process_im_message_receive(
             }
             Some(e) => {
                 if let Some(ref my_name) = e.my_name {
-                    let trimmed = text.trim_start();
-                    let mention = format!("@{}", my_name);
-                    let starts = trimmed.starts_with(&mention)
-                        || trimmed
-                            .strip_prefix('@')
-                            .map(|s| s.trim_start().starts_with(my_name))
-                            .unwrap_or(false);
-                    if !starts {
-                        let _ = inbound_tx.try_send(InboundMessage {
-                            channel: channel_name.to_string(),
-                            sender_id: sender_open_id.clone(),
-                            chat_id: chat_id.clone(),
-                            content: text.clone(),
-                            timestamp: chrono::Utc::now(),
-                            media: vec![],
-                            metadata: serde_json::json!({
-                                "message_id": message_id,
-                                "message_type": message_type,
-                                "chat_type": chat_type,
-                                "trigger_agent": false,
-                                "group": true,
-                                "default_agent": config.default_agent,
-                            }),
-                        });
-                        return;
+                    if is_group {
+                        if let Some(stripped) =
+                            feishu_resolve_group_mention(&text, my_name, bot_open_id, mentions_slice)
+                        {
+                            (true, stripped, true)
+                        } else {
+                            debug!(
+                                chat_id = %chat_id,
+                                mention_count = msg.mentions.as_ref().map(|m| m.len()).unwrap_or(0),
+                                "Feishu group allowlist entry: skipped (no @bot match for my_name)"
+                            );
+                            let _ = inbound_tx.try_send(InboundMessage {
+                                channel: channel_name.to_string(),
+                                sender_id: sender_open_id.clone(),
+                                chat_id: chat_id.clone(),
+                                content: text.clone(),
+                                timestamp: chrono::Utc::now(),
+                                media: vec![],
+                                metadata: serde_json::json!({
+                                    "message_id": message_id,
+                                    "message_type": message_type,
+                                    "chat_type": chat_type,
+                                    "trigger_agent": false,
+                                    "group": true,
+                                    "default_agent": config.default_agent,
+                                }),
+                            });
+                            return;
+                        }
+                    } else {
+                        (true, text.clone(), false)
                     }
-                    let stripped = trimmed
-                        .strip_prefix(&mention)
-                        .map(str::trim_start)
-                        .unwrap_or_else(|| trimmed.strip_prefix('@').map(str::trim_start).unwrap_or(trimmed));
-                    (true, stripped.to_string(), true)
                 } else {
-                    (true, text.clone(), false)
+                    (true, text.clone(), is_group)
                 }
             }
         }
     };
+
+    let content = strip_feishu_leading_user_placeholders(&content);
+    if content.trim().is_empty() {
+        warn!(
+            chat_id = %chat_id,
+            "Feishu message has no text after stripping @_user_N placeholders; skipping"
+        );
+        return;
+    }
 
     let pending_approvals = event_state.map(|s| s.pending_approvals.clone());
     let approval_classifier = event_state.and_then(|s| s.approval_classifier.clone());
@@ -833,7 +1042,7 @@ impl Channel for FeishuChannel {
 
         let client = self.build_api_client();
 
-        match client.get_bot_info().await {
+        let feishu_bot_open_id = match client.get_bot_info().await {
             Ok(info) => {
                 info!("Feishu bot connected successfully");
                 if let Some(name) = &info.app_name {
@@ -842,6 +1051,7 @@ impl Channel for FeishuChannel {
                 if let Some(open_id) = &info.open_id {
                     info!("  Open ID: {open_id}");
                 }
+                info.open_id.clone()
             }
             Err(e) => {
                 let err_str = format!("{e:?}");
@@ -855,8 +1065,9 @@ impl Channel for FeishuChannel {
                     ));
                 }
                 warn!("Failed to fetch Feishu bot info (transient): {e:?}");
+                None
             }
-        }
+        };
 
         let mut outbound_rx = self.outbound_rx.take().unwrap();
         let outbound_client = self.build_api_client();
@@ -1012,6 +1223,7 @@ impl Channel for FeishuChannel {
                 self.config.name.clone(),
                 self.config.enable_allowlist,
                 self.config.group_my_name.clone(),
+                feishu_bot_open_id.clone(),
                 self.config.default_agent.clone(),
                 self.config.app_id.clone(),
                 self.config.app_secret.clone(),
@@ -1182,5 +1394,36 @@ impl Channel for FeishuChannel {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod feishu_parse_tests {
+    use super::*;
+
+    #[test]
+    fn mention_deserializes_nested_id_open_id() {
+        let j = r#"{"key":"@_user_1","name":"SynBot","id":{"open_id":"ou_abc","user_id":"u1"}}"#;
+        let m: FeishuMention = serde_json::from_str(j).unwrap();
+        assert!(feishu_mention_is_bot(&m, Some("ou_abc"), "wrong"));
+        assert!(feishu_mention_is_bot(&m, None, "SynBot"));
+    }
+
+    #[test]
+    fn extract_text_from_rich_text_array() {
+        let content = r#"{"text":[{"tag":"at","text":"@_user_1"},{"tag":"text","text":" hi"}]}"#;
+        assert_eq!(feishu_extract_text_message_body(content), "@_user_1 hi");
+    }
+
+    #[test]
+    fn strip_leading_placeholders_for_agent() {
+        assert_eq!(
+            strip_feishu_leading_user_placeholders("@_user_1 hi"),
+            "hi"
+        );
+        assert_eq!(
+            strip_feishu_leading_user_placeholders("@_user_1 @_user_2 hello"),
+            "hello"
+        );
     }
 }
