@@ -764,11 +764,18 @@ impl DiscordChannel {
                                                                     .unwrap_or(trimmed)
                                                                     .trim_start();
                                                                 inbound.content = stripped.to_string();
-                                                                inbound.metadata["group"] =
-                                                                    serde_json::json!(true);
+                                                            inbound.metadata["group"] =
+                                                                serde_json::json!(true);
                                                                 (true, false)
                                                             }
                                                         } else {
+                                                            // Allowlist hit without per-entry my_name: still mark guild
+                                                            // channels as group scope (session id must match
+                                                            // enable_allowlist=false behavior).
+                                                            if is_group {
+                                                                inbound.metadata["group"] =
+                                                                    serde_json::json!(true);
+                                                            }
                                                             (true, false)
                                                         }
                                                     }
