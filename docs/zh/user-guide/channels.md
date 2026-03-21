@@ -340,6 +340,62 @@ Discord 支持富文本消息嵌入：
 3. **错误处理**: 处理网络错误和重试逻辑
 4. **日志记录**: 记录所有传入事件以进行调试
 
+## Slack（Socket Mode）
+
+Synbot 使用 **Slack Socket Mode**，无需公网 URL 或 ngrok。机器人通过 **App-level token** 与 Slack 建立 WebSocket，使用 **Bot token** 发送消息。
+
+### 开始使用 Slack
+
+1. **创建 Slack 应用**：
+   - 打开 [Slack API](https://api.slack.com/apps) → Create New App → From scratch
+   - 在 Settings → **Socket Mode** 中启用 **Socket Mode**
+   - 创建 **App-level token**（以 `xapp-` 开头），勾选作用域 **`connections:write`**
+   - 在 OAuth & Permissions 中将应用安装到工作区，获取 **Bot User OAuth Token**（以 `xoxb-` 开头）
+
+2. **订阅事件**（Event Subscriptions）：
+   - 启用 **Subscribe to bot events**
+   - 至少添加 `message.channels`、`message.im`、`app_mention`，以便机器人能收到消息
+
+3. **配置 Synbot**：
+   ```json
+   {
+     "channels": {
+       "slack": [
+         {
+           "name": "slack",
+           "enabled": true,
+           "token": "xoxb-YOUR_BOT_TOKEN",
+           "appToken": "xapp-YOUR_APP_LEVEL_TOKEN",
+           "allowlist": [],
+           "enableAllowlist": false
+         }
+       ]
+     }
+   }
+   ```
+   **重要：** 不要把两个 token 填反。若日志出现 `not_allowed_token_type`，多半是 Bot token 写进了 `appToken`，或把 App-level token 写进了 `token`。
+   - **token** = **Bot User OAuth Token**（`xoxb-...`，来自 **OAuth & Permissions**）→ 用于发消息等 Web API。
+   - **appToken** = **App-level token**（`xapp-...`，来自 **Basic Information → App-Level Tokens**，作用域 `connections:write`）→ **仅用于** Socket Mode 连接。
+
+4. **启动 Synbot**：
+   ```bash
+   synbot start
+   ```
+
+- **token**：Bot token（`xoxb-...`），用于发送消息（如 `chat.postMessage`）。
+- **appToken**：App-level token（`xapp-...`），用于 Socket Mode 的 WebSocket。
+- **allowlist**：可选；`enableAllowlist` 为 true 时，仅处理列表中 `chatId` 对应的频道或用户。
+- **groupMyName**：可选，填机器人 **用户 ID**（如 `U01234ABCD`），用于在频道中要求必须 @ 机器人才处理消息。
+
+**频道里 @ 机器人时出现两次回复 / 先 Busy 再正常：** Slack 对同一条帖子常会同时推送 **`message`** 与 **`app_mention`** 两类事件。Synbot 会按 **频道 ID + 消息 `ts`** 去重，只让 agent 处理一次（否则会话里第二次事件可能在第一次尚未结束时触发 **`[Control] Busy`**，随后再出现正常回复）。
+
+**错误 `not_allowed_token_type`：** 两个 token 写反了。应使用 `token` = Bot token（`xoxb-`）、`appToken` = App-level token（`xapp-`）。App-level token 在 **Basic Information → App-Level Tokens** 创建，作用域选 `connections:write`。
+
+**机器人无响应时：**
+- 确认 Slack 应用中已启用 **Socket Mode**（Settings → Socket Mode）。
+- 在 **Event Subscriptions** 中启用 **Subscribe to bot events**，并至少订阅：`message.channels`、`message.im`、`app_mention`。
+- 使用调试日志启动：`RUST_LOG=synbot::channels::slack=info,slack_morphism=debug synbot start`，便于查看连接与入站事件。
+
 ## Matrix
 
 Synbot 以机器人用户身份连接 Matrix homeserver，同步房间消息并在同一房间内回复。可使用用户名/密码登录，或使用 access token（例如在 Element 设置 → 帮助与关于 → Access Token 中获取）。
@@ -629,6 +685,10 @@ tail -f ~/.synbot/logs/synbot.log | grep "telegram"
 - **事件传递问题**: 检查 webhook 配置
 - **速率限制**: 实施请求节流
 
+#### Slack
+- **无响应**: 确认已启用 Socket Mode，且 Event Subscriptions 中已订阅 `message.channels`、`message.im`、`app_mention`；检查 `token`（xoxb）与 `appToken`（xapp）未对调。
+- **@ 机器人时先出现 Busy 再正常回复**: 多为 Slack 对同一条消息同时投递 `message` 与 `app_mention`；请使用已包含「频道 + `ts`」去重的 Synbot 版本，或参见上文 **Slack（Socket Mode）** 章节说明。
+
 ### 调试技巧
 
 1. **启用调试日志**:
@@ -650,6 +710,9 @@ tail -f ~/.synbot/logs/synbot.log | grep "telegram"
 
    # 测试 Discord Gateway
    curl https://discord.com/api/v10/gateway
+
+   # 测试 Slack Web API（需 Bot token）
+   curl -H "Authorization: Bearer xoxb-YOUR_BOT_TOKEN" https://slack.com/api/auth.test
    ```
 
 3. **验证配置**:

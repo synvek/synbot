@@ -7,8 +7,10 @@
 //! File upload uses Slack's replacement API (files.getUploadURLExternal + files.completeUploadExternal)
 //! because files.upload is deprecated and returns method_deprecated.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -52,6 +54,27 @@ fn slack_channel_id_raw(chat_id: &str) -> String {
 fn slack_channel_uses_group_session_scope(raw_or_formatted_id: &str) -> bool {
     let id = slack_channel_id_raw(raw_or_formatted_id);
     id.starts_with('C') || id.starts_with('G')
+}
+
+/// Slack often delivers **both** `message` and `app_mention` for the same channel post when the bot
+/// is @-mentioned. Both carry the same `ts`; drop the second so the agent is not run twice (second
+/// run would hit `[Control] Busy` while the first is still in progress).
+const SLACK_CHANNEL_PUSH_DEDUPE_TTL: Duration = Duration::from_secs(120);
+
+async fn slack_claim_channel_push_dedupe(
+    dedupe: &tokio::sync::Mutex<HashMap<(String, String), Instant>>,
+    channel_id: &str,
+    message_ts: &str,
+) -> bool {
+    let key = (channel_id.to_string(), message_ts.to_string());
+    let now = Instant::now();
+    let mut guard = dedupe.lock().await;
+    guard.retain(|_, t| now.duration_since(*t) < SLACK_CHANNEL_PUSH_DEDUPE_TTL);
+    if guard.contains_key(&key) {
+        return false;
+    }
+    guard.insert(key, now);
+    true
 }
 
 /// Upload a file to Slack using the replacement API (files.getUploadURLExternal + POST to URL + files.completeUploadExternal).
@@ -201,6 +224,8 @@ struct SlackPushStateInner {
     allowlist: Vec<AllowlistEntry>,
     enable_allowlist: bool,
     group_my_name: Option<String>,
+    /// Deduplicate `message` + `app_mention` pairs in channels (same `channel_id` + `ts`).
+    channel_push_dedupe: Arc<tokio::sync::Mutex<HashMap<(String, String), Instant>>>,
     /// Workspace directory for saving incoming attachments; required to download message files.
     workspace_dir: Option<PathBuf>,
     /// Bot token (xoxb-...) for downloading private file URLs.
@@ -281,6 +306,7 @@ impl SlackChannel {
     async fn run_socket_mode(&self) -> Result<()> {
         let client = Arc::new(SlackClient::new(SlackClientHyperConnector::new()?));
 
+        let channel_push_dedupe = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
         let push_state = SlackPushState {
             inner: Arc::new(SlackPushStateInner {
                 inbound_tx: self.inbound_tx.clone(),
@@ -289,6 +315,7 @@ impl SlackChannel {
                 allowlist: self.config.allowlist.clone(),
                 enable_allowlist: self.config.enable_allowlist,
                 group_my_name: self.config.group_my_name.clone(),
+                channel_push_dedupe: channel_push_dedupe.clone(),
                 workspace_dir: self.workspace_dir.clone(),
                 token: self.config.token.clone(),
             }),
@@ -379,6 +406,7 @@ async fn slack_push_events_handler(
         &state_inner.allowlist,
         state_inner.enable_allowlist,
         state_inner.group_my_name.as_deref(),
+        &state_inner.channel_push_dedupe,
         state_inner.workspace_dir.as_deref(),
         Some(state_inner.token.as_str()),
     ).await {
@@ -449,12 +477,13 @@ async fn slack_push_to_inbound(
     allowlist: &[AllowlistEntry],
     enable_allowlist: bool,
     group_my_name: Option<&str>,
+    channel_push_dedupe: &tokio::sync::Mutex<HashMap<(String, String), Instant>>,
     workspace_dir: Option<&std::path::Path>,
     token: Option<&str>,
 ) -> SlackInboundOutcome {
     use slack_morphism::events::SlackEventCallbackBody;
 
-    let (chat_id, sender_id, mut content, is_group, files_opt) = match &event.event {
+    let (chat_id, sender_id, mut content, is_group, files_opt, channel_dedupe_ts) = match &event.event {
         SlackEventCallbackBody::Message(msg) => {
             if msg.sender.bot_id.is_some() || msg.hidden == Some(true) {
                 info!("Slack: ignoring message (from bot or hidden)");
@@ -501,11 +530,16 @@ async fn slack_push_to_inbound(
                 .map(|c| slack_channel_id_raw(&c.to_slack_format()))
                 .unwrap_or_default();
             let is_group = slack_channel_uses_group_session_scope(&channel_id);
+            let channel_dedupe_ts = if is_group {
+                Some(msg.origin.ts.0.clone())
+            } else {
+                None
+            };
             let files = msg
                 .content
                 .as_ref()
                 .and_then(|c| c.files.as_ref());
-            (channel_id, sender_id, content, is_group, files)
+            (channel_id, sender_id, content, is_group, files, channel_dedupe_ts)
         }
         SlackEventCallbackBody::AppMention(mention) => {
             let sender_id = mention.user.to_slack_format();
@@ -520,12 +554,18 @@ async fn slack_push_to_inbound(
             }
             let channel_id = slack_channel_id_raw(&mention.channel.to_slack_format());
             let is_group = slack_channel_uses_group_session_scope(&channel_id);
+            let channel_dedupe_ts = if is_group {
+                Some(mention.origin.ts.0.clone())
+            } else {
+                None
+            };
             (
                 channel_id,
                 sender_id,
                 text.to_string(),
                 is_group,
                 None::<&Vec<SlackFile>>,
+                channel_dedupe_ts,
             )
         }
         _ => {
@@ -535,6 +575,17 @@ async fn slack_push_to_inbound(
             return SlackInboundOutcome::Ignored;
         }
     };
+
+    if let Some(ref ts) = channel_dedupe_ts {
+        if !slack_claim_channel_push_dedupe(channel_push_dedupe, &chat_id, ts).await {
+            info!(
+                chat_id = %chat_id,
+                ts = %ts,
+                "Slack: ignoring duplicate push for same channel message (Slack sends both message and app_mention)"
+            );
+            return SlackInboundOutcome::Ignored;
+        }
+    }
 
     // Download attachments to workspace when possible
     let mut media = Vec::new();

@@ -391,6 +391,8 @@ Synbot uses **Slack Socket Mode**, so you do not need a public URL or ngrok. The
 - **allowlist**: Optional; when `enableAllowlist` is true, only listed `chatId`s (channel or user IDs) are accepted.
 - **groupMyName**: Optional bot user ID (e.g. `U01234ABCD`) for requiring @mentions in channels.
 
+**Duplicate replies when @-mentioning in a channel:** Slack often delivers **both** a `message` event and an `app_mention` event for the same post. Synbot deduplicates by channel ID + message `ts` so the agent runs only once (otherwise the second event could briefly show `[Control] Busy` while the first run is still active).
+
 **Error `not_allowed_token_type`:** You have the two tokens reversed. Use `token` = Bot token (xoxb-) and `appToken` = App-level token (xapp-). Create the App-level token under **Basic Information → App-Level Tokens** with scope `connections:write`.
 
 **If the bot does not respond:**
