@@ -47,6 +47,13 @@ fn slack_channel_id_raw(chat_id: &str) -> String {
     s.to_string()
 }
 
+/// `true` for Slack public (`C…`) or private (`G…`) channels; `false` for DMs (`D…`).
+/// Used for session scope (`group` vs `dm`) and optional @-bot gating in channels.
+fn slack_channel_uses_group_session_scope(raw_or_formatted_id: &str) -> bool {
+    let id = slack_channel_id_raw(raw_or_formatted_id);
+    id.starts_with('C') || id.starts_with('G')
+}
+
 /// Upload a file to Slack using the replacement API (files.getUploadURLExternal + POST to URL + files.completeUploadExternal).
 /// files.upload is deprecated and returns method_deprecated for many apps.
 async fn slack_upload_file_v2(
@@ -493,7 +500,7 @@ async fn slack_push_to_inbound(
                 .as_ref()
                 .map(|c| slack_channel_id_raw(&c.to_slack_format()))
                 .unwrap_or_default();
-            let is_group = channel_id.starts_with('C');
+            let is_group = slack_channel_uses_group_session_scope(&channel_id);
             let files = msg
                 .content
                 .as_ref()
@@ -512,11 +519,12 @@ async fn slack_push_to_inbound(
                 return SlackInboundOutcome::Ignored;
             }
             let channel_id = slack_channel_id_raw(&mention.channel.to_slack_format());
+            let is_group = slack_channel_uses_group_session_scope(&channel_id);
             (
                 channel_id,
                 sender_id,
                 text.to_string(),
-                true,
+                is_group,
                 None::<&Vec<SlackFile>>,
             )
         }
@@ -610,6 +618,7 @@ async fn slack_push_to_inbound(
             "event_id": format!("{}", event.event_id.0),
             "team_id": format!("{}", event.team_id.0),
             "default_agent": default_agent,
+            "group": is_group,
         }),
     })
 }
