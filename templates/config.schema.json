@@ -142,6 +142,14 @@
         }
       ]
     },
+    "pairings": {
+      "description": "Pairing approvals supplementing allowlist; use `synbot pairing approve`.",
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/PairingEntry"
+      }
+    },
     "plugins": {
       "description": "Plugin-specific configuration. Keys are plugin names; values are arbitrary JSON for each plugin.",
       "default": {},
@@ -413,6 +421,26 @@
             "string",
             "null"
           ]
+        }
+      }
+    },
+    "PairingEntry": {
+      "description": "Approved pairing: grants access for one chat (by MD5(chatId) prefix) for a channel provider.",
+      "type": "object",
+      "required": [
+        "channel",
+        "pairingCode"
+      ],
+      "properties": {
+        "channel": {
+          "description": "Channel provider name (registry key): feishu, discord, telegram, …",
+          "type": "string"
+        },
+        "pairingCode": {
+          "description": "First 12 hex characters of MD5(chatId).",
+          "type": "string",
+          "minLength": 12,
+          "maxLength": 12
         }
       }
     },

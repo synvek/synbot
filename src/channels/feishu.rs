@@ -22,7 +22,9 @@ use crate::channels::approval_classifier;
 use crate::channels::feishu_api::FeishuApiClient;
 use crate::channels::feishu_ws::{build_event_response_frame, get_ws_endpoint, run_ws_loop};
 use crate::channels::{approval_formatter, Channel, RetryPolicy, RetryState};
-use crate::config::{AllowlistEntry, FeishuConfig};
+use crate::config::{
+    pairing_allows, pairing_message, pairings_from_config_file_cached, AllowlistEntry, FeishuConfig,
+};
 use crate::rig_provider::SynbotCompletionModel;
 use crate::tools::approval::{ApprovalManager, ApprovalResponse};
 
@@ -64,6 +66,7 @@ pub struct FeishuChannel {
     approval_classifier: Option<Arc<dyn SynbotCompletionModel>>,
     pending_approvals: Arc<RwLock<HashMap<String, (String, String)>>>,
     workspace_dir: Option<PathBuf>,
+    config_path: Option<PathBuf>,
 }
 
 // ---------------------------------------------------------------------------
@@ -461,6 +464,7 @@ impl FeishuChannel {
         show_tool_calls: bool,
         tool_result_preview_chars: usize,
         workspace_dir: Option<PathBuf>,
+        config_path: Option<PathBuf>,
     ) -> Self {
         Self {
             config,
@@ -474,6 +478,7 @@ impl FeishuChannel {
             approval_classifier: None,
             pending_approvals: Arc::new(RwLock::new(HashMap::new())),
             workspace_dir,
+            config_path,
         }
     }
 
@@ -566,6 +571,8 @@ async fn attempt_ws_connection(
     inbound_tx: mpsc::Sender<InboundMessage>,
     allowlist: Vec<AllowlistEntry>,
     channel_name: String,
+    channel_provider: &'static str,
+    config_path: Option<PathBuf>,
     enable_allowlist: bool,
     group_my_name: Option<String>,
     bot_open_id: Option<String>,
@@ -607,6 +614,7 @@ async fn attempt_ws_connection(
 
     info!("Feishu WebSocket connecting...");
     let bot_open_id_for_cb = bot_open_id.clone();
+    let config_path_cb = config_path.clone();
     let result = run_ws_loop(ws_url, client_config, move |frame: Frame| {
         let inbound_tx = inbound_tx.clone();
         let channel_name = channel_name.clone();
@@ -614,6 +622,7 @@ async fn attempt_ws_connection(
         let approval_manager = approval_manager.clone();
         let event_state = event_state.clone();
         let bot_open_id_cb = bot_open_id_for_cb.clone();
+        let config_path_ev = config_path_cb.clone();
         async move {
             let start = Instant::now();
             let payload = frame.payload.as_ref().and_then(|p| {
@@ -632,6 +641,8 @@ async fn attempt_ws_connection(
             let client = FeishuApiClient::new(&config.app_id, &config.app_secret);
             process_im_message_receive(
                 &channel_name,
+                channel_provider,
+                config_path_ev.as_ref(),
                 &config,
                 &event,
                 &client,
@@ -663,6 +674,8 @@ async fn attempt_ws_connection(
 /// Process a single im.message.receive_v1 event: allowlist/mention logic, file download, approval, forward to bus.
 async fn process_im_message_receive(
     channel_name: &str,
+    channel_provider: &str,
+    config_path: Option<&PathBuf>,
     config: &FeishuConfig,
     event: &FeishuImMessageEvent,
     client: &FeishuApiClient,
@@ -869,21 +882,23 @@ async fn process_im_message_receive(
             (true, text.clone(), false)
         }
     } else {
+        let pairings = config_path
+            .map(|p| pairings_from_config_file_cached(p.as_path()))
+            .unwrap_or_default();
+        let paired = pairing_allows(&chat_id, channel_provider, &pairings);
         let entry = allowlist.iter().find(|e| e.chat_id == chat_id);
         match entry {
-            None => {
+            None if !paired => {
                 warn!(chat_id = %chat_id, "Feishu: chat not in allowlist");
-                if chat_type == "p2p" {
-                    let _ = client
-                        .send_message(
-                            "chat_id",
-                            &chat_id,
-                            "text",
-                            &serde_json::json!({ "text": "Conversation not allowed. Please configure allowlist." })
-                                .to_string(),
-                        )
-                        .await;
-                }
+                let hint = pairing_message(channel_provider, &chat_id);
+                let _ = client
+                    .send_message(
+                        "chat_id",
+                        &chat_id,
+                        "text",
+                        &serde_json::json!({ "text": hint }).to_string(),
+                    )
+                    .await;
                 let _ = inbound_tx.try_send(InboundMessage {
                     channel: channel_name.to_string(),
                     sender_id: sender_open_id.clone(),
@@ -900,6 +915,44 @@ async fn process_im_message_receive(
                     }),
                 });
                 return;
+            }
+            None => {
+                if is_group {
+                    if let Some(ref my_name) = group_my_name {
+                        if let Some(stripped) =
+                            feishu_resolve_group_mention(&text, my_name, bot_open_id, mentions_slice)
+                        {
+                            (true, stripped, true)
+                        } else {
+                            debug!(
+                                chat_id = %chat_id,
+                                mention_count = msg.mentions.as_ref().map(|m| m.len()).unwrap_or(0),
+                                "Feishu group (pairing): skipped (no @bot match for group_my_name)"
+                            );
+                            let _ = inbound_tx.try_send(InboundMessage {
+                                channel: channel_name.to_string(),
+                                sender_id: sender_open_id.clone(),
+                                chat_id: chat_id.clone(),
+                                content: text.clone(),
+                                timestamp: chrono::Utc::now(),
+                                media: vec![],
+                                metadata: serde_json::json!({
+                                    "message_id": message_id,
+                                    "message_type": message_type,
+                                    "chat_type": chat_type,
+                                    "trigger_agent": false,
+                                    "group": true,
+                                    "default_agent": config.default_agent,
+                                }),
+                            });
+                            return;
+                        }
+                    } else {
+                        (true, text.clone(), true)
+                    }
+                } else {
+                    (true, text.clone(), false)
+                }
             }
             Some(e) => {
                 if let Some(ref my_name) = e.my_name {
@@ -1221,6 +1274,8 @@ impl Channel for FeishuChannel {
                 self.inbound_tx.clone(),
                 self.config.allowlist.clone(),
                 self.config.name.clone(),
+                "feishu",
+                self.config_path.clone(),
                 self.config.enable_allowlist,
                 self.config.group_my_name.clone(),
                 feishu_bot_open_id.clone(),

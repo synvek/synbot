@@ -4,6 +4,8 @@
 //! authentication, channel and private-message routing, and `RetryPolicy`
 //! exponential-backoff reconnection.
 
+use std::path::PathBuf;
+
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use futures_util::StreamExt;
@@ -13,7 +15,9 @@ use tracing::{error, info, warn};
 
 use crate::bus::{InboundMessage, OutboundMessage};
 use crate::channels::{Channel, RetryPolicy, RetryState};
-use crate::config::IrcConfig;
+use crate::config::{
+    pairing_allows, pairing_message, pairings_from_config_file_cached, IrcConfig,
+};
 
 // ---------------------------------------------------------------------------
 // IrcChannel
@@ -24,6 +28,7 @@ pub struct IrcChannel {
     inbound_tx: mpsc::Sender<InboundMessage>,
     outbound_rx: Option<broadcast::Receiver<OutboundMessage>>,
     retry_state: RetryState,
+    config_path: Option<PathBuf>,
 }
 
 impl IrcChannel {
@@ -31,12 +36,14 @@ impl IrcChannel {
         config: IrcConfig,
         inbound_tx: mpsc::Sender<InboundMessage>,
         outbound_rx: broadcast::Receiver<OutboundMessage>,
+        config_path: Option<PathBuf>,
     ) -> Self {
         Self {
             config,
             inbound_tx,
             outbound_rx: Some(outbound_rx),
             retry_state: RetryState::new(),
+            config_path,
         }
     }
 
@@ -152,6 +159,7 @@ impl Channel for IrcChannel {
         let inbound_tx = self.inbound_tx.clone();
         let allowlist = self.config.allowlist.clone();
         let enable_allowlist = self.config.enable_allowlist;
+        let config_path = self.config_path.clone();
 
         // Outbound dispatcher — runs in background
         let sender = client.sender();
@@ -232,28 +240,33 @@ impl Channel for IrcChannel {
                             continue;
                         }
 
+                        let chat_id = Self::chat_id_for(target, sender_nick);
+                        let pairings = config_path
+                            .as_ref()
+                            .map(|p| pairings_from_config_file_cached(p.as_path()))
+                            .unwrap_or_default();
+                        let paired = pairing_allows(&chat_id, "irc", &pairings);
                         if !Self::is_target_allowed(
                             enable_allowlist,
                             &allowlist,
                             target,
                             sender_nick,
-                        ) {
+                        ) && !paired
+                        {
                             warn!(
                                 sender = %sender_nick,
                                 target = %target,
                                 "IRC: conversation not permitted by allowlist"
                             );
-                            // DM only: reply to the user. Never post allowlist errors to a channel (spam).
-                            if !Self::is_channel_target(target) {
-                                let _ = sender.send_privmsg(
-                                    sender_nick,
-                                    "Conversation not allowed. Please configure allowlist.",
-                                );
-                            }
+                            let hint = pairing_message("irc", &chat_id);
+                            let reply_target = if Self::is_channel_target(target) {
+                                target
+                            } else {
+                                sender_nick
+                            };
+                            let _ = sender.send_privmsg(reply_target, hint);
                             continue;
                         }
-
-                        let chat_id = Self::chat_id_for(target, sender_nick);
                         let is_group = Self::is_channel_target(target);
 
                         let inbound = InboundMessage {
@@ -321,7 +334,7 @@ impl crate::channels::ChannelFactory for IrcChannelFactory {
             warn!("IRC channel '{}' created without nickname", cfg.name);
         }
 
-        let ch = IrcChannel::new(cfg, ctx.inbound_tx, ctx.outbound_rx);
+        let ch = IrcChannel::new(cfg, ctx.inbound_tx, ctx.outbound_rx, ctx.config_path);
         Ok(Box::new(ch))
     }
 }
@@ -355,7 +368,7 @@ mod tests {
     fn make_channel() -> IrcChannel {
         let (inbound_tx, _) = mpsc::channel(16);
         let (_, outbound_rx) = broadcast::channel(16);
-        IrcChannel::new(make_config(), inbound_tx, outbound_rx)
+        IrcChannel::new(make_config(), inbound_tx, outbound_rx, None)
     }
 
     #[test]
@@ -444,7 +457,7 @@ mod tests {
             enable_allowlist: true,
             agent: "main".to_string(),
         };
-        let ch = IrcChannel::new(cfg, inbound_tx, outbound_rx);
+        let ch = IrcChannel::new(cfg, inbound_tx, outbound_rx, None);
         let irc_cfg = ch.build_irc_config();
         assert_eq!(irc_cfg.server.as_deref(), Some("irc.libera.chat"));
         assert_eq!(irc_cfg.nickname.as_deref(), Some("synbot"));
@@ -465,6 +478,7 @@ mod tests {
             approval_manager: None,
             completion_model: None,
             outbound_tx: Some(outbound_tx),
+            config_path: None,
         };
         let config = serde_json::json!({
             "enabled": true,
@@ -496,6 +510,7 @@ mod tests {
             approval_manager: None,
             completion_model: None,
             outbound_tx: Some(outbound_tx),
+            config_path: None,
         };
         let result = factory.create(serde_json::json!("not_an_object"), ctx);
         assert!(result.is_err());

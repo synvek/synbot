@@ -1,7 +1,9 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{OnceLock, RwLock};
+use std::sync::{Mutex, OnceLock, RwLock};
+use std::time::SystemTime;
 
 // ---------------------------------------------------------------------------
 // Channel configs
@@ -19,6 +21,18 @@ pub struct AllowlistEntry {
     /// Bot's name in the group (optional). When set, only messages starting with @my_name are processed.
     #[serde(default)]
     pub my_name: Option<String>,
+}
+
+/// Approved pairing: grants access for one chat (identified by pairing code derived from chat id) for a channel provider.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct PairingEntry {
+    /// Channel provider name (registry key): feishu, discord, telegram, …
+    pub channel: String,
+    /// First 12 hex chars of MD5(chat_id), case-insensitive when matched.
+    #[serde(rename = "pairingCode")]
+    pub pairing_code: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -1590,6 +1604,9 @@ pub struct Config {
     /// Plugin-specific configuration. Keys are plugin names; values are arbitrary JSON for each plugin.
     #[serde(default)]
     pub plugins: std::collections::HashMap<String, serde_json::Value>,
+    /// Pairing approvals: supplement allowlist; matched by channel provider + MD5(chat_id) prefix.
+    #[serde(default)]
+    pub pairings: Vec<PairingEntry>,
     /// Config file format version. Used by ConfigMigrator to apply incremental migrations.
     #[serde(default = "default_config_version")]
     pub config_version: u32,
@@ -2902,6 +2919,105 @@ pub fn save_config(cfg: &Config, path: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
+/// Registry channel type names valid for `synbot pairing` and pairing hints.
+pub const PAIRING_CHANNEL_PROVIDERS: &[&str] = &[
+    "telegram", "feishu", "discord", "slack", "email", "matrix", "dingtalk", "whatsapp", "irc",
+];
+
+/// Whether `name` is a built-in channel provider for pairing (CLI and messages).
+pub fn is_pairing_channel_provider(name: &str) -> bool {
+    PAIRING_CHANNEL_PROVIDERS
+        .iter()
+        .any(|p| p.eq_ignore_ascii_case(name))
+}
+
+/// 12 lowercase hex chars: MD5(chat_id) prefix.
+pub fn pairing_code_from_chat_id(chat_id: &str) -> String {
+    let digest = md5::compute(chat_id.as_bytes());
+    format!("{:x}", digest)
+        .chars()
+        .take(12)
+        .collect()
+}
+
+/// User-facing hint when allowlist blocks the chat (English, single line breaks avoided).
+pub fn pairing_message(channel_provider: &str, chat_id: &str) -> String {
+    let code = pairing_code_from_chat_id(chat_id);
+    format!(
+        "Synbot: Chat requires pairing, pairing code is {}. Current chat id is {}. Use following command to finish pairing: synbot pairing approve {} {}.",
+        code, chat_id, channel_provider, code
+    )
+}
+
+/// True if `pairings` contains an entry for this provider with matching code (case-insensitive).
+pub fn pairing_allows(chat_id: &str, provider: &str, pairings: &[PairingEntry]) -> bool {
+    let code = pairing_code_from_chat_id(chat_id);
+    pairings.iter().any(|p| {
+        p.channel.eq_ignore_ascii_case(provider) && p.pairing_code.eq_ignore_ascii_case(&code)
+    })
+}
+
+fn read_pairings_from_file(path: &Path) -> Result<Vec<PairingEntry>> {
+    let text =
+        std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+    let v: serde_json::Value = serde_json::from_str(&text)
+        .with_context(|| format!("parse JSON {}", path.display()))?;
+    match v.get("pairings") {
+        Some(p) => Ok(serde_json::from_value(p.clone()).unwrap_or_default()),
+        None => Ok(Vec::new()),
+    }
+}
+
+type PairingsCacheMap = HashMap<PathBuf, (SystemTime, Vec<PairingEntry>)>;
+
+fn pairings_cache_mutex() -> &'static Mutex<PairingsCacheMap> {
+    static CACHE: OnceLock<Mutex<PairingsCacheMap>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Load `pairings` from the config JSON on disk, using file mtime to avoid redundant parses.
+/// On read/parse failure, logs a warning and returns the last cached value for this path, or empty.
+pub fn pairings_from_config_file_cached(config_path: &Path) -> Vec<PairingEntry> {
+    let mtime = match std::fs::metadata(config_path) {
+        Ok(m) => m.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+        Err(e) => {
+            tracing::warn!(
+                path = %config_path.display(),
+                error = %e,
+                "pairings: config file metadata unreadable"
+            );
+            return Vec::new();
+        }
+    };
+
+    let mut guard = pairings_cache_mutex()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if let Some((t, list)) = guard.get(config_path) {
+        if *t == mtime {
+            return list.clone();
+        }
+    }
+
+    match read_pairings_from_file(config_path) {
+        Ok(pairings) => {
+            guard.insert(config_path.to_path_buf(), (mtime, pairings.clone()));
+            pairings
+        }
+        Err(e) => {
+            tracing::warn!(
+                path = %config_path.display(),
+                error = %e,
+                "pairings: failed to load from config; using stale cache if any"
+            );
+            guard
+                .get(config_path)
+                .map(|(_, p)| p.clone())
+                .unwrap_or_default()
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Unit tests
 // ---------------------------------------------------------------------------
@@ -3545,6 +3661,35 @@ mod tests {
         assert!(find_error(&errors, "tools.exec.permissions.approval_timeout_secs").is_some());
         assert!(errors.iter().any(|e| e.field.contains("tools.exec.permissions.rules[0].pattern")));
         assert!(errors.iter().any(|e| e.field.contains("tools.exec.permissions.rules[1].pattern")));
+    }
+
+    #[test]
+    fn pairing_code_from_chat_id_is_twelve_lowercase_hex() {
+        let code = pairing_code_from_chat_id("room!abc:example.org");
+        assert_eq!(code.len(), 12);
+        assert!(code.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()));
+    }
+
+    #[test]
+    fn pairing_allows_matches_case_insensitive() {
+        let chat = "12345";
+        let lower = pairing_code_from_chat_id(chat);
+        let pairings = vec![PairingEntry {
+            channel: "discord".to_string(),
+            pairing_code: lower.to_uppercase(),
+        }];
+        assert!(pairing_allows(chat, "discord", &pairings));
+        assert!(pairing_allows(chat, "DISCORD", &pairings));
+        assert!(!pairing_allows(chat, "slack", &pairings));
+    }
+
+    #[test]
+    fn pairing_message_contains_channel_and_code() {
+        let m = pairing_message("feishu", "oc_xxx");
+        assert!(m.contains("feishu"));
+        assert!(m.contains("oc_xxx"));
+        assert!(m.contains(&pairing_code_from_chat_id("oc_xxx")));
+        assert!(m.contains("synbot pairing approve"));
     }
 }
 

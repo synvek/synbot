@@ -6,6 +6,7 @@ mod start;
 mod cron;
 mod sandbox_cmd;
 mod service;
+mod pairing;
 mod helpers;
 pub mod doctor;
 
@@ -20,6 +21,7 @@ pub use cron::{cmd_cron, CronAction};
 pub use sandbox_cmd::cmd_sandbox;
 pub use service::{cmd_service, ServiceAction};
 pub use doctor::cmd_doctor;
+pub use pairing::{cmd_pairing, PairingAction};
 
 #[derive(Parser)]
 #[command(name = "synbot", about = "synbot — Personal AI Assistant")]
@@ -82,6 +84,12 @@ enum Commands {
 
     /// Run diagnostics: check config, channel credentials, provider API keys, sandbox, memory, and MCP servers.
     Doctor,
+
+    /// List, approve, or remove channel pairings (supplement to allowlist).
+    Pairing {
+        #[command(subcommand)]
+        action: PairingAction,
+    },
 }
 
 pub async fn run() -> Result<()> {
@@ -106,6 +114,7 @@ pub async fn run() -> Result<()> {
         Commands::Cron { action } => cmd_cron(action).await,
         Commands::Service { action } => cmd_service(action).await,
         Commands::Doctor => cmd_doctor().await,
+        Commands::Pairing { action } => cmd_pairing(action).await,
     }
 }
 

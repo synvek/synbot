@@ -332,6 +332,7 @@ pub async fn cmd_start() -> Result<()> {
                 approval_manager: Some(std::sync::Arc::clone(&approval_manager)),
                 completion_model: Some(std::sync::Arc::clone(&completion_model)),
                 outbound_tx: Some(bus.outbound_tx_clone()),
+                config_path: Some(config::config_path()),
             };
             let factory = std::sync::Arc::clone(&factory);
             let type_name = type_name.clone();

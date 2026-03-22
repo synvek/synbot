@@ -23,9 +23,18 @@ fn create_test_channel(
         enabled: true,
         show_tool_calls: true,
         group_my_name: None,
+        default_agent: "main".to_string(),
     };
-    
-    let mut channel = DiscordChannel::new(config, inbound_tx, outbound_rx, true);
+
+    let mut channel = DiscordChannel::new(
+        config,
+        inbound_tx,
+        outbound_rx,
+        true,
+        2048,
+        None,
+        None,
+    );
     if let Some(manager) = approval_manager {
         channel = channel.with_approval_manager(manager);
     }

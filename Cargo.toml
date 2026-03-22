@@ -99,6 +99,9 @@ dirs = "6"
 # Embed templates/roles at compile time (onboard)
 include_dir = "0.7"
 
+# Pairing code (MD5 prefix of chat id)
+md5 = "0.7"
+
 # UUID
 uuid = { version = "1", features = ["v4"] }
 

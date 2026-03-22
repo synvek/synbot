@@ -25,7 +25,9 @@ use tracing::{error, info, warn};
 
 use crate::bus::{InboundMessage, OutboundMessage};
 use crate::channels::{approval_formatter, Channel};
-use crate::config::{AllowlistEntry, MatrixConfig};
+use crate::config::{
+    pairing_allows, pairing_message, pairings_from_config_file_cached, MatrixConfig,
+};
 
 // ---------------------------------------------------------------------------
 // Message splitting (Matrix has no strict limit; use a reasonable chunk size)
@@ -69,6 +71,7 @@ pub struct MatrixChannel {
     outbound_rx: Option<broadcast::Receiver<OutboundMessage>>,
     client: Option<Arc<Client>>,
     workspace_dir: Option<PathBuf>,
+    config_path: Option<PathBuf>,
 }
 
 impl MatrixChannel {
@@ -79,6 +82,7 @@ impl MatrixChannel {
         show_tool_calls: bool,
         tool_result_preview_chars: usize,
         workspace_dir: Option<PathBuf>,
+        config_path: Option<PathBuf>,
     ) -> Result<Self> {
         Ok(Self {
             config,
@@ -88,6 +92,7 @@ impl MatrixChannel {
             outbound_rx: Some(outbound_rx),
             client: None,
             workspace_dir,
+            config_path,
         })
     }
 
@@ -144,20 +149,31 @@ impl MatrixChannel {
                     "Matrix: set either accessToken or both username and password for login"
                 );
             }
-                let user_id = if username.starts_with('@') && username.contains(':') {
+            let user_id = if username.starts_with('@') && username.contains(':') {
                 matrix_sdk::ruma::UserId::parse(username)
                     .context("Matrix username must be a valid user ID (e.g. @bot:example.org)")?
             } else {
                 matrix_sdk::ruma::UserId::parse(&format!("@{}:{}", username, server))
                     .context("Matrix username could not be parsed as user ID")?
             };
+            let versions_probe = format!("{}/_matrix/client/versions", homeserver_url);
             client
                 .matrix_auth()
                 .login_username(user_id.as_str(), password)
                 .initial_device_display_name("synbot")
                 .send()
                 .await
-                .context("Matrix login failed")?;
+                .with_context(|| {
+                    format!(
+                        "Matrix login failed for {} at {}. \
+                         HTTP 503 or `<non-json bytes>` usually means the homeserver is not ready or the URL hits a proxy/HTML error page. \
+                         Check: curl -sS '{}'. \
+                         If login still fails, set username to the full MXID @localpart:server_name where server_name matches Synapse `server_name` (not only the URL hostname when they differ).",
+                        user_id,
+                        homeserver_url,
+                        versions_probe
+                    )
+                })?;
             info!(
                 channel = %self.config.name,
                 user_id = %user_id,
@@ -211,6 +227,7 @@ impl Channel for MatrixChannel {
         let enable_allowlist = self.config.enable_allowlist;
         let group_my_name = self.config.group_my_name.clone();
         let inbound_tx = self.inbound_tx.clone();
+        let config_path = self.config_path.clone();
 
         client.add_event_handler(
             move |event: SyncRoomMessageEvent, room: Room| {
@@ -220,6 +237,7 @@ impl Channel for MatrixChannel {
                 let enable_allowlist = enable_allowlist;
                 let group_my_name = group_my_name.clone();
                 let inbound_tx = inbound_tx.clone();
+                let config_path = config_path.clone();
 
                 async move {
                     if room.state() != RoomState::Joined {
@@ -243,17 +261,18 @@ impl Channel for MatrixChannel {
                         let allowed = allowlist.iter().any(|e| {
                             e.chat_id == room_id || e.chat_id == sender
                         });
-                        if !allowed {
+                        let pairings = config_path
+                            .as_ref()
+                            .map(|p| pairings_from_config_file_cached(p.as_path()))
+                            .unwrap_or_default();
+                        let paired = pairing_allows(room_id, "matrix", &pairings)
+                            || pairing_allows(sender, "matrix", &pairings);
+                        if !allowed && !paired {
                             warn!(room_id = %room_id, "Matrix: room/user not in allowlist, ignoring");
-                            // Only reply in DMs; avoid spamming group rooms.
-                            let is_dm = !room.direct_targets().is_empty();
-                            if is_dm {
-                                let _ = room
-                                    .send(RoomMessageEventContent::text_plain(
-                                        "Conversation not allowed. Please configure allowlist.",
-                                    ))
-                                    .await;
-                            }
+                            let hint = pairing_message("matrix", room_id);
+                            let _ = room
+                                .send(RoomMessageEventContent::text_plain(hint))
+                                .await;
                             return;
                         }
                     }

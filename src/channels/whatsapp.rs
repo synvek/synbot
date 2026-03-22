@@ -3,6 +3,7 @@
 //!
 //! Minimal integration: forwards inbound messages to the bus; outbound send is TODO.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -12,7 +13,9 @@ use tracing::{info, warn};
 
 use crate::bus::{InboundMessage, OutboundMessage};
 use crate::channels::Channel;
-use crate::config::{AllowlistEntry, WhatsAppConfig};
+use crate::config::{
+    pairing_allows, pairings_from_config_file_cached, pairing_message, AllowlistEntry, WhatsAppConfig,
+};
 
 use wa_rs::bot::Bot;
 use wa_rs::store::SqliteStore;
@@ -25,6 +28,7 @@ struct WhatsAppEventState {
     allowlist: Vec<AllowlistEntry>,
     agent: String,
     channel_name: String,
+    config_path: Option<PathBuf>,
 }
 
 pub struct WhatsAppChannel {
@@ -32,6 +36,7 @@ pub struct WhatsAppChannel {
     inbound_tx: mpsc::Sender<InboundMessage>,
     #[allow(dead_code)]
     outbound_rx: Option<broadcast::Receiver<OutboundMessage>>,
+    config_path: Option<PathBuf>,
 }
 
 impl WhatsAppChannel {
@@ -39,11 +44,13 @@ impl WhatsAppChannel {
         config: WhatsAppConfig,
         inbound_tx: mpsc::Sender<InboundMessage>,
         outbound_rx: broadcast::Receiver<OutboundMessage>,
+        config_path: Option<PathBuf>,
     ) -> Self {
         Self {
             config,
             inbound_tx,
             outbound_rx: Some(outbound_rx),
+            config_path,
         }
     }
 }
@@ -79,6 +86,7 @@ impl Channel for WhatsAppChannel {
             allowlist: self.config.allowlist.clone(),
             agent: self.config.agent.clone(),
             channel_name: self.config.name.clone(),
+            config_path: self.config_path.clone(),
         });
 
         let mut bot = Bot::builder()
@@ -108,15 +116,26 @@ impl Channel for WhatsAppChannel {
                             let sender_id: String =
                                 sender_debug.chars().filter(|c| c.is_ascii_digit()).collect();
 
-                            let allowed = state.allowlist.is_empty()
-                                || state.allowlist.iter().any(|e| {
-                                    e.chat_id == sender_id || e.chat_id == sender_debug
-                                });
+                            let allowlist_empty = state.allowlist.is_empty();
+                            let in_list = state.allowlist.iter().any(|e| {
+                                e.chat_id == sender_id || e.chat_id == sender_debug
+                            });
+                            let pairings = state
+                                .config_path
+                                .as_ref()
+                                .map(|p| pairings_from_config_file_cached(p.as_path()))
+                                .unwrap_or_default();
+                            let paired = !allowlist_empty
+                                && (pairing_allows(&sender_id, "whatsapp", &pairings)
+                                    || pairing_allows(&sender_debug, "whatsapp", &pairings));
+                            let allowed = allowlist_empty || in_list || paired;
                             if !allowed {
+                                let hint = pairing_message("whatsapp", &sender_id);
                                 warn!(
                                     channel = %state.channel_name,
                                     sender_id = %sender_id,
-                                    "whatsapp: sender not in allowlist, ignoring"
+                                    hint = %hint,
+                                    "whatsapp: sender not in allowlist, ignoring (outbound reply not implemented; see hint in logs)"
                                 );
                                 return;
                             }

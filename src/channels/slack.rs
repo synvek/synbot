@@ -21,7 +21,9 @@ use tracing::{error, info, warn};
 use crate::bus::{InboundMessage, OutboundMessage};
 use crate::channels::file_handler;
 use crate::channels::{Channel, approval_formatter};
-use crate::config::{AllowlistEntry, SlackConfig};
+use crate::config::{
+    pairing_allows, pairing_message, pairings_from_config_file_cached, AllowlistEntry, SlackConfig,
+};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -230,6 +232,7 @@ struct SlackPushStateInner {
     workspace_dir: Option<PathBuf>,
     /// Bot token (xoxb-...) for downloading private file URLs.
     token: String,
+    config_path: Option<PathBuf>,
 }
 
 // ---------------------------------------------------------------------------
@@ -246,6 +249,7 @@ pub struct SlackChannel {
     running: bool,
     /// Workspace directory for resolving outbound file paths. Slack does not support multiple files in one message; we send one file per message.
     workspace_dir: Option<PathBuf>,
+    config_path: Option<PathBuf>,
 }
 
 impl SlackChannel {
@@ -256,6 +260,7 @@ impl SlackChannel {
         show_tool_calls: bool,
         tool_result_preview_chars: usize,
         workspace_dir: Option<PathBuf>,
+        config_path: Option<PathBuf>,
     ) -> Result<Self> {
         // Warn if tokens look swapped (common cause of not_allowed_token_type)
         let token_trim = config.token.trim();
@@ -285,6 +290,7 @@ impl SlackChannel {
             bot_token,
             running: false,
             workspace_dir,
+            config_path,
         })
     }
 
@@ -318,6 +324,7 @@ impl SlackChannel {
                 channel_push_dedupe: channel_push_dedupe.clone(),
                 workspace_dir: self.workspace_dir.clone(),
                 token: self.config.token.clone(),
+                config_path: self.config_path.clone(),
             }),
         };
 
@@ -409,6 +416,7 @@ async fn slack_push_events_handler(
         &state_inner.channel_push_dedupe,
         state_inner.workspace_dir.as_deref(),
         Some(state_inner.token.as_str()),
+        state_inner.config_path.as_deref(),
     ).await {
         SlackInboundOutcome::Accepted(inbound) => {
             info!(
@@ -421,22 +429,17 @@ async fn slack_push_events_handler(
                 error!("Slack: failed to forward inbound message to bus: {e}");
             }
         }
-        SlackInboundOutcome::Denied {
-            chat_id,
-            notify_user,
-        } => {
-            if !notify_user {
-                return Ok(());
-            }
+        SlackInboundOutcome::Denied { chat_id } => {
+            let hint = pairing_message("slack", &chat_id);
             let raw_channel_id = slack_channel_id_raw(&chat_id);
             let session_token = SlackApiToken::new(state_inner.token.clone().into());
             let session = client.open_session(&session_token);
             let req = SlackApiChatPostMessageRequest::new(
                 raw_channel_id.into(),
-                SlackMessageContent::new().with_text("Conversation not allowed. Please configure allowlist.".into()),
+                SlackMessageContent::new().with_text(hint.into()),
             );
             if let Err(e) = session.chat_post_message(&req).await {
-                warn!(chat_id = %chat_id, error = %e, "Slack: failed to send allowlist denial hint");
+                warn!(chat_id = %chat_id, error = %e, "Slack: failed to send pairing hint");
             }
         }
         SlackInboundOutcome::Ignored => {}
@@ -462,10 +465,8 @@ fn slack_push_event_type_name(event: &SlackPushEventCallback) -> &'static str {
 /// Returns ignored/denied/accepted outcome.
 enum SlackInboundOutcome {
     Accepted(InboundMessage),
-    /// `notify_user` is true for IMs (e.g. `D…`); false for channels so we do not spam the room.
     Denied {
         chat_id: String,
-        notify_user: bool,
     },
     Ignored,
 }
@@ -480,6 +481,7 @@ async fn slack_push_to_inbound(
     channel_push_dedupe: &tokio::sync::Mutex<HashMap<(String, String), Instant>>,
     workspace_dir: Option<&std::path::Path>,
     token: Option<&str>,
+    config_path: Option<&std::path::Path>,
 ) -> SlackInboundOutcome {
     use slack_morphism::events::SlackEventCallbackBody;
 
@@ -630,14 +632,13 @@ async fn slack_push_to_inbound(
     // Allowlist check
     if enable_allowlist {
         let allowed = allowlist.iter().any(|e| e.chat_id == chat_id);
-        if !allowed {
+        let pairings = config_path
+            .map(|p| pairings_from_config_file_cached(p))
+            .unwrap_or_default();
+        let paired = pairing_allows(&chat_id, "slack", &pairings);
+        if !allowed && !paired {
             warn!(chat_id = %chat_id, "Slack: chat not in allowlist, ignoring");
-            // Only DM / IM (`D…`): do not post allowlist errors to public/private channels (`C…`/`G…`).
-            let notify_user = slack_channel_id_raw(&chat_id).starts_with('D');
-            return SlackInboundOutcome::Denied {
-                chat_id,
-                notify_user,
-            };
+            return SlackInboundOutcome::Denied { chat_id };
         }
     }
 

@@ -22,6 +22,7 @@ fn test_ctx() -> ChannelStartContext {
         approval_manager: None,
         completion_model: None,
         outbound_tx: Some(outbound_tx),
+        config_path: None,
     }
 }
 

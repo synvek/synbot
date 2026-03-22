@@ -199,6 +199,8 @@ pub struct ChannelStartContext {
     pub approval_manager: Option<Arc<crate::tools::approval::ApprovalManager>>,
     pub completion_model: Option<Arc<dyn crate::rig_provider::SynbotCompletionModel>>,
     pub outbound_tx: Option<broadcast::Sender<OutboundMessage>>,
+    /// Config JSON path for reloading `pairings` without daemon restart (mtime cache).
+    pub config_path: Option<std::path::PathBuf>,
 }
 
 /// Factory that builds a [Channel] from config JSON and start context.

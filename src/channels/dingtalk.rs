@@ -18,7 +18,9 @@ use crate::channels::approval_formatter;
 use crate::channels::dingtalk_stream;
 use crate::channels::file_handler;
 use crate::channels::Channel;
-use crate::config::DingTalkConfig;
+use crate::config::{
+    pairing_allows, pairing_message, pairings_from_config_file_cached, DingTalkConfig,
+};
 
 /// DingTalk may send `conversationType` as string `"1"` / `"2"` or as JSON number.
 fn deserialize_conversation_type<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
@@ -84,6 +86,7 @@ pub struct DingTalkChannel {
     sessions: Arc<RwLock<HashMap<String, SessionEntry>>>,
     http: reqwest::Client,
     workspace_dir: Option<PathBuf>,
+    config_path: Option<PathBuf>,
 }
 
 /// Resolve clientId/clientSecret with optional appKey/appSecret fallback; trims whitespace.
@@ -153,6 +156,7 @@ impl DingTalkChannel {
         show_tool_calls: bool,
         tool_result_preview_chars: usize,
         workspace_dir: Option<PathBuf>,
+        config_path: Option<PathBuf>,
     ) -> Self {
         let robot_code_config = config.robot_code.trim().to_string();
         Self {
@@ -165,6 +169,7 @@ impl DingTalkChannel {
             sessions: Arc::new(RwLock::new(HashMap::new())),
             http: crate::appcontainer_dns::build_reqwest_client(),
             workspace_dir,
+            config_path,
         }
     }
 
@@ -249,6 +254,7 @@ impl Channel for DingTalkChannel {
         let show_tool_calls = self.show_tool_calls;
         let tool_preview = self.tool_result_preview_chars;
         let workspace_dir = self.workspace_dir.clone();
+        let config_path = self.config_path.clone();
 
         let channel_name_out = channel_name.clone();
         let client_id_ws = client_id.clone();
@@ -283,6 +289,7 @@ impl Channel for DingTalkChannel {
             let allowlist = allowlist.clone();
             let http = crate::appcontainer_dns::build_reqwest_client();
             let workspace_dir = workspace_dir.clone();
+            let config_path = config_path.clone();
             let app_key = app_key_file.clone();
             let app_secret = app_secret_file.clone();
             let robot_code_cfg = robot_code_cfg.clone();
@@ -309,28 +316,23 @@ impl Channel for DingTalkChannel {
                             || e.chat_id == sender_id
                             || (!sender_id.is_empty() && e.chat_id.contains(&sender_id))
                     });
-                    if !ok {
+                    let pairings = config_path
+                        .as_ref()
+                        .map(|p| pairings_from_config_file_cached(p.as_path()))
+                        .unwrap_or_default();
+                    let paired = pairing_allows(&conversation_id, "dingtalk", &pairings)
+                        || (!sender_id.is_empty()
+                            && pairing_allows(&sender_id, "dingtalk", &pairings));
+                    if !ok && !paired {
                         warn!(
                             conversation_id = %conversation_id,
                             sender_id = %sender_id,
                             conversation_type = ?data.conversation_type,
                             "DingTalk: not in allowlist (no bot reply). Single chat: add allowlist chatId = conversationId or senderId. Group chat: add chatId = this conversationId; mentioning the bot is still required for the platform to deliver the message."
                         );
-                        // DingTalk: "1" = single chat, "2" = group — only notify in single chat.
-                        let is_single = data
-                            .conversation_type
-                            .as_deref()
-                            .map(|t| t == "1")
-                            .unwrap_or(false);
-                        if is_single {
-                            if let Some(ref wh) = data.session_webhook {
-                                let _ = post_session_text_http(
-                                    &http,
-                                    wh,
-                                    "Conversation not allowed. Please configure allowlist.",
-                                )
-                                .await;
-                            }
+                        if let Some(ref wh) = data.session_webhook {
+                            let hint = pairing_message("dingtalk", &conversation_id);
+                            let _ = post_session_text_http(&http, wh, &hint).await;
                         }
                         return;
                     }

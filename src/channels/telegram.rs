@@ -9,13 +9,16 @@ use anyhow::Result;
 use async_trait::async_trait;
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, RwLock};
 use tracing::{error, info, warn};
 
 use crate::bus::{InboundMessage, OutboundMessage};
 use crate::channels::{approval_formatter, Channel, RetryPolicy, RetryState};
-use crate::config::{AllowlistEntry, TelegramConfig};
+use crate::config::{
+    pairing_allows, pairing_message, pairings_from_config_file_cached, TelegramConfig,
+};
 use crate::tools::approval::ApprovalManager;
 
 const API_BASE: &str = "https://api.telegram.org/bot";
@@ -32,6 +35,7 @@ pub struct TelegramChannel {
     approval_manager: Option<Arc<ApprovalManager>>,
     /// Map of user's pending approval requests: user_id -> (request_id, chat_id)
     pending_approvals: Arc<RwLock<HashMap<String, (String, String)>>>,
+    config_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -82,6 +86,7 @@ impl TelegramChannel {
         outbound_rx: broadcast::Receiver<OutboundMessage>,
         show_tool_calls: bool,
         tool_result_preview_chars: usize,
+        config_path: Option<PathBuf>,
     ) -> Self {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(60))
@@ -97,6 +102,7 @@ impl TelegramChannel {
             running: false,
             approval_manager: None,
             pending_approvals: Arc::new(RwLock::new(HashMap::new())),
+            config_path,
         }
     }
 
@@ -390,25 +396,26 @@ impl Channel for TelegramChannel {
                                         (true, text.clone(), false)
                                     }
                                 } else {
+                                    let pairings = self
+                                        .config_path
+                                        .as_ref()
+                                        .map(|p| pairings_from_config_file_cached(p.as_path()))
+                                        .unwrap_or_default();
+                                    let paired =
+                                        pairing_allows(&chat_id_str, "telegram", &pairings);
                                     let entry = self
                                         .config
                                         .allowlist
                                         .iter()
                                         .find(|e| e.chat_id == chat_id_str);
                                     match entry {
-                                        None => {
+                                        None if !paired => {
                                             warn!(
                                                 chat_id = %chat_id_str,
                                                 "Telegram: chat not in allowlist, saving to session only"
                                             );
-                                            if !is_group {
-                                                let _ = self
-                                                    .send_text(
-                                                        m.chat.id,
-                                                        "Conversation not allowed. Please configure allowlist.",
-                                                    )
-                                                    .await;
-                                            }
+                                            let hint = pairing_message("telegram", &chat_id_str);
+                                            let _ = self.send_text(m.chat.id, &hint).await;
                                             let _ = self.inbound_tx.send(InboundMessage {
                                                 channel: self.config.name.clone(),
                                                 sender_id: sender.clone(),
@@ -422,6 +429,53 @@ impl Channel for TelegramChannel {
                                                 }),
                                             }).await;
                                             continue;
+                                        }
+                                        None => {
+                                            if is_group {
+                                                if let Some(ref my_name) = self.config.group_my_name {
+                                                    let trimmed = text.trim_start();
+                                                    let mention = format!("@{}", my_name);
+                                                    let starts = trimmed.starts_with(&mention)
+                                                        || trimmed
+                                                            .strip_prefix('@')
+                                                            .map(|s| s.trim_start().starts_with(my_name))
+                                                            .unwrap_or(false);
+                                                    if !starts {
+                                                        info!(
+                                                            chat_id = %chat_id_str,
+                                                            "Telegram: group message not @bot, saving to session only"
+                                                        );
+                                                        let _ = self.inbound_tx.send(InboundMessage {
+                                                            channel: self.config.name.clone(),
+                                                            sender_id: sender.clone(),
+                                                            chat_id: chat_id_str.clone(),
+                                                            content: text.clone(),
+                                                            timestamp: chrono::Utc::now(),
+                                                            media: vec![],
+                                                            metadata: serde_json::json!({
+                                                                "trigger_agent": false,
+                                                                "group": true,
+                                                                "default_agent": self.config.default_agent,
+                                                            }),
+                                                        }).await;
+                                                        continue;
+                                                    }
+                                                    let stripped = trimmed
+                                                        .strip_prefix(&mention)
+                                                        .map(str::trim_start)
+                                                        .unwrap_or_else(|| {
+                                                            trimmed
+                                                                .strip_prefix('@')
+                                                                .map(str::trim_start)
+                                                                .unwrap_or(trimmed)
+                                                        });
+                                                    (true, stripped.to_string(), true)
+                                                } else {
+                                                    (true, text.clone(), true)
+                                                }
+                                            } else {
+                                                (true, text.clone(), false)
+                                            }
                                         }
                                         Some(e) => {
                                             if let Some(ref my_name) = e.my_name {

@@ -27,7 +27,8 @@ fn create_test_channel(
         default_agent: "main".to_string(),
     };
     
-    let mut channel = TelegramChannel::new(config, inbound_tx, outbound_rx, true);
+    let mut channel =
+        TelegramChannel::new(config, inbound_tx, outbound_rx, true, 2048, None);
     if let Some(manager) = approval_manager {
         channel = channel.with_approval_manager(manager);
     }
