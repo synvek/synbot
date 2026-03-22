@@ -364,7 +364,7 @@ impl Channel for TelegramChannel {
                                                     .map(|s| s.trim_start().starts_with(my_name))
                                                     .unwrap_or(false);
                                             if !starts {
-                                                info!(
+                                                warn!(
                                                     chat_id = %chat_id_str,
                                                     "Telegram: group message not @bot, saving to session only"
                                                 );
@@ -441,7 +441,7 @@ impl Channel for TelegramChannel {
                                                             .map(|s| s.trim_start().starts_with(my_name))
                                                             .unwrap_or(false);
                                                     if !starts {
-                                                        info!(
+                                                        warn!(
                                                             chat_id = %chat_id_str,
                                                             "Telegram: group message not @bot, saving to session only"
                                                         );
@@ -478,41 +478,56 @@ impl Channel for TelegramChannel {
                                             }
                                         }
                                         Some(e) => {
-                                            if let Some(ref my_name) = e.my_name {
-                                                let trimmed = text.trim_start();
-                                                let mention = format!("@{}", my_name);
-                                                let starts = trimmed.starts_with(&mention)
-                                                    || trimmed
-                                                        .strip_prefix('@')
-                                                        .map(|s| s.trim_start().starts_with(my_name))
-                                                        .unwrap_or(false);
-                                                if !starts {
-                                                    info!(
-                                                        chat_id = %chat_id_str,
-                                                        "Telegram: group message not @bot, saving to session only"
-                                                    );
-                                                    let _ = self.inbound_tx.send(InboundMessage {
-                                                        channel: self.config.name.clone(),
-                                                        sender_id: sender.clone(),
-                                                        chat_id: chat_id_str.clone(),
-                                                        content: text.clone(),
-                                                        timestamp: chrono::Utc::now(),
-                                                        media: vec![],
-                                                        metadata: serde_json::json!({
-                                                            "trigger_agent": false,
-                                                            "group": true,
-                                                            "default_agent": self.config.default_agent,
-                                                        }),
-                                                    }).await;
-                                                    continue;
-                                                }
-                                                let stripped = trimmed
-                                                    .strip_prefix(&mention)
-                                                    .map(str::trim_start)
-                                                    .unwrap_or_else(|| trimmed.strip_prefix('@').map(str::trim_start).unwrap_or(trimmed));
-                                                (true, stripped.to_string(), true)
-                                            } else {
+                                            // Per-entry myName applies to groups only; DMs should not require @mention.
+                                            // For groups, fall back to channel groupMyName (same as paired-only path).
+                                            if !is_group {
                                                 (true, text.clone(), false)
+                                            } else {
+                                                let my_name_for_group = e
+                                                    .my_name
+                                                    .as_ref()
+                                                    .or(self.config.group_my_name.as_ref());
+                                                if let Some(my_name) = my_name_for_group {
+                                                    let trimmed = text.trim_start();
+                                                    let mention = format!("@{}", my_name);
+                                                    let starts = trimmed.starts_with(&mention)
+                                                        || trimmed
+                                                            .strip_prefix('@')
+                                                            .map(|s| s.trim_start().starts_with(my_name.as_str()))
+                                                            .unwrap_or(false);
+                                                    if !starts {
+                                                        warn!(
+                                                            chat_id = %chat_id_str,
+                                                            "Telegram: group message not @bot, saving to session only"
+                                                        );
+                                                        let _ = self.inbound_tx.send(InboundMessage {
+                                                            channel: self.config.name.clone(),
+                                                            sender_id: sender.clone(),
+                                                            chat_id: chat_id_str.clone(),
+                                                            content: text.clone(),
+                                                            timestamp: chrono::Utc::now(),
+                                                            media: vec![],
+                                                            metadata: serde_json::json!({
+                                                                "trigger_agent": false,
+                                                                "group": true,
+                                                                "default_agent": self.config.default_agent,
+                                                            }),
+                                                        }).await;
+                                                        continue;
+                                                    }
+                                                    let stripped = trimmed
+                                                        .strip_prefix(&mention)
+                                                        .map(str::trim_start)
+                                                        .unwrap_or_else(|| {
+                                                            trimmed
+                                                                .strip_prefix('@')
+                                                                .map(str::trim_start)
+                                                                .unwrap_or(trimmed)
+                                                        });
+                                                    (true, stripped.to_string(), true)
+                                                } else {
+                                                    (true, text.clone(), true)
+                                                }
                                             }
                                         }
                                     }

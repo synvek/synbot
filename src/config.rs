@@ -51,7 +51,8 @@ pub struct TelegramConfig {
     /// When true (default), only chats in allowlist are accepted; when false, allowlist is not checked.
     #[serde(default = "default_true")]
     pub enable_allowlist: bool,
-    /// When enable_allowlist is false, bot name used for group @ check (optional).
+    /// Bot username for group @-mention gate: used when allowlist is off, when a chat is
+    /// paired-only (not on allowlist), and as fallback for allowlisted groups without per-entry `myName`.
     #[serde(default)]
     pub group_my_name: Option<String>,
     pub proxy: Option<String>,
