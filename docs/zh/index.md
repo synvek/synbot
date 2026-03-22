@@ -19,7 +19,7 @@ Synbot 是一个用 Rust 编写的个人 AI 助手，灵感来源于 [nanobot](h
 
 ### 入门指南
 - [安装指南](/zh/getting-started/installation)
-- [配置指南](/zh/getting-started/configuration)
+- [配置指南](/zh/getting-started/configuration)（含根级 **pairings** 与 `synbot pairing`）
 
 ### 用户指南
 - [消息渠道](/zh/user-guide/channels)

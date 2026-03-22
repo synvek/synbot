@@ -158,6 +158,27 @@ synbot doctor
 synbot --root-dir /path/to/workspace doctor
 ```
 
+### `synbot pairing` \<子命令\>
+
+管理**渠道配对**：在根配置 **`pairings`** 中按提供商名 + **配对码**（`chatId` 的 MD5 前 12 位十六进制）放行会话。在 **`enableAllowlist`** 为 true 时，与各渠道 **`allowlist`** 叠加生效。
+
+| 子命令 | 说明 |
+|--------|------|
+| `list` | 列出所有 `{ channel, pairingCode }`。 |
+| `approve <channel> <code>` | 新增一条。`channel` 为支持的提供商（`telegram`、`feishu`、`discord`、`slack`、`email`、`matrix`、`dingtalk`、`whatsapp`、`irc`）。`code` 必须为 12 位十六进制。 |
+| `remove <channel> <code>` | 删除匹配项。 |
+
+示例：
+
+```bash
+synbot pairing list
+synbot pairing approve telegram abc123def456
+synbot pairing remove telegram abc123def456
+synbot --root-dir /data/synbot pairing approve discord fedcba098765
+```
+
+行为说明与 Telegram 群组 @ 规则见 [配置指南 — 渠道配对](/zh/getting-started/configuration#channel-pairing)。
+
 ## 配置与路径
 
 - **根目录**：默认 `~/.synbot`（Windows：`%USERPROFILE%\.synbot`）。可通过全局选项 `--root-dir <目录>` 覆盖（如 `synbot --root-dir /data/synbot start`）。每个进程只使用一个工作区；要使用多工作区或多版本，可启动多个进程并传入不同 `--root-dir`。
@@ -168,6 +189,6 @@ synbot --root-dir /path/to/workspace doctor
 ## 相关文档
 
 - [安装指南](/zh/getting-started/installation)
-- [配置指南](/zh/getting-started/configuration)
+- [配置指南](/zh/getting-started/configuration)（含**渠道配对**）
 - [运行 Synbot](/zh/getting-started/running)
 - [沙箱](/zh/getting-started/sandbox)

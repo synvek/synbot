@@ -24,6 +24,12 @@ Synbot 支持多种消息渠道，允许您通过不同平台与 AI 助手交互
 
 ## 渠道配置
 
+### 白名单与配对（pairing）
+
+多数渠道在 **`enableAllowlist`** 为 true（默认）时，同时使用各渠道自己的 **`allowlist`** 与根配置里的 **`pairings`**。会话被接受的条件为：`chatId` 在白名单中，**或** 根级配对里存在与该会话 **配对码**（`chatId` 的 MD5 前 12 位十六进制）及 **`channel`** 提供商匹配的条目。用户可在持有配置的机器上执行 **`synbot pairing approve …`**（详见 [配置指南 — 渠道配对](/zh/getting-started/configuration#channel-pairing) 与 [CLI 参考](/zh/getting-started/cli-reference)）。
+
+**Telegram：** 私聊一般**不需要** @ 机器人。**群组 / 超级群** 在配置了渠道级 **`groupMyName`**（常见于仅配对放行的群）或 allowlist 条目的 **`myName`** 时，消息需**以 `@机器人用户名` 开头**才会交给 Agent。若只见会话里记入用户消息、机器人从不回复，请在 **warn** 级别日志中查找 `Telegram: group message not @bot`。
+
 ### 基本配置结构
 
 所有渠道共享一个通用的配置结构：
@@ -803,7 +809,8 @@ curl http://localhost:18888/api/health/feishu
 
 ## 相关文档
 
-- [配置指南](/zh/getting-started/configuration/)
+- [配置指南](/zh/getting-started/configuration/)（含**渠道配对**）
+- [CLI 参考](/zh/getting-started/cli-reference/)（`synbot pairing`）
 - [工具指南](/zh/user-guide/tools/)
 - [权限指南](/zh/user-guide/permissions/)
 - [Web 控制台指南](/zh/user-guide/web-dashboard/)

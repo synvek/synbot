@@ -158,6 +158,27 @@ synbot doctor
 synbot --root-dir /path/to/workspace doctor
 ```
 
+### `synbot pairing` \<subcommand\>
+
+Manage **channel pairings**: extra allow rules stored in root `config.json` under **`pairings`**, matched by provider name + **pairing code** (first 12 hex chars of MD5(chat id)). Supplements each channel’s **`allowlist`** when **`enableAllowlist`** is true.
+
+| Subcommand | Description |
+|------------|-------------|
+| `list` | Print all `{ channel, pairingCode }` entries. |
+| `approve <channel> <code>` | Add a pairing. `channel` is a supported provider (`telegram`, `feishu`, `discord`, `slack`, `email`, `matrix`, `dingtalk`, `whatsapp`, `irc`). `code` must be exactly 12 hexadecimal characters. |
+| `remove <channel> <code>` | Remove a matching entry. |
+
+Examples:
+
+```bash
+synbot pairing list
+synbot pairing approve telegram abc123def456
+synbot pairing remove telegram abc123def456
+synbot --root-dir /data/synbot pairing approve discord fedcba098765
+```
+
+See [Configuration — Channel pairing](/getting-started/configuration#channel-pairing) for behavior and Telegram group @-mention notes.
+
 ## Config and paths
 
 - **Root directory**: By default `~/.synbot` (Windows: `%USERPROFILE%\.synbot`). Override with the global option `--root-dir <DIR>` for any command (e.g. `synbot --root-dir /data/synbot start`). Each process uses a single workspace; run multiple processes with different `--root-dir` for multiple workspaces or versions.
@@ -168,6 +189,6 @@ synbot --root-dir /path/to/workspace doctor
 ## See also
 
 - [Installation](/getting-started/installation)
-- [Configuration](/getting-started/configuration)
+- [Configuration](/getting-started/configuration) (includes **Channel pairing**)
 - [Running Synbot](/getting-started/running)
 - [Sandbox](/getting-started/sandbox)

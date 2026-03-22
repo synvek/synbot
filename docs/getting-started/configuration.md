@@ -94,6 +94,50 @@ Here's a minimal configuration to get started. Channels are arrays; one entry pe
 
 Channels are configured as **arrays**: you can run multiple bots per platform (e.g. multiple Telegram bots). Each entry has a unique `name` (defaults to `"telegram"`, `"discord"`, `"feishu"`). Access control uses an **allowlist**: only chats in `allowlist` are accepted when `enableAllowlist` is true (default).
 
+## Channel pairing {#channel-pairing}
+
+**Pairing** is an optional, root-level list in `config.json` that **supplements** the per-channel allowlist. When `enableAllowlist` is true, a chat is allowed if **either**:
+
+- its id appears in that channel’s `allowlist`, or  
+- there is a **`pairings`** entry with matching **`channel`** (provider name) and **`pairingCode`**.
+
+### How the code is derived
+
+For a given chat, **`pairingCode`** is the first **12 hexadecimal characters** of **MD5(`chatId`)**, where **`chatId`** is the same string the channel uses (e.g. Telegram’s numeric chat id as a string, including the minus sign for groups). Matching is **case-insensitive**.
+
+### Approving a chat
+
+1. Someone sends a message from a chat that is not yet allowlisted. The bot may reply with a **pairing hint** that includes the **current chat id** and the exact CLI command to run.
+2. On the machine that owns the config, run:
+   ```bash
+   synbot pairing approve <channel> <pairingCode>
+   ```
+   Example: `synbot pairing approve telegram abc123def456`.
+3. Use the same **`--root-dir`** as `synbot start` if you are not using the default `~/.synbot`.
+4. Restart the daemon if needed so the channel reloads config (pairings are read from the config file on disk).
+
+### `pairings` in `config.json`
+
+```json
+{
+  "pairings": [
+    { "channel": "telegram", "pairingCode": "abc123def456" }
+  ]
+}
+```
+
+### Supported `channel` values
+
+`telegram`, `feishu`, `discord`, `slack`, `email`, `matrix`, `dingtalk`, `whatsapp`, `irc` — the same provider keys used elsewhere (case-insensitive in the CLI).
+
+### CLI
+
+- `synbot pairing list` — list all entries  
+- `synbot pairing approve <channel> <code>` — add an entry (12 hex chars)  
+- `synbot pairing remove <channel> <code>` — remove an entry  
+
+Pairing grants access **for that chat id** only; **channel-specific rules still apply** after access is granted (for example, Telegram **supergroups** may require an **`@bot`** prefix when `groupMyName` is set or when the allowlist entry’s `myName` is set — see [Channels](/user-guide/channels)).
+
 ### Telegram
 
 ```json
@@ -108,6 +152,7 @@ Channels are configured as **arrays**: you can run multiple bots per platform (e
           { "chatId": "123456789", "chatAlias": "My Chat", "myName": null }
         ],
         "enableAllowlist": true,
+        "groupMyName": "YourBotUsername",
         "proxy": "socks5://127.0.0.1:1080",
         "showToolCalls": true
       }
@@ -117,8 +162,9 @@ Channels are configured as **arrays**: you can run multiple bots per platform (e
 ```
 
 - **token**: Your Telegram bot token from [@BotFather](https://t.me/botfather)
-- **allowlist**: Array of `{ "chatId", "chatAlias", "myName"? }`. `chatId` is user or group ID; `chatAlias` is a label for logs/UI; `myName` in groups limits replies to messages that @mention the bot
-- **enableAllowlist**: When true (default), only chats in allowlist are accepted; when false, allowlist is not checked
+- **allowlist**: Array of `{ "chatId", "chatAlias", "myName"? }`. `chatId` is user or group ID; `chatAlias` is a label for logs/UI; in **groups**, `myName` (if set) limits processing to messages that start with `@thatName`. If the entry has no `myName`, the channel-level **`groupMyName`** is used for groups when set; if neither is set, all text in that group is processed.
+- **enableAllowlist**: When true (default), only chats in the allowlist **or** in root **`pairings`** (see [Channel pairing](#channel-pairing)) are accepted; when false, allowlist is not checked
+- **groupMyName**: Optional bot **username** (without `@`) for Telegram **groups**: when set, only messages starting with `@groupMyName` trigger the agent for chats allowed only via **pairing** (not on the allowlist). Allowlisted groups use per-entry **`myName`** first, then fall back to **`groupMyName`**. **Private chats** do not require `@` for the agent.
 - **proxy**: Optional proxy URL for network connections
 - **showToolCalls**: When true (default), send tool execution progress to this channel
 

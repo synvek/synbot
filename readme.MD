@@ -26,6 +26,8 @@
 
 - Tool execution with approval
 
+- **Channel pairing**: approve new chats via `synbot pairing approve` (supplements per-channel allowlists; see `docs/getting-started/configuration.md` and CLI reference)
+
 - Plugin support(Use wasm as plugin created by rust, c/c++, go and so on)
 
 - MCP (Model Context Protocol) tools: configure MCP servers (stdio or SSE) and expose their tools to the agent
@@ -105,6 +107,8 @@ Minimal configuration example:
 ```
 
 For more options see the [documentation](https://github.com/synvek/synbot/tree/main/docs).
+
+**Channel access**: With `enableAllowlist` on (default), add chats to each channel’s `allowlist` or approve them with `synbot pairing approve <provider> <code>` (code from the bot’s hint). Use the same `--root-dir` as `synbot start` when pairing. Telegram **groups** may require `@BotUsername` at the start of each message when `groupMyName` / allowlist `myName` is set.
 
 **MCP tools**: Add `tools.mcp.servers` to connect MCP servers and register their tools for the agent. Examples:
 

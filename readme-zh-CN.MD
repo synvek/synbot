@@ -26,6 +26,8 @@
 
 - 工具执行需经审批
 
+- **渠道配对**：通过 `synbot pairing approve` 为新会话放行（补充各渠道白名单；详见 `docs/getting-started/configuration.md` 与 CLI 参考）
+
 - 插件支持(支持使用Rust, C/C++, Go等开发wasm作为插件运行)
 
 - MCP（Model Context Protocol）工具：可配置多个 MCP 服务器（stdio 或 SSE），将其暴露的工具注册为 Agent 可用工具
@@ -103,6 +105,8 @@ synbot --root-dir /path/to/workspace onboard
 ```
 
 更多配置请参阅 [文档](https://github.com/synvek/synbot/tree/main/docs)。
+
+**会话准入**：在开启 `enableAllowlist`（默认）时，可将会话写入各渠道 `allowlist`，或使用 `synbot pairing approve <提供商> <配对码>`（配对码来自机器人提示）。配对时请与 `synbot start` 使用相同的 `--root-dir`。Telegram **群组**在配置了 `groupMyName` 或白名单条目的 `myName` 时，通常需要每条消息**以 `@机器人用户名` 开头**。
 
 **MCP 工具**：在配置中增加 `tools.mcp.servers` 可接入 MCP 服务器，将其工具注册为 Agent 可用工具。示例：
 

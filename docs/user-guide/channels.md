@@ -28,6 +28,12 @@ Synbot supports multiple messaging channels, allowing you to interact with the A
 
 ## Channel Configuration
 
+### Allowlist and pairing
+
+Most channels use an **`allowlist`** plus optional root-level **`pairings`** in `config.json` when **`enableAllowlist`** is true (default). A chat is accepted if its id is listed in the channel allowlist **or** if a pairing entry matches that chat’s **pairing code** (first 12 hex digits of MD5(chat id)) for the right **channel** provider. Users can run **`synbot pairing approve …`** on the host that owns the config (see [Configuration — Channel pairing](/getting-started/configuration#channel-pairing) and [CLI Reference](/getting-started/cli-reference)).
+
+**Telegram:** Private chats normally need no `@` mention. **Groups and supergroups** may require the message to **start with `@your_bot_username`** when **`groupMyName`** is set (typical for pairing-only groups) or when the allowlist entry’s **`myName`** is set; otherwise every group message would ping the bot. If messages are stored in session but the agent never runs, check logs at **warn** for `Telegram: group message not @bot`.
+
 ### Basic Configuration Structure
 
 All channels share a common configuration structure:
@@ -800,8 +806,9 @@ curl http://localhost:18888/api/health/feishu
 
 ## Related Documentation
 
-- [Configuration Guide](/docs/en/getting-started/configuration/)
-- [Tools Guide](/docs/en/user-guide/tools/)
-- [Permission Guide](/docs/en/user-guide/permissions/)
-- [Web Dashboard Guide](/docs/en/user-guide/web-dashboard/)
+- [Configuration Guide](/getting-started/configuration) (includes **Channel pairing**)
+- [CLI Reference](/getting-started/cli-reference) (`synbot pairing`)
+- [Tools Guide](/user-guide/tools)
+- [Permission Guide](/user-guide/permissions)
+- [Web Dashboard Guide](/user-guide/web-dashboard)
 

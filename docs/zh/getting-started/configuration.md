@@ -91,6 +91,50 @@ cargo run --example generate_config_schema --features schema -- -o templates/con
 
 渠道以**数组**形式配置，可在一类平台下配置多个机器人（如多个 Telegram 机器人）。每条记录可有唯一 `name`（默认 `"telegram"`、`"discord"`、`"feishu"`）。访问控制使用**白名单**：当 `enableAllowlist` 为 true（默认）时，仅接受 `allowlist` 中的会话。
 
+## 渠道配对 {#channel-pairing}
+
+**配对**是 `config.json` **根级**的可选列表，用于**补充**各渠道自己的 `allowlist`。当 `enableAllowlist` 为 true 时，只要满足**任一**条件即允许该会话：
+
+- 该会话的 id 已出现在对应渠道的 `allowlist` 中，或  
+- 根级 **`pairings`** 中存在一条记录，其 **`channel`**（提供商名）与 **`pairingCode`** 与该会话匹配。
+
+### 配对码如何计算
+
+对某个会话，**`pairingCode`** 为 **`chatId` 的 MD5 值的前 12 个十六进制字符**（`chatId` 与渠道侧使用的字符串一致，例如 Telegram 的数字聊天 id 字符串，群组含负号）。匹配时**不区分大小写**。
+
+### 如何完成配对
+
+1. 用户在尚未加入白名单的会话里给机器人发消息；机器人可能回复**配对提示**，其中包含**当前 chat id** 和要执行的 `synbot pairing approve …` 命令。
+2. 在持有配置文件的环境中执行：
+   ```bash
+   synbot pairing approve <channel> <pairingCode>
+   ```
+   示例：`synbot pairing approve telegram abc123def456`。
+3. 若未使用默认的 `~/.synbot`，请与 `synbot start` 使用相同的 **`--root-dir`**。
+4. 视需要**重启**守护进程，以便渠道重新加载配置（配对数据来自磁盘上的 `config.json`）。
+
+### `config.json` 中的 `pairings`
+
+```json
+{
+  "pairings": [
+    { "channel": "telegram", "pairingCode": "abc123def456" }
+  ]
+}
+```
+
+### 允许的 `channel` 取值
+
+`telegram`、`feishu`、`discord`、`slack`、`email`、`matrix`、`dingtalk`、`whatsapp`、`irc`（与配置里使用的提供商键一致；CLI 中不区分大小写）。
+
+### CLI 子命令
+
+- `synbot pairing list` — 列出全部配对  
+- `synbot pairing approve <channel> <code>` — 新增一条（`code` 须为 12 位十六进制）  
+- `synbot pairing remove <channel> <code>` — 删除一条  
+
+配对仅放行**该 chat id**；放行后仍遵守**各渠道的额外规则**（例如 Telegram **群组**在配置了 **`groupMyName`** 或 allowlist 条目的 **`myName`** 时，需要**以 @机器人用户名开头**才会交给 Agent；详见 [渠道指南](/zh/user-guide/channels)）。
+
 ### Telegram
 
 ```json
@@ -105,6 +149,7 @@ cargo run --example generate_config_schema --features schema -- -o templates/con
           { "chatId": "123456789", "chatAlias": "我的会话", "myName": null }
         ],
         "enableAllowlist": true,
+        "groupMyName": "YourBotUsername",
         "proxy": "socks5://127.0.0.1:1080",
         "showToolCalls": true
       }
@@ -114,8 +159,9 @@ cargo run --example generate_config_schema --features schema -- -o templates/con
 ```
 
 - **token**: 来自 [@BotFather](https://t.me/botfather) 的 Telegram 机器人令牌
-- **allowlist**: `{ "chatId", "chatAlias", "myName"? }` 的数组。`chatId` 为用户或群组 ID；`chatAlias` 为日志/界面标签；群组中 `myName` 可限制仅在被 @ 时回复
-- **enableAllowlist**: 为 true（默认）时仅接受白名单会话；为 false 时不校验白名单
+- **allowlist**: `{ "chatId", "chatAlias", "myName"? }` 的数组。`chatId` 为用户或群组 ID；`chatAlias` 为日志/界面标签；在**群组**中若设置了 `myName`，仅处理以 `@该名称` 开头的消息。若条目未设 `myName`，群组会回退使用渠道级 **`groupMyName`**（若已设置）；二者都未设置时，该群内所有文本都会进入 Agent。
+- **enableAllowlist**: 为 true（默认）时仅接受 **allowlist 或根级 [渠道配对](#channel-pairing)** 中的会话；为 false 时不校验白名单
+- **groupMyName**: 可选，填机器人 **用户名**（不含 `@`）。在 Telegram **群组**中：对**仅通过配对放行**（不在 allowlist）的群，若设置了此项，则须以 `@groupMyName` 开头才会触发 Agent。已在 allowlist 的群组优先使用条目的 **`myName`**，否则回退 **`groupMyName`**。**私聊**不要求 @。
 - **proxy**: 可选，网络代理 URL
 - **showToolCalls**: 为 true（默认）时向该渠道推送工具执行进度
 
