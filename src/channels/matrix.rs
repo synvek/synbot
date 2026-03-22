@@ -20,13 +20,13 @@ use matrix_sdk::{
     authentication::{matrix::MatrixSession, AuthSession},
     Client, Room, RoomState, SessionMeta, SessionTokens,
 };
-use tokio::sync::{broadcast, mpsc};
-use tracing::{error, info, warn};
+use tokio::sync::{broadcast, broadcast::error::RecvError, mpsc};
+use tracing::{debug, error, info, warn};
 
 use crate::bus::{InboundMessage, OutboundMessage};
 use crate::channels::{approval_formatter, Channel};
 use crate::config::{
-    pairing_allows, pairing_message, pairings_from_config_file_cached, MatrixConfig,
+    pairing_allows, pairing_message, pairings_from_config_file_cached, sessions_root, MatrixConfig,
 };
 
 // ---------------------------------------------------------------------------
@@ -34,6 +34,90 @@ use crate::config::{
 // ---------------------------------------------------------------------------
 
 const MATRIX_MAX_MESSAGE_LEN: usize = 4000;
+
+/// Fixed device id for synbot's Matrix session. Password login must send the same id every time;
+/// otherwise the homeserver mints a new device and the SQLite crypto store (bound to user+device) rejects the session.
+const MATRIX_DEVICE_ID: &str = "SYNBOT";
+
+/// Extract a plain-text body for agent processing (`m.text`, `m.notice`, `m.emote`).
+fn matrix_plain_body_from_msgtype(msgtype: &MessageType) -> Option<&str> {
+    match msgtype {
+        MessageType::Text(c) => Some(c.body.as_str()),
+        MessageType::Notice(c) => Some(c.body.as_str()),
+        MessageType::Emote(c) => Some(c.body.as_str()),
+        _ => None,
+    }
+}
+
+fn matrix_channel_slug(name: &str) -> String {
+    let name = name.trim();
+    let name = if name.is_empty() { "matrix" } else { name };
+    name.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn expand_user_path(raw: &str) -> PathBuf {
+    let raw = raw.trim();
+    if raw.starts_with('~') {
+        dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(raw.trim_start_matches("~/").trim_start_matches('~').trim_start_matches('/'))
+    } else {
+        PathBuf::from(raw)
+    }
+}
+
+/// Normalized MXID for matching `event.sender` (echo suppression). Returns `None` if username unset.
+fn matrix_bot_user_id(cfg: &MatrixConfig) -> Option<String> {
+    let username = cfg.username.trim();
+    if username.is_empty() {
+        return None;
+    }
+    if username.starts_with('@') && username.contains(':') {
+        return Some(username.to_string());
+    }
+    let homeserver_url = cfg.homeserver_url.trim();
+    let url = url::Url::parse(homeserver_url).ok()?;
+    let server = url.host_str().unwrap_or("localhost");
+    let local = username.trim_start_matches('@');
+    matrix_sdk::ruma::UserId::parse(&format!("@{local}:{server}"))
+        .ok()
+        .map(|u| u.to_string())
+}
+
+/// `allowlist[].chatId` must be a **room id** (`!sigil:server`) or **sender MXID** (`@user:server`).
+/// Room aliases (`#name:server`) do not match. Compared trimmed and ASCII case-insensitive.
+fn matrix_allowlist_entry_matches(entry_chat_id: &str, room_id: &str, sender: &str) -> bool {
+    let e = entry_chat_id.trim();
+    if e.is_empty() {
+        return false;
+    }
+    let room = room_id.trim();
+    let send = sender.trim();
+    e == room
+        || e == send
+        || e.eq_ignore_ascii_case(room)
+        || e.eq_ignore_ascii_case(send)
+}
+
+fn matrix_sqlite_path(cfg: &MatrixConfig) -> PathBuf {
+    let custom = cfg.store_path.trim();
+    if custom.is_empty() {
+        sessions_root()
+            .join("matrix")
+            .join(matrix_channel_slug(&cfg.name))
+            .join("store.sqlite")
+    } else {
+        expand_user_path(custom)
+    }
+}
 
 fn split_message(content: &str, max_len: usize) -> Vec<String> {
     if max_len == 0 {
@@ -110,7 +194,31 @@ impl MatrixChannel {
             .context("Matrix homeserver_url must be a valid URL (e.g. https://matrix.example.org)")?;
         let server = url.host_str().unwrap_or("localhost").to_string();
 
-        let client = Client::builder().homeserver_url(url).build().await?;
+        let db_path = matrix_sqlite_path(&self.config);
+        if let Some(parent) = db_path.parent() {
+            std::fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "Matrix: failed to create store directory {}",
+                    parent.display()
+                )
+            })?;
+        }
+        let lock_holder = format!("synbot-matrix-{}", matrix_channel_slug(&self.config.name));
+        info!(
+            channel = %self.config.name,
+            store = %db_path.display(),
+            "Matrix: opening SQLite store (sync state + E2EE crypto)"
+        );
+        // Same reqwest/DNS/TLS as the rest of synbot (system resolver by default; Google DNS when SYNBOT_IN_APP_SANDBOX).
+        let http = crate::appcontainer_dns::build_reqwest_client();
+        let client = Client::builder()
+            .homeserver_url(url)
+            .http_client(http)
+            .cross_process_store_locks_holder_name(lock_holder)
+            .sqlite_store(&db_path, None)
+            .build()
+            .await
+            .context("Matrix: failed to build client (check store path and permissions)")?;
 
         if let Some(ref token) = self.config.access_token {
             let token = token.trim();
@@ -121,7 +229,7 @@ impl MatrixChannel {
                 }
                 let user_id = matrix_sdk::ruma::UserId::parse(username)
                     .context("Matrix username must be a valid user ID (e.g. @bot:example.org)")?;
-                let device_id = matrix_sdk::ruma::device_id!("SYNBOT");
+                let device_id = matrix_sdk::ruma::device_id!(MATRIX_DEVICE_ID);
                 let session = AuthSession::Matrix(MatrixSession {
                     meta: SessionMeta {
                         user_id: user_id.to_owned(),
@@ -160,6 +268,7 @@ impl MatrixChannel {
             client
                 .matrix_auth()
                 .login_username(user_id.as_str(), password)
+                .device_id(MATRIX_DEVICE_ID)
                 .initial_device_display_name("synbot")
                 .send()
                 .await
@@ -168,16 +277,20 @@ impl MatrixChannel {
                         "Matrix login failed for {} at {}. \
                          HTTP 503 or `<non-json bytes>` usually means the homeserver is not ready or the URL hits a proxy/HTML error page. \
                          Check: curl -sS '{}'. \
+                         If the error mentions DNS / hickory / `Operation not permitted`, the process cannot read system resolver config (macOS sandbox/Seatbelt): use `http://127.0.0.1:8008` instead of `localhost`, or run outside the sandbox. \
+                         If the error mentions crypto store / account doesn't match / device: delete this channel's SQLite store file (default under sessions/matrix/{{name}}/store.sqlite) once to clear an old random device id, then log in again — synbot pins device id to `{}`. \
                          If login still fails, set username to the full MXID @localpart:server_name where server_name matches Synapse `server_name` (not only the URL hostname when they differ).",
                         user_id,
                         homeserver_url,
-                        versions_probe
+                        versions_probe,
+                        MATRIX_DEVICE_ID
                     )
                 })?;
             info!(
                 channel = %self.config.name,
                 user_id = %user_id,
-                "Matrix: logged in with username/password"
+                device_id = MATRIX_DEVICE_ID,
+                "Matrix: logged in with username/password (stable device id for crypto store)"
             );
         }
 
@@ -228,6 +341,14 @@ impl Channel for MatrixChannel {
         let group_my_name = self.config.group_my_name.clone();
         let inbound_tx = self.inbound_tx.clone();
         let config_path = self.config_path.clone();
+        let bot_user_id = matrix_bot_user_id(&self.config);
+
+        if enable_allowlist && allowlist.is_empty() {
+            warn!(
+                channel = %self.config.name,
+                "Matrix: enableAllowlist is true and allowlist is empty — deny-all until you add room/user entries or CLI pairings (security default)"
+            );
+        }
 
         client.add_event_handler(
             move |event: SyncRoomMessageEvent, room: Room| {
@@ -238,28 +359,55 @@ impl Channel for MatrixChannel {
                 let group_my_name = group_my_name.clone();
                 let inbound_tx = inbound_tx.clone();
                 let config_path = config_path.clone();
+                let bot_user_id = bot_user_id.clone();
 
                 async move {
                     if room.state() != RoomState::Joined {
+                        info!(
+                            room_id = %room.room_id(),
+                            state = ?room.state(),
+                            "Matrix: skip timeline message (room not joined)"
+                        );
                         return;
                     }
                     let event = match &event {
                         matrix_sdk::ruma::events::SyncMessageLikeEvent::Original(ev) => ev,
-                        _ => return,
-                    };
-                    let MessageType::Text(text_content) = &event.content.msgtype else {
-                        return;
+                        _ => {
+                            info!(
+                                room_id = %room.room_id(),
+                                "Matrix: skip non-original message (redacted or unsigned)"
+                            );
+                            return;
+                        }
                     };
                     let sender = event.sender.as_str();
                     let room_id = room.room_id().as_str();
-                    let body = text_content.body.trim();
+                    if bot_user_id.as_deref() == Some(sender) {
+                        debug!(room_id = %room_id, "Matrix: skip own message (echo)");
+                        return;
+                    }
+                    info!(
+                        room_id = %room_id,
+                        sender = %sender,
+                        "Matrix: m.room.message received"
+                    );
+                    let Some(raw_body) = matrix_plain_body_from_msgtype(&event.content.msgtype) else {
+                        info!(
+                            room_id = %room_id,
+                            msgtype = ?event.content.msgtype,
+                            "Matrix: skip non-plain message (only m.text / m.notice / m.emote are handled)"
+                        );
+                        return;
+                    };
+                    let body = raw_body.trim();
                     if body.is_empty() {
+                        info!(room_id = %room_id, "Matrix: skip empty message body");
                         return;
                     }
 
                     if enable_allowlist {
                         let allowed = allowlist.iter().any(|e| {
-                            e.chat_id == room_id || e.chat_id == sender
+                            matrix_allowlist_entry_matches(&e.chat_id, room_id, sender)
                         });
                         let pairings = config_path
                             .as_ref()
@@ -268,8 +416,27 @@ impl Channel for MatrixChannel {
                         let paired = pairing_allows(room_id, "matrix", &pairings)
                             || pairing_allows(sender, "matrix", &pairings);
                         if !allowed && !paired {
-                            warn!(room_id = %room_id, "Matrix: room/user not in allowlist, ignoring");
-                            let hint = pairing_message("matrix", room_id);
+                            warn!(
+                                room_id = %room_id,
+                                sender = %sender,
+                                allowlist_size = allowlist.len(),
+                                "Matrix: no allowlist match (use room id !…:server from Element Room settings → Advanced, not #alias; or sender MXID; chatId is trimmed/case-insensitive)"
+                            );
+                            let hint = if allowlist.is_empty() {
+                                format!(
+                                    "{} Allowlist tip: `chatId` must be this room's internal id (starts with !) or someone's @user:server — not a #room alias.",
+                                    pairing_message("matrix", room_id)
+                                )
+                            } else {
+                                let n = allowlist.len();
+                                let entries_word = if n == 1 { "entry" } else { "entries" };
+                                format!(
+                                    "{} Your config lists {} allowlist {} but none matches this room or sender. Often the `chatId` is from another room: copy the value after \"Current chat id\" above into `channels.matrix[].allowlist[].chatId` (or use your MXID @user:server), then restart synbot.",
+                                    pairing_message("matrix", room_id),
+                                    n,
+                                    entries_word
+                                )
+                            };
                             let _ = room
                                 .send(RoomMessageEventContent::text_plain(hint))
                                 .await;
@@ -295,11 +462,16 @@ impl Channel for MatrixChannel {
                                     .trim_start()
                                     .to_string();
                             } else {
+                                info!(
+                                    room_id = %room_id,
+                                    "Matrix: skip group message (set groupMyName and start messages with @bot_id or @bot_id:)"
+                                );
                                 return;
                             }
                         }
                     }
 
+                    let content_len = content.len();
                     let inbound = InboundMessage {
                         channel: channel_name.clone(),
                         sender_id: sender.to_string(),
@@ -314,6 +486,13 @@ impl Channel for MatrixChannel {
                     };
                     if let Err(e) = inbound_tx.send(inbound).await {
                         error!("Matrix: failed to forward inbound message: {e}");
+                    } else {
+                        info!(
+                            room_id = %room_id,
+                            sender = %sender,
+                            chars = content_len,
+                            "Matrix: message forwarded to agent bus"
+                        );
                     }
                 }
             },
@@ -327,7 +506,18 @@ impl Channel for MatrixChannel {
         let workspace_dir = self.workspace_dir.clone();
 
         tokio::spawn(async move {
-            while let Ok(msg) = outbound_rx.recv().await {
+            loop {
+                let msg = match outbound_rx.recv().await {
+                    Ok(m) => m,
+                    Err(RecvError::Lagged(n)) => {
+                        warn!(
+                            skipped = n,
+                            "Matrix: outbound broadcast lagged; continuing (replies would have been lost without this)"
+                        );
+                        continue;
+                    }
+                    Err(RecvError::Closed) => break,
+                };
                 if msg.channel != channel_name_out {
                     continue;
                 }
@@ -374,12 +564,22 @@ impl Channel for MatrixChannel {
                     }
                 };
                 if !content.is_empty() {
-                    if let Some(room) = client_out.get_room(&room_id) {
-                        let chunks = split_message(&content, MATRIX_MAX_MESSAGE_LEN);
-                        for chunk in chunks {
-                            if let Err(e) = room.send(RoomMessageEventContent::text_plain(&chunk)).await {
-                                error!("Matrix outbound send error: {e:#}");
+                    match client_out.get_room(&room_id) {
+                        Some(room) => {
+                            let chunks = split_message(&content, MATRIX_MAX_MESSAGE_LEN);
+                            for chunk in chunks {
+                                if let Err(e) =
+                                    room.send(RoomMessageEventContent::text_plain(&chunk)).await
+                                {
+                                    error!("Matrix outbound send error: {e:#}");
+                                }
                             }
+                        }
+                        None => {
+                            warn!(
+                                room_id = %room_id,
+                                "Matrix: outbound message dropped (room not in client; bot may not have joined this room)"
+                            );
                         }
                     }
                 }
@@ -414,7 +614,35 @@ impl Channel for MatrixChannel {
         });
 
         let sync_token = client.sync_once(SyncSettings::default()).await?.next_batch;
+
+        let joined = client.joined_rooms();
+        info!(
+            channel = %self.config.name,
+            joined_rooms = joined.len(),
+            "Matrix: initial sync complete"
+        );
+        for room in &joined {
+            let enc = room.encryption_state();
+            if enc.is_encrypted() {
+                info!(
+                    channel = %self.config.name,
+                    room_id = %room.room_id(),
+                    "Matrix: encrypted room — E2EE is enabled; keys are persisted in the configured SQLite store"
+                );
+            } else if enc.is_unknown() {
+                info!(
+                    channel = %self.config.name,
+                    room_id = %room.room_id(),
+                    "Matrix: room encryption state unknown after first sync (if you never see 'message forwarded', check E2EE / room type)"
+                );
+            }
+        }
+
         let settings = SyncSettings::default().token(sync_token);
+        info!(
+            channel = %self.config.name,
+            "Matrix: entering long sync loop (receiving live events)"
+        );
         client.sync(settings).await?;
 
         Ok(())

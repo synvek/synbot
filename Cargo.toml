@@ -38,9 +38,9 @@ toml = "0.8"
 # JSON Schema generation for config (optional, enable with feature "schema")
 schemars = { version = "0.8", features = ["derive"], optional = true }
 
-# HTTP client (hickory-dns: use network DNS instead of system getaddrinfo; fixes WSAHOST_NOT_FOUND 11001 in AppContainer)
-# rustls-tls: on macOS app sandbox we force rustls + webpki-roots only to avoid Security framework (OSStatus -9808)
-reqwest = { version = "0.12", features = ["json", "hickory-dns", "rustls-tls"] }
+# HTTP: rustls + webpki on macOS (see appcontainer_dns). Do not enable reqwest's hickory-dns globally — it reads system
+# resolver config and fails with EPERM in macOS Seatbelt/some sandboxes; AppContainer uses GoogleDnsResolver via build_reqwest_client().
+reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 # Explicit nameserver (8.8.8.8) when in AppContainer (see appcontainer_dns module)
 hickory-resolver = "0.25"
 
@@ -64,8 +64,8 @@ bytes = "1"
 # Slack (Socket Mode)
 slack-morphism = { version = "2.18", features = ["hyper"] }
 
-# Matrix channel (matrix-sdk; minimal features, no E2EE/sqlite by default)
-matrix-sdk = { version = "0.16", default-features = false, features = ["rustls-tls"] }
+# Matrix: rustls + E2EE + SQLite (state + crypto keys). bundled-sqlite avoids system libsqlite dev deps.
+matrix-sdk = { version = "0.16", default-features = false, features = ["rustls-tls", "e2e-encryption", "bundled-sqlite"] }
 
 # IRC channel
 irc = { version = "1", default-features = false, features = ["tls-native"] }

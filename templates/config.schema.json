@@ -1382,6 +1382,7 @@
           ]
         },
         "allowlist": {
+          "description": "Matrix: chatId must be internal room id !id:server (Element Room settings → Advanced) or @user:server — not #alias. Empty allowlist + enableAllowlist denies all.",
           "default": [],
           "type": "array",
           "items": {
@@ -1394,6 +1395,7 @@
           "type": "string"
         },
         "enableAllowlist": {
+          "description": "When true, only allowlist + CLI pairings are accepted; empty allowlist denies everyone. When false, allowlist is not checked.",
           "default": true,
           "type": "boolean"
         },
@@ -1427,6 +1429,11 @@
         "showToolCalls": {
           "default": true,
           "type": "boolean"
+        },
+        "storePath": {
+          "description": "SQLite path for Matrix state and E2EE crypto store. Empty = default under sessions/matrix/{name}/store.sqlite. Tilde ~ is expanded.",
+          "default": "",
+          "type": "string"
         },
         "username": {
           "description": "Bot user ID (e.g. \"@bot:example.org\") or localpart for login.",

@@ -188,8 +188,15 @@ pub struct MatrixConfig {
     /// Access token (optional). When set, login is skipped and this token is used.
     #[serde(default)]
     pub access_token: Option<String>,
+    /// SQLite store path for Matrix sync state and Olm/Megolm keys (E2EE). Tilde `~` is expanded.
+    /// When empty, defaults to `{sessions_dir}/matrix/{channelName}/store.sqlite` (see `sessions_root()`).
+    /// The store is tied to user + device id; synbot uses a fixed device id `SYNBOT` for password login. Delete this file if you see a crypto store / device mismatch after upgrading.
+    #[serde(default)]
+    pub store_path: String,
+    /// For Matrix, `chatId` must be the internal **room id** (`!xx:server`, from Element → Room settings → Advanced) or a user **MXID** — not a room alias (`#name:server`). Matching ignores surrounding ASCII spaces and letter case.
     #[serde(default)]
     pub allowlist: Vec<AllowlistEntry>,
+    /// When true, only `allowlist` entries and CLI pairings are accepted; an empty allowlist denies everyone.
     #[serde(default = "default_true")]
     pub enable_allowlist: bool,
     /// When enable_allowlist is false, bot user id for @mention check in rooms (optional).
