@@ -50,6 +50,7 @@ Synbot 是一个用 Rust 编写的个人 AI 助手，灵感来源于 [nanobot](h
 ### 工具系统
 - **文件系统工具**: 读取、写入、列出文件
 - **Shell 工具**: 带安全控制的命令执行
+- **工具沙箱（可选）**: 可在 Docker（gVisor 等）、Windows AppContainer、nono 或 macOS `sandbox-exec` 中隔离执行 `exec`；详见 [沙箱](/zh/getting-started/sandbox)
 - **Web 工具**: 网页搜索和内容获取
 - **消息工具**: 跨渠道发送消息
 - **审批工具**: 基于权限的审批工作流

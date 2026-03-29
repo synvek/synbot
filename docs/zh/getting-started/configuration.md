@@ -842,7 +842,7 @@ cargo run --example generate_config_schema --features schema -- -o templates/con
 
 ## 沙箱配置
 
-可选：为主进程（应用沙箱）和工具执行（工具沙箱）提供隔离。详见 [沙箱](/zh/getting-started/sandbox)。
+可选：为主进程（应用沙箱）和工具执行（工具沙箱）提供隔离。`toolSandbox.sandboxType` 可为 Docker 系（`gvisor-docker`、`plain-docker`、Windows 下 `wsl2-gvisor`）或宿主机原生（Windows：`appcontainer`；Linux/macOS：`nono`；仅 macOS：`seatbelt`）。详见 [沙箱](/zh/getting-started/sandbox)。
 
 ```json
 {

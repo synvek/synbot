@@ -36,7 +36,7 @@ features:
     details: Cron job support for automated task execution.
     icon: ⏰
   - title: Sandbox Isolation
-    details: App sandbox (AppContainer / nono) and tool sandbox (Docker / gVisor) for secure execution.
+    details: App sandbox (AppContainer / nono) and tool sandbox (Docker / gVisor, or host AppContainer, nono, sandbox-exec on macOS).
     icon: 🛡️
 
 warning:
@@ -190,7 +190,7 @@ Synbot is a personal AI assistant written in Rust, originally inspired by [nanob
 - **Multi-agent Support**: Role-based agents with different capabilities
 - **Workflows**: Persistent, resumable multi-step workflows (TurboWorkflow)
 - **Cron Jobs**: Scheduled task execution
-- **Sandbox**: App sandbox (AppContainer / nono) and tool sandbox (Docker / gVisor)
+- **Sandbox**: App sandbox (AppContainer / nono) and tool sandbox (Docker / gVisor / WSL2, or Windows AppContainer, nono, macOS sandbox-exec)
 - **Logging**: Configurable logging with multiple formats
 
 ### Project Status

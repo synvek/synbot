@@ -493,7 +493,7 @@ impl Sandbox for NonoSandbox {
         command: &str,
         args: &[String],
         timeout: Duration,
-        _working_dir: Option<&str>,
+        working_dir: Option<&str>,
     ) -> Result<ExecutionResult> {
         if self.status.state != SandboxState::Running {
             return Err(SandboxError::NotStarted);
@@ -507,11 +507,14 @@ impl Sandbox for NonoSandbox {
         
         let start = Instant::now();
         
-        // Execute command with nono.sh wrapper
-        let output = Command::new("nono")
-            .args(&nono_args)
+        let mut cmd = Command::new("nono");
+        cmd.args(&nono_args)
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::piped());
+        if let Some(wd) = working_dir.filter(|s| !s.is_empty()) {
+            cmd.current_dir(wd);
+        }
+        let output = cmd
             .output()
             .map_err(|e| SandboxError::ExecutionFailed(format!("Failed to execute command: {}", e)))?;
         
@@ -569,10 +572,16 @@ impl Sandbox for NonoSandbox {
     }
     
     fn get_info(&self) -> SandboxInfo {
+        let sandbox_type =
+            if matches!(self.config.requested_tool_sandbox_type.as_deref(), Some("nono")) {
+                "nono-tool".to_string()
+            } else {
+                "nono".to_string()
+            };
         SandboxInfo {
             sandbox_id: self.config.sandbox_id.clone(),
             platform: std::env::consts::OS.to_string(),
-            sandbox_type: "nono".to_string(),
+            sandbox_type,
         }
     }
 }

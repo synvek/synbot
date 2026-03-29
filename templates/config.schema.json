@@ -2136,7 +2136,7 @@
           ]
         },
         "sandboxType": {
-          "description": "Tool sandbox backend: \"gvisor-docker\" (default), \"plain-docker\". On Windows also \"wsl2-gvisor\". If the environment does not match (e.g. gVisor not installed), tool sandbox will fail; change this to an available type (e.g. \"plain-docker\") to run.",
+          "description": "Tool sandbox backend: Docker \"gvisor-docker\" (default), \"plain-docker\"; Windows also \"wsl2-gvisor\" or host \"appcontainer\" (requires `synbot sandbox setup` once as Administrator for network). Linux/macOS host: \"nono\" (nono CLI on PATH). macOS only: \"seatbelt\" (`/usr/bin/sandbox-exec`; coarse network on/off only, not per-host rules). If the environment does not match, creation fails—pick an available type.",
           "default": null,
           "type": [
             "string",

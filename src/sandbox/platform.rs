@@ -245,13 +245,18 @@ impl SandboxFactory {
         #[cfg(target_os = "windows")]
         {
             use crate::sandbox::plain_docker::PlainDockerSandbox;
-            use crate::sandbox::{GVisorDockerSandbox, Wsl2GVisorSandbox};
+            use crate::sandbox::{GVisorDockerSandbox, Wsl2GVisorSandbox, WindowsAppContainerSandbox};
             match requested {
                 "wsl2-gvisor" => Ok(Box::new(Wsl2GVisorSandbox::new(config)?)),
                 "gvisor-docker" => Ok(Box::new(GVisorDockerSandbox::new(config)?)),
                 "plain-docker" => Ok(Box::new(PlainDockerSandbox::new(config)?)),
+                "appcontainer" => Ok(Box::new(WindowsAppContainerSandbox::new(config)?)),
+                "nono" | "seatbelt" => Err(SandboxError::CreationFailed(format!(
+                    "Tool sandbox type '{}' is not supported on Windows. Use 'appcontainer', 'wsl2-gvisor', 'gvisor-docker', or 'plain-docker'.",
+                    requested
+                ))),
                 _ => Err(SandboxError::CreationFailed(format!(
-                    "Unsupported tool sandbox type '{}' on Windows. Use 'wsl2-gvisor', 'gvisor-docker', or 'plain-docker'.",
+                    "Unsupported tool sandbox type '{}' on Windows. Use 'appcontainer', 'wsl2-gvisor', 'gvisor-docker', or 'plain-docker'.",
                     requested
                 ))),
             }
@@ -261,13 +266,31 @@ impl SandboxFactory {
         {
             use crate::sandbox::plain_docker::PlainDockerSandbox;
             use crate::sandbox::GVisorDockerSandbox;
+            use crate::sandbox::NonoSandbox;
+            #[cfg(target_os = "macos")]
+            use crate::sandbox::macos_sandbox_exec::MacosSandboxExecToolSandbox;
             match requested {
                 "gvisor-docker" => Ok(Box::new(GVisorDockerSandbox::new(config)?)),
                 "plain-docker" => Ok(Box::new(PlainDockerSandbox::new(config)?)),
+                "nono" => Ok(Box::new(NonoSandbox::new(config)?)),
+                #[cfg(target_os = "macos")]
+                "seatbelt" => Ok(Box::new(MacosSandboxExecToolSandbox::new(config)?)),
+                #[cfg(target_os = "linux")]
+                "seatbelt" => Err(SandboxError::CreationFailed(
+                    "Tool sandbox type 'seatbelt' is only supported on macOS (sandbox-exec). Use 'nono', 'gvisor-docker', or 'plain-docker' on Linux."
+                        .to_string(),
+                )),
+                "appcontainer" => Err(SandboxError::CreationFailed(format!(
+                    "Tool sandbox type 'appcontainer' is only supported on Windows. Use 'nono', 'gvisor-docker', or 'plain-docker' on this platform."
+                ))),
                 _ => Err(SandboxError::CreationFailed(format!(
-                    "Unsupported tool sandbox type '{}'. Use 'gvisor-docker' or 'plain-docker'. \
-                     If gVisor is not installed, set toolSandbox.sandboxType to \"plain-docker\" in config.",
-                    requested
+                    "Unsupported tool sandbox type '{}'. Use 'gvisor-docker', 'plain-docker', 'nono'{}.",
+                    requested,
+                    if cfg!(target_os = "macos") {
+                        ", or 'seatbelt' (macOS only)"
+                    } else {
+                        ""
+                    }
                 ))),
             }
         }

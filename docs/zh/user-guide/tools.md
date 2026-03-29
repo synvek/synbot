@@ -536,7 +536,12 @@ curl -X POST http://localhost:18888/api/tools/execute \
 
 ### 如何验证 exec 在 tool sandbox 内运行
 
-当配置了 `tool_sandbox` 时，exec 工具会在隔离容器（Linux 下为 gVisor 或普通 Docker）中执行命令。可通过以下方式确认 exec 是否在 tool sandbox 中运行。
+当配置了 `toolSandbox` 时，exec 会在所选后端中执行：
+
+- **Docker 系**（`gvisor-docker`、`plain-docker`、`wsl2-gvisor`）：在 **Linux 容器**内执行（可用 cgroup/主机名/`docker ps` 等验证）。
+- **宿主机原生**（Windows：`appcontainer`；macOS/Linux：`nono`；仅 macOS：`seatbelt`）：仍在**宿主机 OS**上，但日志中仍有 `sandbox=true`，且日志里的工作目录为**真实工作区路径**（不是 `/workspace`）。
+
+可通过以下方式确认 exec 是否在使用工具沙箱。
 
 #### 1. 启动日志
 
@@ -562,7 +567,7 @@ Tool sandbox start failed (exec will run on host)
 Tool sandbox creation failed (exec will run on host)
 ```
 
-表示 exec **未**使用 tool sandbox（可能未安装或未启动 Docker/gVisor）。
+表示 exec **未**使用工具沙箱（后端创建失败，或 Docker 系环境下 Docker/gVisor 不可用）。
 
 #### 2. 单次命令日志
 
@@ -574,9 +579,11 @@ grep -E "Command executed successfully \(sandbox\)|Command execution failed \(sa
 
 若 exec 在 tool sandbox 中运行，日志中会有 `sandbox=true`。若某次命令没有对应带 `(sandbox)` 的日志，则该次是在主机（或仅 app sandbox）上执行。
 
-#### 3. 运行时验证（在容器内）
+#### 3. 运行时验证（仅 Docker 系后端）
 
-让助手执行一个在容器内与在主机上表现不同的命令，再在主机上执行同一命令对比。
+**Docker** 工具沙箱下，可让助手执行一个在容器内与在主机上表现不同的命令，再在主机上对比。
+
+**宿主机原生**后端**不会**出现 Docker cgroup 或独立容器主机名；请主要依据 **§1–2** 及平台自身诊断（如 Windows AppContainer 相关日志）。
 
 **方式 A：cgroup（Linux）**  
 在 tool sandbox（Docker 容器）内，进程会处于 Docker 的 cgroup 下：
@@ -600,22 +607,23 @@ hostname
 再在主机上执行 `hostname`。若结果不同，说明命令在容器内执行。
 
 **方式 C：查看 Docker 容器**  
-在启用 tool sandbox 且 synbot 运行期间执行：
+在启用 **Docker** 工具沙箱且 synbot 运行期间执行：
 
 ```bash
 docker ps --filter name=synbot-tool
 ```
 
-应能看到名为 `synbot-tool` 的容器在运行，exec 即在该容器内执行。
+应能看到名为 `synbot-tool` 的容器在运行，exec 即在该容器内执行。（**不适用于** `appcontainer` / `nono` / `seatbelt` 工具沙箱。）
 
 #### 4. 对照表
 
-| 检查项 | exec 在 tool sandbox 中 | exec 在主机上 |
-|--------|-------------------------|----------------|
+| 检查项 | exec 在工具沙箱中 | exec 在主机上 |
+|--------|------------------|---------------|
 | 启动日志 | `Tool sandbox started (exec runs in sandbox)` | `Tool sandbox ... failed (exec will run on host)` 或无相关日志 |
 | 单次 exec 日志 | `Command executed successfully (sandbox)` 且 `sandbox=true` | 无 `(sandbox)` / 无 `sandbox=true` |
-| `docker ps` | 存在并运行中的 `synbot-tool` 容器 | 无该容器（或未用于 exec） |
-| 通过 exec 执行 `cat /proc/self/cgroup` | 含 `docker/` 或 `gvisor/` | 主机 cgroup 路径 |
+| 日志中的工作目录（宿主机原生） | 真实工作区路径 | 未走工具沙箱时无此对比 |
+| `docker ps`（仅 Docker 系） | 存在并运行中的 `synbot-tool` 容器 | 无该容器（或未用于 exec） |
+| 通过 exec 执行 `cat /proc/self/cgroup`（Linux Docker） | 含 `docker/` 或 `gvisor/` | 主机 cgroup 路径 |
 
 ## 自定义工具
 

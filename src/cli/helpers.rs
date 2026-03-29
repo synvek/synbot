@@ -74,12 +74,13 @@ pub type HeartbeatCronContext = Option<(
     Option<std::path::PathBuf>,
 )>;
 
-/// When sandbox is configured: (manager, tool_sandbox_id).
+/// When sandbox is configured: (manager, tool_sandbox_id, exec_kind).
 /// If tool_sandbox_id is Some("synbot-tool"), exec runs inside it; if None, manager is kept alive (e.g. for app sandbox only).
 /// Pass by reference so the caller can keep the manager alive for the process lifetime when only app_sandbox is running.
 pub type SandboxContext = Option<(
     std::sync::Arc<crate::sandbox::SandboxManager>,
     Option<String>, // tool_sandbox_id when tool sandbox started, None when only app sandbox or tool failed
+    crate::sandbox::types::ToolSandboxExecKind,
 )>;
 
 /// Build default tool registry. Returns the registry and a shared spawn context;
@@ -102,7 +103,7 @@ pub fn build_default_tools(
 
     let tool_sandbox_enabled = sandbox_context
         .as_ref()
-        .and_then(|(_, id)| id.as_ref())
+        .and_then(|(_, id, _)| id.as_ref())
         .is_some();
 
     let spawn_context = std::sync::Arc::new(tokio::sync::RwLock::new(None));
@@ -147,7 +148,10 @@ pub fn build_default_tools(
         session_id: None,
         channel: None,
         chat_id: None,
-        sandbox_context: sandbox_context.as_ref().and_then(|(m, id)| id.as_ref().map(|sid| (m.clone(), sid.clone()))),
+        sandbox_context: sandbox_context.as_ref().and_then(|(m, id, k)| {
+            id.as_ref()
+                .map(|sid| (m.clone(), sid.clone(), *k))
+        }),
     })).expect("register ExecTool");
     reg.register(std::sync::Arc::new(web::WebSearchTool::from_config(&cfg.tools.web)))
         .expect("register WebSearchTool");

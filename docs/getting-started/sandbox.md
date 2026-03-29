@@ -12,7 +12,7 @@ Synbot supports two layers of sandbox isolation for security: **app sandbox** (i
 | Layer | Purpose | Platforms |
 |-------|---------|-----------|
 | **App sandbox** | Runs the whole Synbot daemon (channels, agent, web) inside an isolated environment | Windows: AppContainer; Linux: nono (Landlock); macOS: nono (Seatbelt) |
-| **Tool sandbox** | Runs tool execution (e.g. `execute_command`) inside a container | Docker; optionally gVisor or WSL2 (Windows) |
+| **Tool sandbox** | Runs tool execution (e.g. `execute_command`) in isolation | **Docker** (optional gVisor; Windows: WSL2+gVisor) **or host-native**: Windows **AppContainer**, Linux/macOS **nono** CLI, macOS-only **sandbox-exec** (Seatbelt profile) |
 
 ## App Sandbox
 
@@ -73,7 +73,12 @@ This loads config, builds the app sandbox from `appSandbox`, starts the sandbox,
 
 ## Tool Sandbox
 
-When `toolSandbox` is configured, tool execution (e.g. the `exec` tool) runs inside a container instead of on the host. This provides stronger isolation for commands run by the agent.
+When `toolSandbox` is configured, tool execution (e.g. the `exec` tool) runs in an isolated backend instead of directly on the un-sandboxed host:
+
+- **Docker backends** (`gvisor-docker`, `plain-docker`, `wsl2-gvisor`): commands run inside a Linux container; default working directory for `exec` is `/workspace`, and skills may appear at `/skills` when mounted.
+- **Host-native backends** (`appcontainer` on Windows; `nono` on Linux/macOS; `seatbelt` on macOS only): commands run on the host OS with sandbox restrictions; `exec` uses your real workspace path as the working directory. No Docker container is involved.
+
+Choose `sandboxType` to match your platform and what you have installed.
 
 ### Configuration: `toolSandbox`
 
@@ -109,17 +114,20 @@ When `toolSandbox` is configured, tool execution (e.g. the `exec` tool) runs ins
 
 - **sandboxName**: Container name (default `"synbot-tool"`).
 - **deleteOnStart**: If `true`, remove and recreate the container on each start; if `false` (default), reuse existing container.
-- **sandboxType**: Backend:
+- **sandboxType**: Backend (no automatic fallback; pick one that exists on your machine):
   - `"gvisor-docker"` (default): Docker with gVisor runsc for stronger isolation.
   - `"plain-docker"`: Standard Docker (less isolation, no gVisor required).
   - `"wsl2-gvisor"`: Windows only; gVisor inside WSL2.
-- **image**: Docker image for the tool container (optional; Synbot may use a default).
-- **filesystem / network / resources / process**: Same idea as app sandbox; applied to the tool container.
-- **filesystem.mountSkillsDir**: When `true` (default), the host skills directory (`~/.synbot/skills`) is bind-mounted **read-only** into the container at **`/skills`**. Commands run via `exec` inside the tool sandbox can then read skills at `/skills/<skill-name>/SKILL.md`. Set to `false` to disable (stronger isolation; exec cannot access skills by path).
+  - `"appcontainer"` (**Windows only**): tool `exec` runs under **AppContainer** (same family as app sandbox). Run **`synbot sandbox setup` once as Administrator** so firewall/WFP rules exist if you need outbound network; then `synbot start` as a normal user.
+  - `"nono"` (**Linux and macOS**): requires the **`nono` executable on `PATH`**; wraps commands with the nono CLI (Landlock on Linux, Seatbelt via nono on macOS).
+  - `"seatbelt"` (**macOS only**): uses **`/usr/bin/sandbox-exec`** with a generated **`.sb` profile**. Network policy is coarse (**allow all outbound** vs **deny network**); `allowedHosts` / `allowedPorts` are not expressed in the profile.
+- **image**: Docker image for the tool container (used only for Docker backends; optional; Synbot may use a default).
+- **filesystem / network / resources / process**: Same idea as app sandbox. For **Docker**, these apply to the container. For **host-native** backends, workspace and (when enabled) skills are merged into host **writable/readonly** paths in the built config.
+- **filesystem.mountSkillsDir**: When `true` (default), for **Docker** backends the host skills directory (`~/.synbot/skills`) is bind-mounted **read-only** at **`/skills`** in the container. For **host-native** backends, the skills directory is added to **readonly** paths on the host instead. Set to `false` to disable.
 
-**Skills path in tool sandbox**: When the tool sandbox is enabled, the main process still discovers and loads skills from `~/.synbot/skills` (e.g. via `list_system_skills` / `read_system_skill`). Inside the container, the same content is available at **`/skills`** so that scripts or commands run by `exec` can use a single, consistent path (e.g. `cat /skills/planning-with-files/SKILL.md`).
+**Skills path with tool sandbox**: The main process still loads skills from `~/.synbot/skills`. With **Docker** tool sandbox, `exec` inside the container typically uses **`/skills/...`**. With **host-native** tool sandbox, use the **host** skills path (e.g. `~/.synbot/skills/...`).
 
-If gVisor is not installed or not desired, set `sandboxType` to `"plain-docker"` to avoid tool sandbox startup failures.
+If gVisor is not installed or not desired, set `sandboxType` to `"plain-docker"` (Docker) or use a **host-native** type on your OS.
 
 ## Sandbox monitoring
 
@@ -149,11 +157,11 @@ Optional audit logging for sandbox activity:
    ```
    Ensure `appSandbox` is set in config.
 
-2. **Tool sandbox only** (tools run in container; daemon on host):
+2. **Tool sandbox only** (tools isolated; daemon on host):
    ```bash
    synbot start
    ```
-   Ensure `toolSandbox` is set in config. The daemon will start the tool container when needed.
+   Ensure `toolSandbox` is set in config. For **Docker** backends the daemon starts the tool container when needed; for **host-native** backends the sandbox is started without Docker.
 
 3. **Both**: Configure both `appSandbox` and `toolSandbox`, then run:
    ```bash
@@ -164,8 +172,11 @@ Optional audit logging for sandbox activity:
 ## Troubleshooting
 
 - **"app_sandbox is not configured"**: Add an `appSandbox` block to config before using `synbot sandbox`.
-- **Tool sandbox fails (gVisor not found, etc.)**: Set `toolSandbox.sandboxType` to `"plain-docker"` if you do not have gVisor installed.
-- **Windows AppContainer: outbound HTTPS fails**: See [AppContainer network troubleshooting](/getting-started/appcontainer-network-troubleshooting) (firewall/WFP, DNS).
+- **Tool sandbox fails (gVisor not found, etc.)**: Set `toolSandbox.sandboxType` to `"plain-docker"` if you use Docker but do not have gVisor, or switch to **`appcontainer`** (Windows) / **`nono`** / **`seatbelt`** (macOS) if you want to avoid Docker.
+- **Windows tool `appcontainer` / outbound network**: Run **`synbot sandbox setup`** once as Administrator (same as app sandbox). See [AppContainer network troubleshooting](/getting-started/appcontainer-network-troubleshooting).
+- **macOS `nono` tool sandbox**: Install **`nono`** and ensure it is on **`PATH`**.
+- **macOS `seatbelt`**: Requires **`/usr/bin/sandbox-exec`**. Some commands may need extra paths in `toolSandbox.filesystem`; network allowlists in config are not applied at host level.
+- **Windows AppContainer (app sandbox): outbound HTTPS fails**: See [AppContainer network troubleshooting](/getting-started/appcontainer-network-troubleshooting) (firewall/WFP, DNS).
 
 ## Related
 

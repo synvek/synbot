@@ -162,15 +162,16 @@ Cron 系统处理计划任务。
 - **`sandbox/manager.rs`**：沙箱生命周期
 - **`sandbox/isolation.rs`**：隔离校验
 - **`sandbox/gvisor_docker.rs`**、**`sandbox/plain_docker.rs`**：基于 Docker 的工具沙箱
-- **`sandbox/nono.rs`**：Linux/macOS 应用沙箱（Landlock/Seatbelt）
-- **`sandbox/windows_appcontainer.rs`**：Windows 应用沙箱（AppContainer）
+- **`sandbox/nono.rs`**：Linux/macOS 下通过 **nono** CLI（`synbot sandbox` 应用沙箱 + `sandboxType: nono` 时的**工具**沙箱）
+- **`sandbox/windows_appcontainer.rs`**：Windows AppContainer（应用沙箱 + `sandboxType: appcontainer` 时的**工具**沙箱）
+- **`sandbox/macos_sandbox_exec.rs`**：macOS 下 `sandboxType: seatbelt` 时通过 **sandbox-exec** 的**工具**沙箱
 - **`sandbox/wsl2.rs`**：Windows 下基于 WSL2 的工具沙箱
 
 #### 平台概览：
 | 层级       | Windows      | Linux        | macOS        |
 |------------|--------------|--------------|--------------|
 | 应用沙箱   | AppContainer | nono (Landlock) | nono (Seatbelt) |
-| 工具沙箱   | Docker / gVisor / WSL2-gVisor | Docker / gVisor | Docker / gVisor |
+| 工具沙箱   | Docker / gVisor / WSL2-gVisor，或 **AppContainer** | Docker / gVisor，或 **nono** | Docker / gVisor，或 **nono**，或 **sandbox-exec**（`seatbelt`） |
 
 ## 数据流
 

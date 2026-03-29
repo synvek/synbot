@@ -261,7 +261,7 @@ pub async fn cmd_start() -> Result<()> {
 
     let tool_sandbox_enabled = sandbox_context
         .as_ref()
-        .and_then(|(_, id)| id.as_ref())
+        .and_then(|(_, id, _)| id.as_ref())
         .is_some();
 
     // Start agent loop (Arc<Mutex<>> so /stop or /cancel can cancel a running agent task)
@@ -398,7 +398,11 @@ pub async fn cmd_start() -> Result<()> {
 /// When we are already inside the app sandbox (child of `synbot sandbox`), we skip creating/starting app sandbox.
 async fn init_sandbox_if_configured(
     cfg: &config::Config,
-) -> Option<(std::sync::Arc<crate::sandbox::SandboxManager>, Option<String>)> {
+) -> Option<(
+    std::sync::Arc<crate::sandbox::SandboxManager>,
+    Option<String>,
+    crate::sandbox::types::ToolSandboxExecKind,
+)> {
     let in_app_sandbox = std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some();
     let has_app = cfg.app_sandbox.is_some() && !in_app_sandbox;
     let has_tool = cfg.tool_sandbox.is_some();
@@ -433,7 +437,8 @@ async fn init_sandbox_if_configured(
                             warn!(sandbox_id = %id, error = %e, "Tool sandbox start failed (exec will run on host)");
                         } else {
                             info!(sandbox_id = %id, "Tool sandbox started (exec runs in sandbox)");
-                            return Some((manager, Some(id)));
+                            let kind = config::tool_sandbox_exec_kind(tool_cfg);
+                            return Some((manager, Some(id), kind));
                         }
                     }
                     Err(e) => {
@@ -454,7 +459,11 @@ async fn init_sandbox_if_configured(
 
     // Keep manager alive when app sandbox was started so it is not dropped and stopped.
     if app_started {
-        Some((manager, None))
+        Some((
+            manager,
+            None,
+            crate::sandbox::types::ToolSandboxExecKind::Docker,
+        ))
     } else {
         None
     }

@@ -216,7 +216,11 @@ fn validate_workspace_path(
 // ---------------------------------------------------------------------------
 
 /// Context for running exec inside a tool sandbox when configured.
-pub type ExecSandboxContext = Option<(Arc<crate::sandbox::SandboxManager>, String)>;
+pub type ExecSandboxContext = Option<(
+    Arc<crate::sandbox::SandboxManager>,
+    String,
+    crate::sandbox::types::ToolSandboxExecKind,
+)>;
 
 pub struct ExecTool {
     pub workspace: PathBuf,
@@ -261,6 +265,30 @@ impl DynTool for ExecTool {
             .validate(&cmd_str)
             .map_err(|e| anyhow::anyhow!(e))?;
 
+        let cwd: PathBuf = args["working_dir"]
+            .as_str()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| self.workspace.clone());
+
+        if self.restrict_to_workspace {
+            validate_workspace_path(&self.workspace, &cwd)
+                .map_err(|e| anyhow::anyhow!(e))?;
+        }
+
+        let approval_cwd = match &self.sandbox_context {
+            Some((
+                _,
+                _,
+                crate::sandbox::types::ToolSandboxExecKind::Docker,
+            )) => "/workspace".to_string(),
+            Some((
+                _,
+                _,
+                crate::sandbox::types::ToolSandboxExecKind::HostNative,
+            )) => cwd.display().to_string(),
+            None => cwd.display().to_string(),
+        };
+
         // Check permission level if permission policy is enabled
         if let Some(permission_policy) = &self.permission_policy {
             let permission = permission_policy.check_permission(&cmd_str);
@@ -289,15 +317,7 @@ impl DynTool for ExecTool {
                     if let (Some(approval_manager), Some(session_id), Some(channel), Some(chat_id)) =
                         (&self.approval_manager, session_id, channel, chat_id)
                     {
-                        // When exec runs in tool sandbox, show container path in approval so UI matches execution context
-                        let cwd = if self.sandbox_context.is_some() {
-                            "/workspace".to_string()
-                        } else {
-                            args["working_dir"]
-                                .as_str()
-                                .unwrap_or_else(|| self.workspace.to_str().unwrap_or("."))
-                                .to_string()
-                        };
+                        let cwd = approval_cwd.clone();
                         
                         let context = format!(
                             "session: {} channel: {}",
@@ -351,18 +371,6 @@ impl DynTool for ExecTool {
             }
         }
 
-        // Resolve working directory
-        let cwd = args["working_dir"]
-            .as_str()
-            .map(PathBuf::from)
-            .unwrap_or_else(|| self.workspace.clone());
-
-        // Validate working directory if restrict_to_workspace is enabled
-        if self.restrict_to_workspace {
-            validate_workspace_path(&self.workspace, &cwd)
-                .map_err(|e| anyhow::anyhow!(e))?;
-        }
-
         let start = Instant::now();
         let working_dir = cwd.display().to_string();
 
@@ -376,13 +384,45 @@ impl DynTool for ExecTool {
         };
         let timeout_duration = Duration::from_secs(effective_timeout_secs);
 
-        // Run inside tool sandbox when configured (cwd is /workspace in container).
-        // Tool sandbox is always a Linux container (plain-docker / gvisor-docker / wsl2-gvisor), so use sh -c.
-        if let Some((ref manager, ref sandbox_id)) = self.sandbox_context {
+        // Run inside tool sandbox when configured (Docker: sh -c + /workspace; host-native: cmd or sh + real cwd).
+        if let Some((ref manager, ref sandbox_id, ref exec_kind)) = self.sandbox_context {
             let timeout = timeout_duration;
-            let (command, args) = ("sh".to_string(), vec!["-c".to_string(), cmd_str.to_string()]);
-            let sandbox_cwd = Some("/workspace");
-            match manager.execute_in_sandbox(sandbox_id, &command, &args, timeout, sandbox_cwd).await {
+            let (command, shell_args, sandbox_cwd_buf, working_dir_display) = match exec_kind {
+                crate::sandbox::types::ToolSandboxExecKind::Docker => (
+                    "sh".to_string(),
+                    vec!["-c".to_string(), cmd_str.to_string()],
+                    "/workspace".to_string(),
+                    "/workspace".to_string(),
+                ),
+                crate::sandbox::types::ToolSandboxExecKind::HostNative => {
+                    let wd = cwd.display().to_string();
+                    if cfg!(windows) {
+                        (
+                            "cmd".to_string(),
+                            vec!["/C".to_string(), cmd_str.to_string()],
+                            wd.clone(),
+                            wd,
+                        )
+                    } else {
+                        (
+                            "sh".to_string(),
+                            vec!["-c".to_string(), cmd_str.to_string()],
+                            wd.clone(),
+                            wd,
+                        )
+                    }
+                }
+            };
+            match manager
+                .execute_in_sandbox(
+                    sandbox_id,
+                    &command,
+                    &shell_args,
+                    timeout,
+                    Some(sandbox_cwd_buf.as_str()),
+                )
+                .await
+            {
                 Ok(exec_result) => {
                     let stdout = decode_output_bytes(&exec_result.stdout);
                     let stderr = decode_output_bytes(&exec_result.stderr);
@@ -395,7 +435,6 @@ impl DynTool for ExecTool {
                     } else {
                         (stdout, stderr, None)
                     };
-                    let working_dir_display = "/workspace".to_string();
                     let exec_result_display = ExecResult {
                         exit_code: exec_result.exit_code,
                         stdout: truncated_stdout.clone(),

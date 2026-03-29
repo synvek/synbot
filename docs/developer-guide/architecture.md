@@ -166,15 +166,16 @@ Two-layer isolation: **app sandbox** (isolates the Synbot daemon) and **tool san
 - **`sandbox/manager.rs`**: Sandbox lifecycle
 - **`sandbox/isolation.rs`**: Isolation verification
 - **`sandbox/gvisor_docker.rs`**, **`sandbox/plain_docker.rs`**: Docker-based tool sandbox
-- **`sandbox/nono.rs`**: Linux/macOS app sandbox (Landlock/Seatbelt)
-- **`sandbox/windows_appcontainer.rs`**: Windows app sandbox (AppContainer)
+- **`sandbox/nono.rs`**: Linux/macOS sandbox via **nono** CLI (app launcher + **tool** sandbox when `sandboxType` is `nono`)
+- **`sandbox/windows_appcontainer.rs`**: Windows AppContainer (app launcher + **tool** sandbox when `sandboxType` is `appcontainer`)
+- **`sandbox/macos_sandbox_exec.rs`**: macOS **tool** sandbox via `sandbox-exec` when `sandboxType` is `seatbelt`
 - **`sandbox/wsl2.rs`**: Windows WSL2-based tool sandbox
 
 #### Platform summary:
 | Layer        | Windows      | Linux     | macOS     |
 |-------------|--------------|-----------|-----------|
 | App sandbox | AppContainer | nono (Landlock) | nono (Seatbelt) |
-| Tool sandbox| Docker / gVisor / WSL2-gVisor | Docker / gVisor | Docker / gVisor |
+| Tool sandbox| Docker / gVisor / WSL2-gVisor, or **AppContainer** | Docker / gVisor, or **nono** | Docker / gVisor, or **nono**, or **sandbox-exec** (`seatbelt`) |
 
 ## Data Flow
 

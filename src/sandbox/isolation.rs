@@ -320,7 +320,12 @@ impl IsolationVerifier {
     fn is_tool_sandbox(&self, sandbox_type: &str) -> bool {
         matches!(
             sandbox_type,
-            "gvisor-docker" | "wsl2-gvisor"
+            "gvisor-docker"
+                | "plain-docker"
+                | "wsl2-gvisor"
+                | "appcontainer-tool"
+                | "nono-tool"
+                | "seatbelt"
         )
     }
 }
@@ -409,6 +414,8 @@ mod tests {
         assert!(verifier.is_app_sandbox("appcontainer"));
         assert!(verifier.is_app_sandbox("sandboxie"));
         assert!(verifier.is_app_sandbox("nono"));
+        assert!(!verifier.is_app_sandbox("appcontainer-tool"));
+        assert!(!verifier.is_app_sandbox("nono-tool"));
         assert!(!verifier.is_app_sandbox("gvisor-docker"));
     }
     
@@ -417,7 +424,11 @@ mod tests {
         let verifier = IsolationVerifier::new();
         
         assert!(verifier.is_tool_sandbox("gvisor-docker"));
+        assert!(verifier.is_tool_sandbox("plain-docker"));
         assert!(verifier.is_tool_sandbox("wsl2-gvisor"));
+        assert!(verifier.is_tool_sandbox("appcontainer-tool"));
+        assert!(verifier.is_tool_sandbox("nono-tool"));
+        assert!(verifier.is_tool_sandbox("seatbelt"));
         assert!(!verifier.is_tool_sandbox("appcontainer"));
         assert!(!verifier.is_tool_sandbox("nono"));
     }

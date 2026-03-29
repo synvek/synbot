@@ -1514,7 +1514,7 @@ pub struct ToolSandboxConfig {
     /// When true, remove existing container with the same name and create fresh on each start. When false (default), reuse existing container if found (start it if stopped).
     #[serde(default)]
     pub delete_on_start: Option<bool>,
-    /// Tool sandbox backend: "gvisor-docker" (default), "plain-docker". On Windows also "wsl2-gvisor". If the environment does not match (e.g. gVisor not installed), tool sandbox will fail; change this to an available type (e.g. "plain-docker") to run.
+    /// Tool sandbox backend: "gvisor-docker" (default), "plain-docker"; on Windows also "wsl2-gvisor" or host-native "appcontainer". On Linux/macOS host-native: "nono"; on macOS only: "seatbelt" (sandbox-exec). If the environment does not match, tool sandbox creation fails; pick an available type.
     #[serde(default)]
     pub sandbox_type: Option<String>,
     #[serde(default)]
@@ -1655,6 +1655,38 @@ fn expand_sandbox_paths(paths: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// Docker-backed tool sandboxes use `workspace_mount` / `skills_mount`; host-native backends use expanded paths in `writable_paths` / `readonly_paths`.
+pub fn tool_sandbox_exec_kind(cfg: &ToolSandboxConfig) -> crate::sandbox::types::ToolSandboxExecKind {
+    let s = cfg.sandbox_type.as_deref().unwrap_or("gvisor-docker");
+    if tool_sandbox_backend_is_docker(s) {
+        crate::sandbox::types::ToolSandboxExecKind::Docker
+    } else {
+        crate::sandbox::types::ToolSandboxExecKind::HostNative
+    }
+}
+
+fn tool_sandbox_backend_is_docker(sandbox_type: &str) -> bool {
+    matches!(
+        sandbox_type,
+        "gvisor-docker" | "plain-docker" | "wsl2-gvisor"
+    )
+}
+
+fn sandbox_path_list_contains(paths: &[String], candidate: &str) -> bool {
+    fn norm(s: &str) -> String {
+        #[cfg(windows)]
+        {
+            s.replace('\\', "/").trim_end_matches('/').to_lowercase()
+        }
+        #[cfg(not(windows))]
+        {
+            s.trim_end_matches('/').to_string()
+        }
+    }
+    let n = norm(candidate);
+    paths.iter().any(|p| norm(p) == n)
+}
+
 fn build_sandbox_monitoring(mon: &Option<SandboxMonitoringConfig>) -> crate::sandbox::types::MonitoringConfig {
     match mon {
         None => crate::sandbox::types::MonitoringConfig::default(),
@@ -1746,8 +1778,8 @@ pub fn build_app_sandbox_config(
 }
 
 /// Build SandboxConfig for tool sandbox from Config.
-/// When `workspace_path` is provided, it is mounted in the container at `/workspace` (tool sandbox exec cwd).
-/// When `skills_dir` is provided and mount_skills_dir is not false, it is mounted read-only at `/skills` so exec in the container can access skills.
+/// For Docker backends: `workspace_path` is bind-mounted at `/workspace` (exec cwd); skills at `/skills` when enabled.
+/// For host-native backends (`appcontainer`, `nono`, `seatbelt`): workspace and skills are merged into `writable_paths` / `readonly_paths` on the host.
 pub fn build_tool_sandbox_config(
     cfg: &ToolSandboxConfig,
     monitoring: &Option<SandboxMonitoringConfig>,
@@ -1755,6 +1787,8 @@ pub fn build_tool_sandbox_config(
     skills_dir: &std::path::Path,
 ) -> anyhow::Result<crate::sandbox::types::SandboxConfig> {
     let platform = "auto".to_string();
+    let tool_type = cfg.sandbox_type.as_deref().unwrap_or("gvisor-docker");
+    let is_docker = tool_sandbox_backend_is_docker(tool_type);
     let fs = cfg.filesystem.as_ref().map(|f| SandboxFilesystemConfig {
         readonly_paths: f.readonly_paths.clone(),
         writable_paths: f.writable_paths.clone(),
@@ -1762,6 +1796,31 @@ pub fn build_tool_sandbox_config(
         mount_skills_dir: f.mount_skills_dir,
     }).unwrap_or_default();
     let mount_skills = fs.mount_skills_dir != Some(false) && skills_dir.exists();
+    let mut readonly_paths = expand_sandbox_paths(&fs.readonly_paths);
+    let mut writable_paths = expand_sandbox_paths(&fs.writable_paths);
+    let workspace_host = workspace_path.to_string_lossy().to_string();
+    let workspace_expanded =
+        expand_sandbox_paths(&[workspace_host.clone()])
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| workspace_host.clone());
+
+    if !is_docker {
+        if !sandbox_path_list_contains(&writable_paths, &workspace_expanded) {
+            writable_paths.push(workspace_expanded.clone());
+        }
+        if mount_skills {
+            let sk = skills_dir.to_string_lossy().to_string();
+            let sk_exp = expand_sandbox_paths(&[sk])
+                .into_iter()
+                .next()
+                .unwrap();
+            if !sandbox_path_list_contains(&readonly_paths, &sk_exp) {
+                readonly_paths.push(sk_exp);
+            }
+        }
+    }
+
     let net = cfg
         .network
         .as_ref()
@@ -1785,18 +1844,11 @@ pub fn build_tool_sandbox_config(
         .as_deref()
         .unwrap_or("synbot-tool")
         .to_string();
-    Ok(crate::sandbox::types::SandboxConfig {
-        sandbox_id,
-        platform,
-        filesystem: crate::sandbox::types::FilesystemConfig {
-            readonly_paths: expand_sandbox_paths(&fs.readonly_paths),
-            writable_paths: expand_sandbox_paths(&fs.writable_paths),
-            hidden_paths: expand_sandbox_paths(&fs.hidden_paths),
-            workspace_mount: Some((
-                workspace_path.to_string_lossy().to_string(),
-                "/workspace".to_string(),
-            )),
-            skills_mount: if mount_skills {
+
+    let (workspace_mount, skills_mount) = if is_docker {
+        (
+            Some((workspace_host, "/workspace".to_string())),
+            if mount_skills {
                 Some((
                     skills_dir.to_string_lossy().to_string(),
                     "/skills".to_string(),
@@ -1804,6 +1856,26 @@ pub fn build_tool_sandbox_config(
             } else {
                 None
             },
+        )
+    } else {
+        (None, None)
+    };
+
+    let child_work_dir = if tool_type == "appcontainer" {
+        Some(workspace_expanded)
+    } else {
+        None
+    };
+
+    Ok(crate::sandbox::types::SandboxConfig {
+        sandbox_id,
+        platform,
+        filesystem: crate::sandbox::types::FilesystemConfig {
+            readonly_paths,
+            writable_paths,
+            hidden_paths: expand_sandbox_paths(&fs.hidden_paths),
+            workspace_mount,
+            skills_mount,
         },
         network: crate::sandbox::types::NetworkConfig {
             enabled: net.enabled,
@@ -1819,15 +1891,10 @@ pub fn build_tool_sandbox_config(
             allow_fork: process.and_then(|p| p.allow_fork).unwrap_or(false),
             max_processes: process.and_then(|p| p.max_processes).unwrap_or(5),
         },
-        child_work_dir: None,
+        child_work_dir,
         monitoring: build_sandbox_monitoring(monitoring),
         delete_on_start: cfg.delete_on_start.unwrap_or(false),
-        requested_tool_sandbox_type: Some(
-            cfg.sandbox_type
-                .as_deref()
-                .unwrap_or("gvisor-docker")
-                .to_string(),
-        ),
+        requested_tool_sandbox_type: Some(tool_type.to_string()),
         image: cfg.image.clone(),
     })
 }

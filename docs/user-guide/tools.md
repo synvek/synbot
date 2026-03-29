@@ -540,7 +540,12 @@ Some operations are restricted by default:
 
 ### Verifying exec runs in tool sandbox
 
-When `tool_sandbox` is configured, the exec tool runs commands inside an isolated container (gVisor or plain Docker on Linux). Use the following to confirm exec is using the tool sandbox.
+When `toolSandbox` is configured, the exec tool runs in the configured backend:
+
+- **Docker** (`gvisor-docker`, `plain-docker`, `wsl2-gvisor`): isolated **Linux container** (see cgroup/hostname/`docker ps` checks below).
+- **Host-native** (`appcontainer` on Windows; `nono` or `seatbelt` on macOS; `nono` on Linux): still on the **host OS**, but logs still show `sandbox=true` and the working directory in logs is the **real workspace path** (not `/workspace`).
+
+Use the following to confirm exec is using the tool sandbox.
 
 #### 1. Startup logs
 
@@ -567,7 +572,7 @@ or
 Tool sandbox creation failed (exec will run on host)
 ```
 
-then exec is **not** using the tool sandbox (Docker/gVisor may be unavailable).
+then exec is **not** using the tool sandbox (backend creation failed or Docker/gVisor unavailable for Docker types).
 
 #### 2. Per-command logs
 
@@ -579,9 +584,11 @@ grep -E "Command executed successfully \(sandbox\)|Command execution failed \(sa
 
 If exec is using the tool sandbox, log lines will include `sandbox=true`. If there is no such line for a given command, that command ran on the host (or in the app sandbox only).
 
-#### 3. Runtime verification inside the container
+#### 3. Runtime verification (Docker backends only)
 
-Ask the assistant to run a command that behaves differently inside a container than on the host, then compare with the same command run directly on the host.
+For **Docker** tool sandboxes, ask the assistant to run a command that behaves differently inside a container than on the host, then compare with the same command run directly on the host.
+
+**Host-native** backends will **not** show Docker cgroups or a separate container hostname; rely on **§1–2** and on environment-specific checks (e.g. Windows AppContainer diagnostics if enabled).
 
 **Option A – cgroup (Linux)**  
 Inside the tool sandbox (Docker container), the process is in a Docker cgroup:
@@ -605,13 +612,13 @@ hostname
 Then run `hostname` on the host. Different values indicate the command ran inside a container.
 
 **Option C – list Docker containers**  
-While synbot is running with tool sandbox enabled, list running containers:
+While synbot is running with a **Docker** tool sandbox, list running containers:
 
 ```bash
 docker ps --filter name=synbot-tool
 ```
 
-You should see a container named `synbot-tool` (or the ID used by that name). Exec is running inside that container.
+You should see a container named `synbot-tool` (or the ID used by that name). Exec is running inside that container. (**Not applicable** for `appcontainer` / `nono` / `seatbelt` tool sandboxes.)
 
 #### 4. Summary
 
@@ -619,8 +626,9 @@ You should see a container named `synbot-tool` (or the ID used by that name). Ex
 |-------|----------------------|--------------|
 | Startup log | `Tool sandbox started (exec runs in sandbox)` | `Tool sandbox ... failed (exec will run on host)` or no tool sandbox message |
 | Exec log | `Command executed successfully (sandbox)` with `sandbox=true` | No `(sandbox)` / no `sandbox=true` |
-| `docker ps` | Container `synbot-tool` exists and is running | No such container (or not used for exec) |
-| `cat /proc/self/cgroup` (when run via exec) | Contains `docker/` or `gvisor/` | Host cgroup paths |
+| Working dir in log (host-native) | Real workspace path | N/A when not sandboxed |
+| `docker ps` (Docker backend only) | Container `synbot-tool` exists and is running | No such container (or not used for exec) |
+| `cat /proc/self/cgroup` via exec (Linux Docker) | Contains `docker/` or `gvisor/` | Host cgroup paths |
 
 ## Custom Tools
 

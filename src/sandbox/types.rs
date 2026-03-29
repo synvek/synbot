@@ -5,6 +5,16 @@ use chrono::{DateTime, Utc};
 use std::time::Duration;
 use std::collections::HashMap;
 
+/// How the exec tool should invoke the shell when `toolSandbox` is enabled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ToolSandboxExecKind {
+    /// Docker-style container: `sh -c`, working directory `/workspace`.
+    #[default]
+    Docker,
+    /// Host-native sandbox (AppContainer, nono, seatbelt): platform shell, real workspace path as cwd.
+    HostNative,
+}
+
 /// Sandbox configuration
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SandboxConfig {
@@ -21,7 +31,7 @@ pub struct SandboxConfig {
     /// When true (tool sandbox only), remove existing container and create fresh on start. When false, reuse existing container if found.
     #[serde(default)]
     pub delete_on_start: bool,
-    /// Requested tool sandbox backend: "gvisor-docker", "plain-docker", or on Windows "wsl2-gvisor". Set at build from config; no fallback when this is set.
+    /// Requested tool sandbox backend: "gvisor-docker", "plain-docker", "wsl2-gvisor" (Windows), "appcontainer" (Windows), "nono" (Linux/macOS), "seatbelt" (macOS only). Set at build from config; no fallback when this is set.
     #[serde(skip, default)]
     pub requested_tool_sandbox_type: Option<String>,
     /// Docker image for tool sandbox (e.g. "ubuntu:22.04"). When None, Docker backends use default "ubuntu:22.04". Set at build from config.

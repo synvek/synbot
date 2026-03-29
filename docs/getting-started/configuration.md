@@ -845,7 +845,7 @@ Scheduled tasks defined in config (cron expression, command, channel, user):
 
 ## Sandbox Configuration
 
-Optional isolation for the main process (app sandbox) and for tool execution (tool sandbox). See [Sandbox](/getting-started/sandbox) for details.
+Optional isolation for the main process (app sandbox) and for tool execution (tool sandbox). `toolSandbox.sandboxType` can be Docker-based (`gvisor-docker`, `plain-docker`, `wsl2-gvisor` on Windows) or host-native (`appcontainer` on Windows; `nono` on Linux/macOS; `seatbelt` on macOS only). See [Sandbox](/getting-started/sandbox) for details.
 
 ```json
 {

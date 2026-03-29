@@ -26,6 +26,9 @@ pub mod nono;
 #[cfg(target_os = "windows")]
 pub mod windows_appcontainer;
 
+#[cfg(target_os = "macos")]
+pub mod macos_sandbox_exec;
+
 #[cfg(target_os = "windows")]
 pub mod wsl2;
 

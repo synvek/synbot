@@ -22,12 +22,14 @@ use chrono::Utc;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::ptr::null_mut;
 use std::time::Duration;
 use windows::core::{HRESULT, PCWSTR};
-use windows::Win32::Foundation::{CloseHandle, HLOCAL, LocalFree};
+use windows::Win32::Foundation::{
+    CloseHandle, HANDLE, HLOCAL, LocalFree, WAIT_OBJECT_0, WAIT_TIMEOUT,
+};
 use windows::Win32::System::Memory::{LocalAlloc, LMEM_ZEROINIT};
 use windows::Win32::Security::Authorization::{
     BuildTrusteeWithSidW, ConvertSidToStringSidW, ConvertStringSidToSidW, GetNamedSecurityInfoW,
@@ -36,8 +38,8 @@ use windows::Win32::Security::Authorization::{
 };
 use windows::Win32::Security::Isolation::{CreateAppContainerProfile, DeleteAppContainerProfile};
 use windows::Win32::Security::{
-    CopySid, FreeSid, GetLengthSid, PSID, SID_AND_ATTRIBUTES, SECURITY_CAPABILITIES,
-    SUB_CONTAINERS_AND_OBJECTS_INHERIT,
+    CopySid, FreeSid, GetLengthSid, PSID, SID_AND_ATTRIBUTES, SECURITY_ATTRIBUTES,
+    SECURITY_CAPABILITIES, SUB_CONTAINERS_AND_OBJECTS_INHERIT,
 };
 use windows::Win32::Security::DACL_SECURITY_INFORMATION;
 use windows::Win32::Storage::FileSystem::{FILE_GENERIC_READ, FILE_GENERIC_WRITE};
@@ -45,11 +47,12 @@ use windows::Win32::Security::ACL;
 use windows::Win32::Security::PSECURITY_DESCRIPTOR;
 use windows::Win32::Foundation::{ERROR_SUCCESS, SetHandleInformation, HANDLE_FLAG_INHERIT};
 use windows::Win32::System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE};
+use windows::Win32::System::Pipes::CreatePipe;
 use windows::Win32::System::Threading::{
     CreateProcessW, DeleteProcThreadAttributeList, GetExitCodeProcess,
     InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST, PROCESS_INFORMATION,
-    STARTUPINFOEXW, STARTUPINFOW, UpdateProcThreadAttribute, WaitForSingleObject,
-    EXTENDED_STARTUPINFO_PRESENT, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
+    STARTUPINFOEXW, STARTUPINFOW, TerminateProcess, UpdateProcThreadAttribute,
+    WaitForSingleObject, EXTENDED_STARTUPINFO_PRESENT, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
     STARTF_USESTDHANDLES,
 };
 
@@ -1130,6 +1133,303 @@ impl WindowsAppContainerSandbox {
             Ok(exit_code as i32)
         }
     }
+
+    /// Spawn a child in the AppContainer with piped stdout/stderr and a wait timeout.
+    pub fn spawn_child_in_container_piped(
+        &self,
+        exe: &Path,
+        args: &[String],
+        working_dir_override: Option<&Path>,
+        timeout: Duration,
+    ) -> Result<(i32, Vec<u8>, Vec<u8>)> {
+        use std::thread;
+
+        let container_sid = self
+            .container_sid
+            .ok_or_else(|| SandboxError::CreationFailed("AppContainer not started".to_string()))?;
+
+        let cmd_line: String = std::iter::once(exe.as_os_str().to_string_lossy().into_owned())
+            .chain(args.iter().cloned())
+            .map(|s| {
+                if s.contains(' ') || s.is_empty() {
+                    format!("\"{}\"", s.replace('\"', "\\\""))
+                } else {
+                    s
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let cmd_wide = to_wide_null(&cmd_line);
+        let exe_wide = to_wide_null(&exe.to_string_lossy());
+
+        let is_system_path = |path: &Path| {
+            let s = path.to_string_lossy().replace('\\', "/").to_lowercase();
+            s == "c:/windows"
+                || s.starts_with("c:/windows/")
+                || s == "c:/program files"
+                || s.starts_with("c:/program files/")
+                || s == "c:/program files (x86)"
+                || s.starts_with("c:/program files (x86)/")
+        };
+
+        if let Some(parent) = exe.parent() {
+            if let Err(e) = grant_appcontainer_path_access(parent, container_sid, false) {
+                log::warn!(
+                    "Grant access to exe dir {}: {} (child may fail to start)",
+                    parent.display(),
+                    e
+                );
+            }
+        }
+        for p in &self.config.filesystem.writable_paths {
+            let path = Path::new(p);
+            if let Err(e) = grant_appcontainer_path_access(path, container_sid, false) {
+                log::warn!("Grant write access to {}: {}", path.display(), e);
+            }
+        }
+        for p in &self.config.filesystem.readonly_paths {
+            let path = Path::new(p);
+            if is_system_path(path) {
+                continue;
+            }
+            if let Err(e) = grant_appcontainer_path_access(path, container_sid, true) {
+                log::warn!("Grant read access to {}: {}", path.display(), e);
+            }
+        }
+
+        let work_dir: Option<PathBuf> = working_dir_override
+            .map(|p| p.to_path_buf())
+            .or_else(|| {
+                self.config
+                    .child_work_dir
+                    .as_ref()
+                    .map(|s| Path::new(s).to_path_buf())
+            })
+            .or_else(|| {
+                self.config
+                    .filesystem
+                    .writable_paths
+                    .first()
+                    .map(|s| Path::new(s).to_path_buf())
+            })
+            .or_else(|| exe.parent().map(|p| p.to_path_buf()));
+        let work_dir_wide = work_dir.as_ref().map(|p| to_wide_null(&p.to_string_lossy()));
+
+        let sa = SECURITY_ATTRIBUTES {
+            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: null_mut(),
+            bInheritHandle: true.into(),
+        };
+
+        let mut stdout_r = HANDLE::default();
+        let mut stdout_w = HANDLE::default();
+        let mut stderr_r = HANDLE::default();
+        let mut stderr_w = HANDLE::default();
+
+        unsafe {
+            CreatePipe(
+                &mut stdout_r,
+                &mut stdout_w,
+                Some(std::ptr::addr_of!(sa)),
+                0,
+            )
+            .map_err(|e| SandboxError::ExecutionFailed(format!("CreatePipe stdout: {}", e)))?;
+            if let Err(e) = CreatePipe(
+                &mut stderr_r,
+                &mut stderr_w,
+                Some(std::ptr::addr_of!(sa)),
+                0,
+            )
+            {
+                let _ = CloseHandle(stdout_r);
+                let _ = CloseHandle(stdout_w);
+                return Err(SandboxError::ExecutionFailed(format!(
+                    "CreatePipe stderr: {}",
+                    e
+                )));
+            }
+
+            let _ = SetHandleInformation(stdout_r, HANDLE_FLAG_INHERIT, 0);
+            let _ = SetHandleInformation(stderr_r, HANDLE_FLAG_INHERIT, 0);
+
+            let h_stdin = GetStdHandle(STD_INPUT_HANDLE).unwrap_or_default();
+            let _ = SetHandleInformation(h_stdin, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+
+            let current_dir = work_dir_wide
+                .as_ref()
+                .map(|w| PCWSTR::from_raw(w.as_ptr()))
+                .unwrap_or(PCWSTR::from_raw(std::ptr::null()));
+
+            let mut capability_sids: Vec<*mut std::ffi::c_void> = Vec::new();
+            let mut sid_attrs: Vec<SID_AND_ATTRIBUTES> = Vec::new();
+            for cap in &self.capabilities {
+                let wide_sid = to_wide_null(&cap.sid);
+                let mut psid = PSID(null_mut());
+                if ConvertStringSidToSidW(PCWSTR::from_raw(wide_sid.as_ptr()), &mut psid).is_ok()
+                    && !psid.0.is_null()
+                {
+                    capability_sids.push(psid.0);
+                    sid_attrs.push(SID_AND_ATTRIBUTES {
+                        Sid: psid,
+                        Attributes: SE_GROUP_ENABLED,
+                    });
+                }
+            }
+
+            let capabilities = SECURITY_CAPABILITIES {
+                AppContainerSid: PSID(container_sid),
+                Capabilities: sid_attrs.as_mut_ptr(),
+                CapabilityCount: sid_attrs.len() as u32,
+                Reserved: 0,
+            };
+
+            let mut size = 0usize;
+            let _ = InitializeProcThreadAttributeList(
+                LPPROC_THREAD_ATTRIBUTE_LIST(null_mut()),
+                1,
+                0,
+                &mut size,
+            );
+            let mut buf = vec![0u8; size];
+            let attr_list = buf.as_mut_ptr() as *mut std::ffi::c_void;
+            let attr_list_handle = LPPROC_THREAD_ATTRIBUTE_LIST(attr_list);
+            if let Err(e) = InitializeProcThreadAttributeList(attr_list_handle, 1, 0, &mut size) {
+                let _ = CloseHandle(stdout_r);
+                let _ = CloseHandle(stdout_w);
+                let _ = CloseHandle(stderr_r);
+                let _ = CloseHandle(stderr_w);
+                return Err(SandboxError::ExecutionFailed(format!(
+                    "InitializeProcThreadAttributeList: {}",
+                    e
+                )));
+            }
+
+            if let Err(e) = UpdateProcThreadAttribute(
+                attr_list_handle,
+                0,
+                PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES as usize,
+                Some(&capabilities as *const _ as *const std::ffi::c_void),
+                std::mem::size_of::<SECURITY_CAPABILITIES>(),
+                None,
+                None,
+            ) {
+                DeleteProcThreadAttributeList(attr_list_handle);
+                let _ = CloseHandle(stdout_r);
+                let _ = CloseHandle(stdout_w);
+                let _ = CloseHandle(stderr_r);
+                let _ = CloseHandle(stderr_w);
+                return Err(SandboxError::ExecutionFailed(format!(
+                    "UpdateProcThreadAttribute: {}",
+                    e
+                )));
+            }
+
+            let startup = STARTUPINFOEXW {
+                StartupInfo: STARTUPINFOW {
+                    cb: std::mem::size_of::<STARTUPINFOEXW>() as u32,
+                    dwFlags: STARTF_USESTDHANDLES,
+                    hStdInput: h_stdin,
+                    hStdOutput: stdout_w,
+                    hStdError: stderr_w,
+                    ..Default::default()
+                },
+                lpAttributeList: attr_list_handle,
+            };
+
+            let mut pi = PROCESS_INFORMATION::default();
+            let cp = CreateProcessW(
+                PCWSTR::from_raw(exe_wide.as_ptr()),
+                windows::core::PWSTR(cmd_wide.as_ptr() as *mut u16),
+                None,
+                None,
+                true,
+                EXTENDED_STARTUPINFO_PRESENT,
+                None,
+                current_dir,
+                &startup as *const STARTUPINFOEXW as *const STARTUPINFOW,
+                &mut pi,
+            );
+
+            if let Err(e) = cp {
+                for sid in &mut capability_sids {
+                    if !(*sid).is_null() {
+                        let _ = LocalFree(HLOCAL(*sid));
+                    }
+                }
+                DeleteProcThreadAttributeList(attr_list_handle);
+                let _ = CloseHandle(stdout_r);
+                let _ = CloseHandle(stdout_w);
+                let _ = CloseHandle(stderr_r);
+                let _ = CloseHandle(stderr_w);
+                return Err(SandboxError::ExecutionFailed(format!("CreateProcessW: {}", e)));
+            }
+
+            for sid in &mut capability_sids {
+                if !(*sid).is_null() {
+                    let _ = LocalFree(HLOCAL(*sid));
+                }
+            }
+
+            let _ = CloseHandle(stdout_w);
+            let _ = CloseHandle(stderr_w);
+            let _ = CloseHandle(pi.hThread);
+
+            let out_h = stdout_r;
+            let err_h = stderr_r;
+            let stdout_j = thread::spawn(move || {
+                let mut v = Vec::new();
+                unsafe {
+                    let mut f = std::fs::File::from_raw_handle(out_h.0);
+                    let _ = f.read_to_end(&mut v);
+                }
+                v
+            });
+            let stderr_j = thread::spawn(move || {
+                let mut v = Vec::new();
+                unsafe {
+                    let mut f = std::fs::File::from_raw_handle(err_h.0);
+                    let _ = f.read_to_end(&mut v);
+                }
+                v
+            });
+
+            let timeout_ms = u32::try_from(timeout.as_millis()).unwrap_or(u32::MAX).max(1);
+            let wait = WaitForSingleObject(pi.hProcess, timeout_ms);
+
+            let (exit_u32, timed_out) = if wait == WAIT_TIMEOUT {
+                let _ = TerminateProcess(pi.hProcess, 1);
+                let _ = WaitForSingleObject(pi.hProcess, 10_000);
+                (1u32, true)
+            } else if wait == WAIT_OBJECT_0 {
+                let mut code = 0u32;
+                let _ = GetExitCodeProcess(pi.hProcess, &mut code);
+                (code, false)
+            } else {
+                let _ = TerminateProcess(pi.hProcess, 1);
+                let _ = WaitForSingleObject(pi.hProcess, 10_000);
+                let _ = CloseHandle(pi.hProcess);
+                DeleteProcThreadAttributeList(attr_list_handle);
+                let _ = stdout_j.join();
+                let _ = stderr_j.join();
+                return Err(SandboxError::ExecutionFailed(format!(
+                    "WaitForSingleObject returned unexpected {:?}",
+                    wait
+                )));
+            };
+
+            let _ = CloseHandle(pi.hProcess);
+            DeleteProcThreadAttributeList(attr_list_handle);
+
+            let stdout = stdout_j.join().unwrap_or_default();
+            let stderr = stderr_j.join().unwrap_or_default();
+
+            if timed_out {
+                return Err(SandboxError::Timeout);
+            }
+
+            Ok((exit_u32 as i32, stdout, stderr))
+        }
+    }
 }
 
 impl WindowsAppContainerSandbox {
@@ -1353,41 +1653,25 @@ impl Sandbox for WindowsAppContainerSandbox {
         command: &str,
         args: &[String],
         timeout: Duration,
-        _working_dir: Option<&str>,
+        working_dir: Option<&str>,
     ) -> Result<ExecutionResult> {
-        use std::process::Command;
         use std::time::Instant;
-        
-        // For now, we'll use a basic implementation that runs the command
-        // In a production system, we would:
-        // 1. Get the AppContainer SID
-        // 2. Create a process token with AppContainer restrictions
-        // 3. Use CreateProcessAsUser with the restricted token
-        // 4. Apply resource limits via Job Objects
-        
-        // Build command with arguments
-        let mut cmd = Command::new(command);
-        cmd.args(args);
-        
-        // Set timeout using a simple approach
-        let start = Instant::now();
-        
-        // Execute command
-        let output = cmd.output().map_err(|e| {
-            SandboxError::ExecutionFailed(format!("Failed to execute command: {}", e))
-        })?;
-        
-        let duration = start.elapsed();
-        
-        // Check timeout
-        if duration > timeout {
-            return Err(SandboxError::Timeout);
+
+        if self.container_sid.is_none() || self.status.state != SandboxState::Running {
+            return Err(SandboxError::NotStarted);
         }
-        
+
+        let start = Instant::now();
+        let exe = Path::new(command);
+        let wd = working_dir.filter(|s| !s.is_empty()).map(Path::new);
+        let (code, stdout, stderr) =
+            self.spawn_child_in_container_piped(exe, args, wd, timeout)?;
+        let duration = start.elapsed();
+
         Ok(ExecutionResult {
-            exit_code: output.status.code().unwrap_or(-1),
-            stdout: output.stdout,
-            stderr: output.stderr,
+            exit_code: code,
+            stdout,
+            stderr,
             duration,
             error: None,
         })
@@ -1424,10 +1708,16 @@ impl Sandbox for WindowsAppContainerSandbox {
     }
     
     fn get_info(&self) -> SandboxInfo {
+        let sandbox_type =
+            if matches!(self.config.requested_tool_sandbox_type.as_deref(), Some("appcontainer")) {
+                "appcontainer-tool".to_string()
+            } else {
+                "appcontainer".to_string()
+            };
         SandboxInfo {
             sandbox_id: self.config.sandbox_id.clone(),
             platform: "windows".to_string(),
-            sandbox_type: "appcontainer".to_string(),
+            sandbox_type,
         }
     }
 }

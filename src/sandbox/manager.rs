@@ -139,9 +139,10 @@ impl SandboxManager {
     
     /// Create a tool sandbox instance
     /// 
-    /// Creates a sandbox for running tools based on the platform:
-    /// - Windows: WSL2 + gVisor Docker
-    /// - Linux/macOS: gVisor Docker
+    /// Creates a sandbox for running tools based on the platform and `requested_tool_sandbox_type`:
+    /// - Windows: `gvisor-docker`, `plain-docker`, `wsl2-gvisor`, or host `appcontainer`
+    /// - Linux/macOS: `gvisor-docker`, `plain-docker`, or host `nono`
+    /// - macOS only: `seatbelt` (`sandbox-exec`)
     /// 
     /// Uses automatic platform detection if config.platform is "auto".
     /// 
