@@ -118,7 +118,7 @@ Choose `sandboxType` to match your platform and what you have installed.
   - `"gvisor-docker"` (default): Docker with gVisor runsc for stronger isolation.
   - `"plain-docker"`: Standard Docker (less isolation, no gVisor required).
   - `"wsl2-gvisor"`: Windows only; gVisor inside WSL2.
-  - `"appcontainer"` (**Windows only**): tool `exec` runs under **AppContainer** (same family as app sandbox). Run **`synbot sandbox setup` once as Administrator** so firewall/WFP rules exist if you need outbound network; then `synbot start` as a normal user.
+  - `"appcontainer"` (**Windows only**): tool `exec` runs under **AppContainer** (same family as app sandbox). Run **`synbot sandbox setup` once as Administrator** so firewall/WFP rules exist if you need outbound network; then `synbot start` as a normal user. When you use **`synbot sandbox start`** with both **app** and **tool** sandboxes set to AppContainer, Synbot starts a **separate host process** that holds the tool AppContainer and receives `exec` over a **named pipe** from the daemon inside the app sandbox (so the tool profile is not created inside the app-sandbox token). You still need the one-time **`synbot sandbox setup`** for WFP and directory ACLs.
   - `"nono"` (**Linux and macOS**): requires the **`nono` executable on `PATH`**; wraps commands with the nono CLI (Landlock on Linux, Seatbelt via nono on macOS).
   - `"seatbelt"` (**macOS only**): uses **`/usr/bin/sandbox-exec`** with a generated **`.sb` profile**. Network policy is coarse (**allow all outbound** vs **deny network**); `allowedHosts` / `allowedPorts` are not expressed in the profile.
 - **image**: Docker image for the tool container (used only for Docker backends; optional; Synbot may use a default).

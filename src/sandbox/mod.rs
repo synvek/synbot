@@ -24,6 +24,10 @@ pub mod performance;
 pub mod nono;
 
 #[cfg(target_os = "windows")]
+pub mod tool_sandbox_ipc;
+pub mod tool_sandbox_delegate;
+
+#[cfg(target_os = "windows")]
 pub mod windows_appcontainer;
 
 #[cfg(target_os = "macos")]
@@ -35,6 +39,7 @@ pub mod wsl2;
 // Re-export commonly used types
 pub use error::{SandboxError, ConfigError, Result, ErrorReport, ErrorSeverity};
 pub use types::*;
+pub use tool_sandbox_delegate::{SandboxContext, ToolSandboxDelegate};
 pub use config::*;
 pub use monitoring::*;
 pub use sandbox_trait::Sandbox;

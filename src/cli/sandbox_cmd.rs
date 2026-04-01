@@ -93,7 +93,7 @@ pub async fn cmd_sandbox(child_args: Vec<String>) -> Result<()> {
 
     #[cfg(target_os = "windows")]
     {
-        run_sandbox_windows(&sandbox_config, &child_args).await
+        run_sandbox_windows(&cfg, &sandbox_config, &child_args).await
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -118,17 +118,16 @@ async fn run_sandbox_setup(
     #[cfg(target_os = "windows")]
     {
         progress("Installing firewall and WFP rules for app AppContainer (requires Administrator)...");
-        // Only grant parent/ancestor traverse ACLs when the **tool sandbox** also uses AppContainer.
-        // If tool sandbox is not AppContainer (or not enabled), keep ACL edits scoped to the target folders.
-        let tool_is_appcontainer = cfg
-            .tool_sandbox
-            .as_ref()
-            .and_then(|t| t.sandbox_type.as_deref())
-            .map(|s| s.eq_ignore_ascii_case("appcontainer"))
-            .unwrap_or(false);
+        // `grant_parent_traverse_acl`: walk each configured path's parent chain (C:\Users\…, etc.)
+        // and add traverse ACEs — very slow on large ACLs. Historically this was enabled for the
+        // **app** profile when `toolSandbox` was also AppContainer because both profiles' processes
+        // could run in one process tree. Tool AppContainer now runs in a **separate host helper**
+        // (`synbot tool-sandbox serve`); setup grants DACLs on **configured paths only** (no
+        // ancestor walk). If exec still hits access denied, run setup as Administrator once after
+        // tightening paths, or add traverse ACEs manually for that AppContainer SID.
         crate::sandbox::windows_appcontainer::install_windows_sandbox_network_rules(
             app_sandbox_config.clone(),
-            tool_is_appcontainer,
+            false,
         )
             .context("Install Windows app sandbox network rules")?;
 
@@ -145,13 +144,11 @@ async fn run_sandbox_setup(
                 ) {
                     Ok(tool_sandbox_config) => {
                         progress("Installing firewall and WFP rules for tool AppContainer (tool sandbox)...");
-                        // Tool sandbox is AppContainer: it needs parent/ancestor traverse ACLs so the
-                        // AppContainer SID can reach configured paths.
                         crate::sandbox::windows_appcontainer::install_windows_sandbox_network_rules(
                             tool_sandbox_config,
-                            true,
+                            false,
                         )
-                        .context("Install Windows tool sandbox network rules")?;
+                            .context("Install Windows tool sandbox network rules")?;
                     }
                     Err(e) => {
                         progress(&format!(
@@ -177,11 +174,64 @@ async fn run_sandbox_setup(
 
 #[cfg(target_os = "windows")]
 async fn run_sandbox_windows(
+    cfg: &crate::config::Config,
     sandbox_config: &crate::sandbox::SandboxConfig,
     child_args: &[String],
 ) -> Result<()> {
     use crate::sandbox::sandbox_trait::Sandbox;
     use crate::sandbox::WindowsAppContainerSandbox;
+    use std::io::{BufRead, BufReader};
+    use std::process::{Command, Stdio};
+    use uuid::Uuid;
+
+    let mut helper_child: Option<std::process::Child> = None;
+
+    let tool_ac = cfg
+        .tool_sandbox
+        .as_ref()
+        .and_then(|t| t.sandbox_type.as_deref())
+        .map(|s| s.eq_ignore_ascii_case("appcontainer"))
+        .unwrap_or(false);
+
+    if tool_ac {
+        let pipe = format!(r"\\.\pipe\synbot-tool-{}", Uuid::new_v4());
+        let auth = Uuid::new_v4().to_string();
+        std::env::set_var(crate::sandbox::tool_sandbox_ipc::ENV_TOOL_SANDBOX_PIPE, &pipe);
+        std::env::set_var(crate::sandbox::tool_sandbox_ipc::ENV_TOOL_SANDBOX_AUTH, &auth);
+
+        let exe = std::env::current_exe().context("Current executable path")?;
+        let mut cmd = Command::new(&exe);
+        if let Some(root) = crate::config::get_root_dir_override() {
+            cmd.arg("--root-dir").arg(root);
+        }
+        cmd.arg("tool-sandbox").arg("serve");
+        cmd.arg("--pipe").arg(&pipe);
+        cmd.arg("--auth").arg(&auth);
+        cmd.env(
+            crate::sandbox::tool_sandbox_ipc::ENV_TOOL_SANDBOX_HELPER,
+            "1",
+        );
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::inherit());
+
+        progress("Starting tool sandbox helper on host (named pipe)...");
+        let mut child = cmd.spawn().context("spawn synbot tool-sandbox serve")?;
+        let stdout = child.stdout.take().context("tool-sandbox serve stdout")?;
+        let mut reader = BufReader::new(stdout);
+        let mut line = String::new();
+        reader
+            .read_line(&mut line)
+            .context("read READY from tool-sandbox helper")?;
+        if line.trim() != "READY" {
+            let _ = child.kill();
+            anyhow::bail!(
+                "tool sandbox helper did not become ready (got {:?})",
+                line.trim()
+            );
+        }
+        helper_child = Some(child);
+        progress("Tool sandbox helper ready.");
+    }
 
     progress("Starting AppContainer...");
     let mut sandbox = WindowsAppContainerSandbox::new(sandbox_config.clone())?;
@@ -193,7 +243,14 @@ async fn run_sandbox_windows(
     let args = child_argv(child_args);
     info!(exe = %exe.display(), args = ?args, "Spawning child in sandbox");
 
+    // When running `synbot sandbox start`, we typically already have a host instance providing the web UI.
+    // Avoid port conflicts in the AppContainer child process.
+    std::env::set_var("SYNBOT_DISABLE_WEB", "1");
+
     let code = sandbox.spawn_child_in_container(&exe, &args)?;
+    if let Some(mut h) = helper_child {
+        let _ = h.kill();
+    }
     progress(&format!("Child exited with code {}", code));
     std::process::exit(code);
 }

@@ -5,6 +5,8 @@ mod agent;
 mod start;
 mod cron;
 mod sandbox_cmd;
+#[cfg(target_os = "windows")]
+mod tool_sandbox_cmd;
 mod service;
 mod pairing;
 mod helpers;
@@ -19,6 +21,9 @@ pub use agent::cmd_agent;
 pub use start::cmd_start;
 pub use cron::{cmd_cron, CronAction};
 pub use sandbox_cmd::cmd_sandbox;
+
+#[cfg(target_os = "windows")]
+use tool_sandbox_cmd::cmd_tool_sandbox_serve;
 pub use service::{cmd_service, ServiceAction};
 pub use doctor::cmd_doctor;
 pub use pairing::{cmd_pairing, PairingAction};
@@ -90,6 +95,27 @@ enum Commands {
         #[command(subcommand)]
         action: PairingAction,
     },
+
+    /// Internal: host-side tool sandbox IPC (used by `synbot sandbox` on Windows).
+    #[cfg(target_os = "windows")]
+    #[command(hide = true)]
+    ToolSandbox {
+        #[command(subcommand)]
+        action: ToolSandboxAction,
+    },
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Subcommand)]
+enum ToolSandboxAction {
+    /// Run tool AppContainer and listen for exec requests on a named pipe.
+    #[command(hide = true)]
+    Serve {
+        #[arg(long)]
+        pipe: String,
+        #[arg(long)]
+        auth: String,
+    },
 }
 
 pub async fn run() -> Result<()> {
@@ -115,6 +141,10 @@ pub async fn run() -> Result<()> {
         Commands::Service { action } => cmd_service(action).await,
         Commands::Doctor => cmd_doctor().await,
         Commands::Pairing { action } => cmd_pairing(action).await,
+        #[cfg(target_os = "windows")]
+        Commands::ToolSandbox { action } => match action {
+            ToolSandboxAction::Serve { pipe, auth } => cmd_tool_sandbox_serve(pipe, auth).await,
+        },
     }
 }
 

@@ -118,7 +118,7 @@ synbot sandbox start
   - `"gvisor-docker"`（默认）：Docker + gVisor runsc，隔离更强。
   - `"plain-docker"`：普通 Docker，无需 gVisor。
   - `"wsl2-gvisor"`：仅 Windows；在 WSL2 内使用 gVisor。
-  - `"appcontainer"`（**仅 Windows**）：工具 `exec` 在 **AppContainer** 下运行（与应用沙箱同类）。若需出站网络，请先**以管理员身份执行一次** **`synbot sandbox setup`** 配置防火墙/WFP，之后可用普通用户 `synbot start`。
+  - `"appcontainer"`（**仅 Windows**）：工具 `exec` 在 **AppContainer** 下运行（与应用沙箱同类）。若需出站网络，请先**以管理员身份执行一次** **`synbot sandbox setup`** 配置防火墙/WFP，之后可用普通用户 `synbot start`。当同时使用 **`synbot sandbox start`**、且应用沙箱与工具沙箱均为 AppContainer 时，Synbot 会在**宿主机**另起一个进程持有工具 AppContainer，应用沙箱内的守护进程通过**命名管道**把 `exec` 请求交给该进程执行（避免在同一受限令牌内叠两套 AppContainer）。**`synbot sandbox setup`** 仍须管理员执行一次以配置 WFP 与目录 ACL。
   - `"nono"`（**Linux 与 macOS**）：要求 **`nono` 在 `PATH` 中**；通过 nono CLI 包装命令（Linux 为 Landlock；macOS 上由 nono 使用 Seatbelt）。
   - `"seatbelt"`（**仅 macOS**）：使用 **`/usr/bin/sandbox-exec`** 及运行时生成的 **`.sb` 策略**。网络策略较粗（**全开出站** vs **拒绝网络**）；配置里的 `allowedHosts` / `allowedPorts` **不会**体现在该 profile 中。
 - **image**：工具容器镜像（**仅 Docker 系**使用；可选；Synbot 可能有默认镜像）。

@@ -39,17 +39,20 @@ use windows::Win32::Security::Authorization::{
 };
 use windows::Win32::Security::Isolation::{CreateAppContainerProfile, DeleteAppContainerProfile};
 use windows::Win32::Security::{
-    CopySid, FreeSid, GetLengthSid, PSID, SID_AND_ATTRIBUTES, SECURITY_ATTRIBUTES,
-    SECURITY_CAPABILITIES, SUB_CONTAINERS_AND_OBJECTS_INHERIT,
+    AclSizeInformation, CopySid, EqualSid, FreeSid, GetAce, GetAclInformation, GetLengthSid,
+    ACCESS_ALLOWED_ACE, ACCESS_DENIED_ACE, ACE_HEADER, ACL, ACL_SIZE_INFORMATION, PSID,
+    PSECURITY_DESCRIPTOR, SID_AND_ATTRIBUTES, SECURITY_ATTRIBUTES, SECURITY_CAPABILITIES,
+    SUB_CONTAINERS_AND_OBJECTS_INHERIT,
 };
+// ACCESS_ALLOWED_ACE_TYPE = 0, ACCESS_DENIED_ACE_TYPE = 1 (avoid extra `windows` crate feature)
+const ACCESS_ALLOWED_ACE_TYPE_U8: u8 = 0;
+const ACCESS_DENIED_ACE_TYPE_U8: u8 = 1;
 use windows::Win32::Security::DACL_SECURITY_INFORMATION;
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, QueryDosDeviceW, FILE_FLAG_BACKUP_SEMANTICS, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ,
     FILE_GENERIC_WRITE, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
 use windows::Win32::Storage::FileSystem::GetVolumeInformationW;
-use windows::Win32::Security::ACL;
-use windows::Win32::Security::PSECURITY_DESCRIPTOR;
 use windows::Win32::Foundation::{ERROR_SUCCESS, SetHandleInformation, HANDLE_FLAG_INHERIT, HANDLE_FLAGS};
 use windows::Win32::System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE};
 use windows::Win32::System::Pipes::CreatePipe;
@@ -1155,6 +1158,132 @@ fn should_apply_runtime_appcontainer_acl_grants() -> bool {
     !skip_runtime_appcontainer_acl_grants() && is_process_elevated()
 }
 
+/// Read-only NTFS check for diagnostics: does the object's DACL enumerate an explicit
+/// `ACCESS_ALLOWED` / `ACCESS_DENIED` ACE whose trustee equals the tool AppContainer SID?
+/// This does **not** compute effective access; it confirms whether `synbot sandbox setup`
+/// (or another tool) applied an ACE for **this** profile SID on each path component.
+unsafe fn dacl_explicit_ace_flags_for_sid(
+    path: &Path,
+    container_sid: PSID,
+) -> std::result::Result<(bool, bool), u32> {
+    let path_wide = to_wide_null(&path.to_string_lossy());
+    let mut dacl: *mut ACL = null_mut();
+    let mut sd = PSECURITY_DESCRIPTOR::default();
+    let err = GetNamedSecurityInfoW(
+        PCWSTR::from_raw(path_wide.as_ptr()),
+        SE_FILE_OBJECT,
+        DACL_SECURITY_INFORMATION,
+        None,
+        None,
+        Some(&mut dacl),
+        None,
+        &mut sd,
+    );
+    if err.0 != 0 {
+        return Err(err.0);
+    }
+    let mut si = ACL_SIZE_INFORMATION::default();
+    if let Err(e) = GetAclInformation(
+        dacl as *const ACL,
+        &mut si as *mut ACL_SIZE_INFORMATION as *mut std::ffi::c_void,
+        std::mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
+        AclSizeInformation,
+    ) {
+        if !sd.0.is_null() {
+            let _ = LocalFree(HLOCAL(sd.0));
+        }
+        return Err(e.code().0 as u32);
+    }
+    let mut allow = false;
+    let mut deny = false;
+    for i in 0..si.AceCount {
+        let mut pace: *mut std::ffi::c_void = null_mut();
+        if GetAce(dacl as *const ACL, i, &mut pace).is_err() {
+            continue;
+        }
+        let header = &*(pace as *const ACE_HEADER);
+        if header.AceType == ACCESS_ALLOWED_ACE_TYPE_U8 {
+            let ace = &*(pace as *const ACCESS_ALLOWED_ACE);
+            let sid_ptr = PSID(core::ptr::addr_of!(ace.SidStart) as *mut _);
+            if EqualSid(sid_ptr, container_sid).is_ok() {
+                allow = true;
+            }
+        } else if header.AceType == ACCESS_DENIED_ACE_TYPE_U8 {
+            let ace = &*(pace as *const ACCESS_DENIED_ACE);
+            let sid_ptr = PSID(core::ptr::addr_of!(ace.SidStart) as *mut _);
+            if EqualSid(sid_ptr, container_sid).is_ok() {
+                deny = true;
+            }
+        }
+    }
+    if !sd.0.is_null() {
+        let _ = LocalFree(HLOCAL(sd.0));
+    }
+    Ok((allow, deny))
+}
+
+fn log_tool_sandbox_ntfs_dacl_probe_after_denied(
+    work_dir: &Path,
+    container_sid: *mut std::ffi::c_void,
+    sandbox_id: &str,
+) {
+    let sid_str = unsafe { sid_to_string(container_sid) }.unwrap_or_else(|| "<unknown>".to_string());
+    let profile_name = format!("SynBot.Sandbox.{}", sandbox_id);
+    let psid = PSID(container_sid);
+    let mut parts: Vec<String> = Vec::new();
+    let mut cur = Some(work_dir.to_path_buf());
+    let mut steps = 0u32;
+    while let Some(p) = cur.take() {
+        if steps >= 16 {
+            parts.push("... (truncated at 16 levels)".to_string());
+            break;
+        }
+        if p.as_os_str().is_empty() {
+            break;
+        }
+        let label = p.display().to_string();
+        let r = unsafe { dacl_explicit_ace_flags_for_sid(&p, psid) };
+        match r {
+            Ok((a, d)) => {
+                parts.push(format!("{}:allow={}:deny={}", label, a, d));
+            }
+            Err(code) => {
+                parts.push(format!("{}:dacl_read_error={}", label, code));
+                break;
+            }
+        }
+        cur = p.parent().map(PathBuf::from);
+        if cur.as_ref().map(|x| x.as_os_str().is_empty()).unwrap_or(true) {
+            break;
+        }
+        steps += 1;
+    }
+    let chain = parts.join(" | ");
+    // Use `tracing` (not `log`): this crate initializes tracing only; `log::` events are invisible in normal runs.
+    tracing::warn!(
+        target: "synbot::sandbox::ntfs_verify",
+        tool_appcontainer_sid = %sid_str,
+        tool_sandbox_profile_name = %profile_name,
+        chain = %chain,
+        "tool sandbox: NTFS DACL read-only probe after child access denied"
+    );
+    // Always mirror a short line to helper stderr so it appears even when log filtering hides the target.
+    let summary = format!(
+        "sid={} profile={}",
+        sid_str, profile_name
+    );
+    let chain_tail = if chain.len() > 600 {
+        format!("{} ... (truncated, full chain in WARN synbot::sandbox::ntfs_verify)", &chain[..600])
+    } else {
+        chain
+    };
+    let _ = writeln!(
+        std::io::stderr(),
+        "[synbot tool-sandbox] NTFS verify: {} | {}",
+        summary, chain_tail
+    );
+}
+
 /// Non-inheriting read on each parent directory so the AppContainer SID can **traverse** to the target.
 /// Without this, ACEs only on e.g. `...\yangxb\.synbot\workspace` do not grant traverse on `...\yangxb`.
 /// Deduplicated across all paths in one setup run (cheap: O(depth) per path, no subtree propagation).
@@ -1934,6 +2063,8 @@ impl WindowsAppContainerSandbox {
         let cmd_payload_mentions_powershell =
             stem == "cmd" && (cmd_c_payload.contains("powershell") || cmd_c_payload.contains("pwsh"));
 
+        let parent_in_app_sandbox = std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some();
+
         let (spawn_args, create_process_cwd_wide): (Vec<String>, Option<Vec<u16>>) = match work_dir.as_ref() {
             // PowerShell is known to emit “当前目录无效” when inheriting some AppContainer cwd values.
             // When cmd.exe is being used to launch PowerShell, prefer System32 + in-shell cd.
@@ -1941,12 +2072,15 @@ impl WindowsAppContainerSandbox {
                 wrap_spawn_args_for_user_workdir(exe, args, wd),
                 Some(to_wide_null(&windows_host_create_process_cwd().to_string_lossy())),
             ),
-            // For cmd.exe, prefer System32 + in-shell pushd even if the directory is accessible.
-            // cmd has been observed to fail with Access Denied or Current Directory Invalid when
-            // inheriting an AppContainer cwd on non-system volumes.
-            Some(wd) if stem == "cmd" => (
+            // cmd from **inside** the app-container daemon: historical pushd workaround.
+            Some(wd) if stem == "cmd" && parent_in_app_sandbox => (
                 wrap_spawn_args_for_user_workdir(exe, args, wd),
                 Some(to_wide_null(&windows_host_create_process_cwd().to_string_lossy())),
+            ),
+            // cmd from host (e.g. `tool-sandbox serve`): workspace as `lpCurrentDirectory`.
+            Some(wd) if stem == "cmd" => (
+                args.to_vec(),
+                Some(to_wide_null(&wd.to_string_lossy())),
             ),
             Some(wd) if work_dir_preflight_ok => (args.to_vec(), Some(to_wide_null(&wd.to_string_lossy()))),
             Some(wd) => (
@@ -1960,8 +2094,10 @@ impl WindowsAppContainerSandbox {
             self.config.sandbox_id,
             if work_dir.is_some() && cmd_payload_mentions_powershell {
                 "system32+cd(powershell)"
-            } else if work_dir.is_some() && stem == "cmd" {
+            } else if work_dir.is_some() && stem == "cmd" && parent_in_app_sandbox {
                 "system32+pushd(cmd)"
+            } else if work_dir.is_some() && stem == "cmd" {
+                "direct(cmd, host parent)"
             } else if work_dir.as_ref().is_some_and(|_| work_dir_preflight_ok) {
                 "direct"
             } else if work_dir.is_some() {
@@ -2203,6 +2339,25 @@ impl WindowsAppContainerSandbox {
                 return Err(SandboxError::Timeout);
             }
 
+            if std::env::var_os(crate::sandbox::tool_sandbox_ipc::ENV_TOOL_SANDBOX_HELPER).is_some()
+                && exit_u32 != 0
+            {
+                let err_utf = String::from_utf8_lossy(&stderr);
+                let low = err_utf.to_ascii_lowercase();
+                let looks_denied = err_utf.contains("拒绝访问")
+                    || low.contains("access is denied")
+                    || low.contains("access denied");
+                if looks_denied {
+                    if let Some(wd) = work_dir.as_ref() {
+                        log_tool_sandbox_ntfs_dacl_probe_after_denied(
+                            wd,
+                            container_sid,
+                            &self.config.sandbox_id,
+                        );
+                    }
+                }
+            }
+
             Ok((exit_u32 as i32, stdout, stderr))
         }
     }
@@ -2366,6 +2521,12 @@ impl WindowsAppContainerSandbox {
 /// can start the sandbox without admin. The rules are keyed by AppContainer SID (deterministic
 /// from profile name); the profile is created then deleted so the next `synbot sandbox start`
 /// will recreate the same profile and reuse the rules.
+///
+/// `grant_parent_traverse_acl`: when `true`, also walks **parent directories** of each configured
+/// path and adds traverse ACEs for the AppContainer SID (needed for deep paths under e.g.
+/// `%USERPROFILE%`, but can be very slow). `synbot sandbox setup` passes **`false`** so only
+/// configured paths receive DACL edits; tool AppContainer runs in a host helper process, so
+/// setup no longer couples expensive ancestor grants to the dual-AppContainer case.
 pub fn install_windows_sandbox_network_rules(
     config: SandboxConfig,
     grant_parent_traverse_acl: bool,

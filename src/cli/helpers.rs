@@ -74,14 +74,8 @@ pub type HeartbeatCronContext = Option<(
     Option<std::path::PathBuf>,
 )>;
 
-/// When sandbox is configured: (manager, tool_sandbox_id, exec_kind).
-/// If tool_sandbox_id is Some("synbot-tool"), exec runs inside it; if None, manager is kept alive (e.g. for app sandbox only).
-/// Pass by reference so the caller can keep the manager alive for the process lifetime when only app_sandbox is running.
-pub type SandboxContext = Option<(
-    std::sync::Arc<crate::sandbox::SandboxManager>,
-    Option<String>, // tool_sandbox_id when tool sandbox started, None when only app sandbox or tool failed
-    crate::sandbox::types::ToolSandboxExecKind,
-)>;
+/// When tool sandbox is active: [`crate::sandbox::ToolSandboxDelegate`] (local manager or Windows remote IPC).
+pub use crate::sandbox::SandboxContext;
 
 /// Build default tool registry. Returns the registry and a shared spawn context;
 /// set the context (model, workspace, tools, agent_id) after you have them so the
@@ -98,39 +92,34 @@ pub fn build_default_tools(
     outbound_tx: tokio::sync::broadcast::Sender<crate::bus::OutboundMessage>,
 ) -> (crate::tools::ToolRegistry, std::sync::Arc<tokio::sync::RwLock<Option<crate::tools::spawn::SpawnContext>>>) {
     use crate::tools::*;
+    // Same flag as ExecTool: paths must stay under workspace when true (see filesystem::resolve_path).
+    // File tools run in the main process; tool sandbox only wraps exec — workspace scope still applies here.
     let restrict = cfg.tools.exec.restrict_to_workspace;
     let ws = ws.to_path_buf();
 
-    let tool_sandbox_enabled = sandbox_context
-        .as_ref()
-        .and_then(|(_, id, _)| id.as_ref())
-        .is_some();
-
     let spawn_context = std::sync::Arc::new(tokio::sync::RwLock::new(None));
     let mut reg = ToolRegistry::new();
-    if !tool_sandbox_enabled {
-        reg.register(std::sync::Arc::new(filesystem::ReadFileTool { workspace: ws.clone(), restrict })).expect("register ReadFileTool");
-        reg.register(std::sync::Arc::new(filesystem::WriteFileTool { workspace: ws.clone(), restrict })).expect("register WriteFileTool");
-        reg.register(std::sync::Arc::new(filesystem::EditFileTool { workspace: ws.clone(), restrict })).expect("register EditFileTool");
-        reg.register(std::sync::Arc::new(filesystem::ListDirTool { workspace: ws.clone(), restrict })).expect("register ListDirTool");
-        reg.register(std::sync::Arc::new(filesystem::ReadMultipleFilesTool { workspace: ws.clone(), restrict })).expect("register ReadMultipleFilesTool");
-        reg.register(std::sync::Arc::new(filesystem::CreateDirTool { workspace: ws.clone(), restrict })).expect("register CreateDirTool");
-        reg.register(std::sync::Arc::new(filesystem::MoveFileTool { workspace: ws.clone(), restrict })).expect("register MoveFileTool");
-        reg.register(std::sync::Arc::new(filesystem::SearchFilesTool { workspace: ws.clone(), restrict })).expect("register SearchFilesTool");
-        reg.register(std::sync::Arc::new(filesystem::SearchTextTool { workspace: ws.clone(), restrict })).expect("register SearchTextTool");
-        reg.register(std::sync::Arc::new(filesystem::GetFileInfoTool { workspace: ws.clone(), restrict })).expect("register GetFileInfoTool");
-        reg.register(std::sync::Arc::new(code_analyzer::CodeAnalyzerTool {
-            workspace: ws.clone(),
-            restrict,
-            max_file_size: 1_048_576,  // 1MB
-            max_scan_files: 1000,
-        })).expect("register CodeAnalyzerTool");
-        reg.register(std::sync::Arc::new(diff_viewer::DiffViewerTool {
-            workspace: ws.clone(),
-            restrict,
-            max_diff_lines: 500,
-        })).expect("register DiffViewerTool");
-    }
+    reg.register(std::sync::Arc::new(filesystem::ReadFileTool { workspace: ws.clone(), restrict })).expect("register ReadFileTool");
+    reg.register(std::sync::Arc::new(filesystem::WriteFileTool { workspace: ws.clone(), restrict })).expect("register WriteFileTool");
+    reg.register(std::sync::Arc::new(filesystem::EditFileTool { workspace: ws.clone(), restrict })).expect("register EditFileTool");
+    reg.register(std::sync::Arc::new(filesystem::ListDirTool { workspace: ws.clone(), restrict })).expect("register ListDirTool");
+    reg.register(std::sync::Arc::new(filesystem::ReadMultipleFilesTool { workspace: ws.clone(), restrict })).expect("register ReadMultipleFilesTool");
+    reg.register(std::sync::Arc::new(filesystem::CreateDirTool { workspace: ws.clone(), restrict })).expect("register CreateDirTool");
+    reg.register(std::sync::Arc::new(filesystem::MoveFileTool { workspace: ws.clone(), restrict })).expect("register MoveFileTool");
+    reg.register(std::sync::Arc::new(filesystem::SearchFilesTool { workspace: ws.clone(), restrict })).expect("register SearchFilesTool");
+    reg.register(std::sync::Arc::new(filesystem::SearchTextTool { workspace: ws.clone(), restrict })).expect("register SearchTextTool");
+    reg.register(std::sync::Arc::new(filesystem::GetFileInfoTool { workspace: ws.clone(), restrict })).expect("register GetFileInfoTool");
+    reg.register(std::sync::Arc::new(code_analyzer::CodeAnalyzerTool {
+        workspace: ws.clone(),
+        restrict,
+        max_file_size: 1_048_576,  // 1MB
+        max_scan_files: 1000,
+    })).expect("register CodeAnalyzerTool");
+    reg.register(std::sync::Arc::new(diff_viewer::DiffViewerTool {
+        workspace: ws.clone(),
+        restrict,
+        max_diff_lines: 500,
+    })).expect("register DiffViewerTool");
     reg.register(std::sync::Arc::new(approval_tool::SubmitApprovalResponseTool {
         approval_manager: approval_manager.clone(),
     })).expect("register SubmitApprovalResponseTool");
@@ -148,10 +137,7 @@ pub fn build_default_tools(
         session_id: None,
         channel: None,
         chat_id: None,
-        sandbox_context: sandbox_context.as_ref().and_then(|(m, id, k)| {
-            id.as_ref()
-                .map(|sid| (m.clone(), sid.clone(), *k))
-        }),
+        sandbox_context: sandbox_context.clone(),
     })).expect("register ExecTool");
     reg.register(std::sync::Arc::new(web::WebSearchTool::from_config(&cfg.tools.web)))
         .expect("register WebSearchTool");

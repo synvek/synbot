@@ -96,13 +96,14 @@ impl ContextBuilder {
             if let Some(kind) = self.tool_sandbox_exec_kind {
                 let exec_hint = match kind {
                     ToolSandboxExecKind::Docker => "- The **exec** tool runs inside the **tool sandbox** (Docker). \
-                     File read/write/list tools are not available; use **exec** for shell. \
-                     The workspace is mounted in the container at a fixed path (see Workspace below)."
+                     **read_file** / **write_file** / **list_dir** (and related file tools) run in the **main process** on the host; \
+                     they are scoped to the workspace per config (`tools.exec.restrictToWorkspace`). \
+                     For **exec** in the container, use paths under `/workspace` (see Workspace below)."
                         .to_string(),
                     ToolSandboxExecKind::HostNative => "- The **exec** tool runs inside the **tool sandbox** (host-native isolation: \
                      Windows AppContainer, macOS Seatbelt, etc.). \
-                     File read/write/list tools are not available; use **exec** for shell. \
-                     Use **real host paths** for the workspace — there is no `/workspace` bind mount (see Workspace below)."
+                     File tools run in the **main process** with the same host workspace path (scoped per `tools.exec.restrictToWorkspace`). \
+                     Use **exec** for shell inside the sandbox; use **real host paths** — there is no `/workspace` bind mount (see Workspace below)."
                         .to_string(),
                 };
                 lines.push(exec_hint);

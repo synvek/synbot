@@ -59,11 +59,7 @@ pub struct ToolRegistrationContext {
     pub config: Arc<tokio::sync::RwLock<crate::config::Config>>,
     pub subagent_manager: Arc<tokio::sync::Mutex<crate::agent::subagent::SubagentManager>>,
     pub tool_sandbox_enabled: bool,
-    pub sandbox_context: Option<(
-        Arc<crate::sandbox::SandboxManager>,
-        String,
-        crate::sandbox::types::ToolSandboxExecKind,
-    )>,
+    pub sandbox_context: Option<crate::sandbox::ToolSandboxDelegate>,
 }
 
 /// Build a short string for logging tool args (path, command, etc.) without leaking full content.

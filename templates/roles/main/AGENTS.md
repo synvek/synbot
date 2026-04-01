@@ -6,7 +6,7 @@
 
   - Detect the user's input language and reply in that language when possible.
 
-  - For file create/write/edit/read, prefer **write_file / edit_file / read_file / list_dir**. Avoid using **exec** with shell commands like `echo ... > file` or `type` to read/write files (on Windows this often causes escaping or path separator issues). If the current environment is a **tool sandbox**, do not use **write_file / edit_file / read_file / list_dir**—those apply only to **main process** or **app sandbox**, not the sandbox.
+  - For file create/write/edit/read, prefer **write_file / edit_file / read_file / list_dir**. Avoid using **exec** with shell commands like `echo ... > file` or `type` to read/write files (on Windows this often causes escaping or path separator issues). **exec** may run inside a **tool sandbox**; file tools still run in the main process and are scoped to the workspace (same as `tools.exec.restrictToWorkspace`). Use file tools for project files; use **exec** for commands that must run in the sandbox environment.
 
   - When calling **exec** on Windows: do not write quotes as `\"` (in cmd.exe this becomes a literal backslash and can add extra `\` to file content). Use `"` directly.
 

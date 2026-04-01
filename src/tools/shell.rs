@@ -29,6 +29,27 @@ fn normalize_command_input(cmd: &str) -> String {
     s
 }
 
+/// Under Windows tool AppContainer, the `dir` builtin can return "拒绝访问" even when the same
+/// working directory works for `for` / wildcard expansion. Rewrite simple non-recursive listings
+/// to a `for` loop (same pattern users can run successfully).
+#[cfg(windows)]
+fn rewrite_windows_tool_sandbox_host_cmd(cmd_str: &str) -> String {
+    let parts: Vec<&str> = cmd_str.trim().split_whitespace().collect();
+    let Some(first) = parts.first() else {
+        return cmd_str.to_string();
+    };
+    if !first.eq_ignore_ascii_case("dir") {
+        return cmd_str.to_string();
+    }
+    if parts.len() == 1 {
+        return "for %f in (*) do @echo %f".to_string();
+    }
+    if parts.len() == 2 && parts[1].eq_ignore_ascii_case("/b") {
+        return "for %f in (*) do @echo %f".to_string();
+    }
+    cmd_str.to_string()
+}
+
 /// Decode process output bytes to a UTF-8 String. On Windows, cmd.exe often outputs
 /// in the system OEM code page (e.g. GBK/CP936 on Chinese systems); decoding as UTF-8
 /// produces mojibake. We try UTF-8 first, then GBK when on Windows.
@@ -218,11 +239,7 @@ fn validate_workspace_path(
 // ---------------------------------------------------------------------------
 
 /// Context for running exec inside a tool sandbox when configured.
-pub type ExecSandboxContext = Option<(
-    Arc<crate::sandbox::SandboxManager>,
-    String,
-    crate::sandbox::types::ToolSandboxExecKind,
-)>;
+pub type ExecSandboxContext = Option<crate::sandbox::ToolSandboxDelegate>;
 
 pub struct ExecTool {
     pub workspace: PathBuf,
@@ -284,16 +301,10 @@ impl DynTool for ExecTool {
         };
 
         let approval_cwd = match &self.sandbox_context {
-            Some((
-                _,
-                _,
-                crate::sandbox::types::ToolSandboxExecKind::Docker,
-            )) => "/workspace".to_string(),
-            Some((
-                _,
-                _,
-                crate::sandbox::types::ToolSandboxExecKind::HostNative,
-            )) => cwd.display().to_string(),
+            Some(ctx) => match ctx.exec_kind() {
+                crate::sandbox::types::ToolSandboxExecKind::Docker => "/workspace".to_string(),
+                crate::sandbox::types::ToolSandboxExecKind::HostNative => cwd.display().to_string(),
+            },
             None => cwd.display().to_string(),
         };
 
@@ -393,8 +404,10 @@ impl DynTool for ExecTool {
         let timeout_duration = Duration::from_secs(effective_timeout_secs);
 
         // Run inside tool sandbox when configured (Docker: sh -c + /workspace; host-native: cmd or sh + real cwd).
-        if let Some((ref manager, ref sandbox_id, ref exec_kind)) = self.sandbox_context {
+        if let Some(ref delegate) = self.sandbox_context {
             let timeout = timeout_duration;
+            let exec_kind = delegate.exec_kind();
+            let sandbox_id = delegate.sandbox_id().to_string();
             let (command, shell_args, sandbox_cwd_buf, working_dir_display) = match exec_kind {
                 crate::sandbox::types::ToolSandboxExecKind::Docker => (
                     "sh".to_string(),
@@ -405,9 +418,10 @@ impl DynTool for ExecTool {
                 crate::sandbox::types::ToolSandboxExecKind::HostNative => {
                     let wd = cwd.display().to_string();
                     if cfg!(windows) {
+                        let inner = rewrite_windows_tool_sandbox_host_cmd(&cmd_str);
                         (
                             "cmd".to_string(),
-                            vec!["/C".to_string(), cmd_str.to_string()],
+                            vec!["/C".to_string(), inner],
                             wd.clone(),
                             wd,
                         )
@@ -421,16 +435,32 @@ impl DynTool for ExecTool {
                     }
                 }
             };
-            match manager
-                .execute_in_sandbox(
-                    sandbox_id,
-                    &command,
-                    &shell_args,
-                    timeout,
-                    Some(sandbox_cwd_buf.as_str()),
-                )
-                .await
-            {
+            let exec_result = match delegate {
+                crate::sandbox::ToolSandboxDelegate::Local { manager, .. } => {
+                    manager
+                        .execute_in_sandbox(
+                            &sandbox_id,
+                            &command,
+                            &shell_args,
+                            timeout,
+                            Some(sandbox_cwd_buf.as_str()),
+                        )
+                        .await
+                }
+                #[cfg(windows)]
+                crate::sandbox::ToolSandboxDelegate::Remote { client, .. } => {
+                    client
+                        .execute(
+                            &sandbox_id,
+                            &command,
+                            &shell_args,
+                            timeout,
+                            Some(sandbox_cwd_buf.as_str()),
+                        )
+                        .await
+                }
+            };
+            match exec_result {
                 Ok(exec_result) => {
                     let stdout = decode_output_bytes(&exec_result.stdout);
                     let stderr = decode_output_bytes(&exec_result.stderr);
@@ -470,6 +500,25 @@ impl DynTool for ExecTool {
                             sandbox = true,
                             "Command execution failed (sandbox)"
                         );
+                        #[cfg(windows)]
+                        {
+                            let is_remote_ipc = matches!(
+                                delegate,
+                                crate::sandbox::ToolSandboxDelegate::Remote { .. }
+                            );
+                            let err_s = exec_result_display.stderr.as_str();
+                            let looks_access_denied = err_s.contains("拒绝访问")
+                                || err_s.to_ascii_lowercase().contains("access is denied")
+                                || err_s.to_ascii_lowercase().contains("access denied");
+                            if is_remote_ipc && looks_access_denied {
+                                tracing::info!(
+                                    target: "synbot::sandbox::ntfs_verify",
+                                    "Access denied under tool AppContainer: `exec` runs in a separate Windows Package SID (tool profile), not the app sandbox SID and not your user token. \
+                                     If `toolSandbox` is disabled, `exec` runs on the host as the normal user — that often matches “only app sandbox works”. \
+                                     Host `synbot tool-sandbox` logs the read-only DACL chain (tracing WARN `synbot::sandbox::ntfs_verify`, or stderr `[synbot tool-sandbox] NTFS verify`)."
+                                );
+                            }
+                        }
                     }
                     return Ok(exec_result_display.to_display_string());
                 }
@@ -694,6 +743,27 @@ mod tests {
         let policy = CommandPolicy::new(vec![], Some(vec!["cargo".to_string()]));
         let err = policy.validate("ls -la").unwrap_err();
         assert!(err.contains("does not match any allow pattern"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_tool_sandbox_rewrites_simple_dir_to_for() {
+        assert_eq!(
+            super::rewrite_windows_tool_sandbox_host_cmd("dir"),
+            "for %f in (*) do @echo %f"
+        );
+        assert_eq!(
+            super::rewrite_windows_tool_sandbox_host_cmd("dir /B"),
+            "for %f in (*) do @echo %f"
+        );
+        assert_eq!(
+            super::rewrite_windows_tool_sandbox_host_cmd("  dir  /b  "),
+            "for %f in (*) do @echo %f"
+        );
+        assert_eq!(
+            super::rewrite_windows_tool_sandbox_host_cmd("dir /s"),
+            "dir /s"
+        );
     }
 
     // ---- ExecResult tests ----

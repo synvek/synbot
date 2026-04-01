@@ -259,9 +259,7 @@ pub async fn cmd_start() -> Result<()> {
         crate::cron::service::CronService::new(cron_store_path),
     ));
 
-    let tool_sandbox_exec_kind = sandbox_context
-        .as_ref()
-        .and_then(|(_, id, kind)| id.as_ref().map(|_| *kind));
+    let tool_sandbox_exec_kind = sandbox_context.as_ref().map(|d| d.exec_kind());
 
     // Start agent loop (Arc<Mutex<>> so /stop or /cancel can cancel a running agent task)
     let agent_loop = crate::agent::r#loop::AgentLoop::new(
@@ -348,8 +346,12 @@ pub async fn cmd_start() -> Result<()> {
         }
     }
 
+    // Allow running multiple instances (e.g. `synbot sandbox start` child) without binding the web UI port.
+    // The sandbox launcher can set this env var for the AppContainer child process.
+    let disable_web = std::env::var_os("SYNBOT_DISABLE_WEB").is_some();
+
     // Start web server if enabled
-    if cfg.web.enabled {
+    if cfg.web.enabled && !disable_web {
         let mut web_config = cfg.web.clone();
         // Inside AppContainer the process is network-isolated; bind to 0.0.0.0 so
         // LAN clients can reach the web UI (inbound firewall rule is added by the
@@ -384,6 +386,9 @@ pub async fn cmd_start() -> Result<()> {
             }
         }
     } else {
+        if disable_web && cfg.web.enabled {
+            info!("Web server disabled by SYNBOT_DISABLE_WEB=1 (running headless).");
+        }
         info!("🐈 synbot daemon running. Press Ctrl+C to stop.");
         tokio::signal::ctrl_c().await?;
         info!("Shutting down...");
@@ -391,17 +396,12 @@ pub async fn cmd_start() -> Result<()> {
     Ok(())
 }
 
-/// If app_sandbox or tool_sandbox is configured, create SandboxManager, create/start sandboxes.
-/// Returns (manager, Some(tool_sandbox_id)) when tool sandbox is running (exec uses it),
-/// or (manager, None) when only app sandbox is running (keeps manager alive so app sandbox is not stopped).
+/// If app_sandbox or tool_sandbox is configured, create SandboxManager, create/start sandboxes,
+/// or (Windows) use a remote tool sandbox helper via IPC when launched from `synbot sandbox`.
 /// When we are already inside the app sandbox (child of `synbot sandbox`), we skip creating/starting app sandbox.
 async fn init_sandbox_if_configured(
     cfg: &config::Config,
-) -> Option<(
-    std::sync::Arc<crate::sandbox::SandboxManager>,
-    Option<String>,
-    crate::sandbox::types::ToolSandboxExecKind,
-)> {
+) -> crate::sandbox::SandboxContext {
     let in_app_sandbox = std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some();
     let has_app = cfg.app_sandbox.is_some() && !in_app_sandbox;
     let has_tool = cfg.tool_sandbox.is_some();
@@ -409,9 +409,52 @@ async fn init_sandbox_if_configured(
         return None;
     }
 
+    #[cfg(target_os = "windows")]
+    if in_app_sandbox {
+        if let Some(ref tool_cfg) = cfg.tool_sandbox {
+            let st = tool_cfg.sandbox_type.as_deref().unwrap_or("gvisor-docker");
+            if st.eq_ignore_ascii_case("appcontainer") {
+                if let (Ok(pipe), Ok(auth)) = (
+                    std::env::var(crate::sandbox::tool_sandbox_ipc::ENV_TOOL_SANDBOX_PIPE),
+                    std::env::var(crate::sandbox::tool_sandbox_ipc::ENV_TOOL_SANDBOX_AUTH),
+                ) {
+                    let workspace_path = config::effective_workspace_path(cfg);
+                    let skills_dir = config::skills_dir();
+                    match config::build_tool_sandbox_config(
+                        tool_cfg,
+                        &cfg.sandbox_monitoring,
+                        &workspace_path,
+                        &skills_dir,
+                    ) {
+                        Ok(sc) => {
+                            let sandbox_id = sc.sandbox_id.clone();
+                            let kind = config::tool_sandbox_exec_kind(tool_cfg);
+                            let client = std::sync::Arc::new(
+                                crate::sandbox::tool_sandbox_ipc::ToolSandboxIpcClient::new(
+                                    pipe, auth,
+                                ),
+                            );
+                            info!(
+                                sandbox_id = %sandbox_id,
+                                "Tool sandbox: using host helper (named pipe IPC)"
+                            );
+                            return Some(crate::sandbox::ToolSandboxDelegate::Remote {
+                                client,
+                                sandbox_id,
+                                kind,
+                            });
+                        }
+                        Err(e) => {
+                            warn!(error = %e, "Tool sandbox config invalid (remote helper)");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     let manager = std::sync::Arc::new(crate::sandbox::SandboxManager::with_defaults());
     let monitoring = &cfg.sandbox_monitoring;
-    let mut app_started = false;
 
     if let Some(_) = cfg.app_sandbox {
         if !in_app_sandbox {
@@ -437,7 +480,11 @@ async fn init_sandbox_if_configured(
                         } else {
                             info!(sandbox_id = %id, "Tool sandbox started (exec runs in sandbox)");
                             let kind = config::tool_sandbox_exec_kind(tool_cfg);
-                            return Some((manager, Some(id), kind));
+                            return Some(crate::sandbox::ToolSandboxDelegate::Local {
+                                manager,
+                                sandbox_id: id,
+                                kind,
+                            });
                         }
                     }
                     Err(e) => {
@@ -456,14 +503,6 @@ async fn init_sandbox_if_configured(
         }
     }
 
-    // Keep manager alive when app sandbox was started so it is not dropped and stopped.
-    if app_started {
-        Some((
-            manager,
-            None,
-            crate::sandbox::types::ToolSandboxExecKind::Docker,
-        ))
-    } else {
-        None
-    }
+    let _ = manager;
+    None
 }
