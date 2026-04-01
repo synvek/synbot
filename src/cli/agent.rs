@@ -12,7 +12,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
     // Initialize logging with config
     logging::init_logging(&cfg, None)?;
     
-    let ws = config::workspace_path(&cfg);
+    let ws = config::effective_workspace_path(&cfg);
 
     let model_name = model.unwrap_or(cfg.main_agent.model.clone());
     let provider_name = provider.unwrap_or(cfg.main_agent.provider.clone());
@@ -148,7 +148,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
         &cfg,
         shared_session_state,
         agent_registry,
-        false,
+        None,
         Some(std::sync::Arc::new(hook_registry)),
     )
     .await;

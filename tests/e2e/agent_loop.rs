@@ -106,7 +106,7 @@ async fn build_agent_loop(
         config,
         session_state,
         agent_registry,
-        false, // tool_sandbox_enabled
+        None, // tool_sandbox_exec_kind
         None,  // hooks
     )
     .await;

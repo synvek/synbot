@@ -27,7 +27,6 @@ static PATTERNS: &[SecretPattern] = &[
     SecretPattern { prefix: "sk-",   label: "api_key"    },
     SecretPattern { prefix: "xoxb-", label: "slack_bot"  },
     SecretPattern { prefix: "xoxp-", label: "slack_user" },
-    SecretPattern { prefix: "bot",   label: "bot_token"  },
     SecretPattern { prefix: "ghp_",  label: "github_pat" },
     SecretPattern { prefix: "gho_",  label: "github_oauth" },
     // Bearer is handled specially: the token follows the space
@@ -352,16 +351,11 @@ mod tests {
     }
 
     #[test]
-    fn test_mask_utf8_first_four_chars_not_bytes() {
+    fn test_no_false_positive_synbot_path() {
         let m = masker();
-        // Regression: `bot` + full-width comma is 4 chars but >4 bytes; byte
-        // slice `&s[..4]` used to panic mid-codepoint.
-        let result = m.mask("bot，很高兴为你服务");
-        assert!(
-            result.contains("[REDACTED:bot_token]"),
-            "expected redaction, got: {result}"
-        );
-        assert!(!result.contains("很高兴"));
+        // Regression: a naive `prefix: "bot"` pattern mangled `.synbot` paths and log fields.
+        let p = r"C:\Users\me\.synbot\config.json";
+        assert_eq!(m.mask(p), p);
     }
 
     #[test]

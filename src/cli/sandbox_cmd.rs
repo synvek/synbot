@@ -2,7 +2,46 @@
 
 use anyhow::{Context, Result};
 use std::io::Write;
+use std::path::PathBuf;
 use tracing::info;
+
+/// `synbot sandbox …` uses a trailing var-arg for everything after `sandbox`, so `--root-dir`
+/// placed after `sandbox` is **not** parsed as the global `Cli.root_dir`. Extract it here and
+/// apply [`crate::config::set_root_dir`] before loading config, and strip it from argv forwarded
+/// to the child (the child gets `--root-dir` re-prepended from the override when needed).
+fn strip_root_dir_from_child_args(args: Vec<String>) -> (Option<PathBuf>, Vec<String>) {
+    let mut root: Option<PathBuf> = None;
+    let mut out = Vec::with_capacity(args.len());
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--root-dir" {
+            if i + 1 < args.len() {
+                root = Some(PathBuf::from(&args[i + 1]));
+                i += 2;
+                continue;
+            }
+        } else if let Some(rest) = args[i].strip_prefix("--root-dir=") {
+            if !rest.is_empty() {
+                root = Some(PathBuf::from(rest));
+                i += 1;
+                continue;
+            }
+        }
+        out.push(args[i].clone());
+        i += 1;
+    }
+    (root, out)
+}
+
+fn apply_root_dir_from_sandbox_child_args(child_args: Vec<String>) -> Vec<String> {
+    let (inline_root, filtered) = strip_root_dir_from_child_args(child_args);
+    if crate::config::get_root_dir_override().is_none() {
+        if let Some(root) = inline_root {
+            crate::config::set_root_dir(Some(root));
+        }
+    }
+    filtered
+}
 
 fn progress(msg: &str) {
     let _ = eprintln!("[synbot sandbox] {}", msg);
@@ -33,6 +72,7 @@ fn child_argv(child_args: &[String]) -> Vec<String> {
 /// Example: cmd_sandbox(vec!["start".into()]) → starts sandbox, then runs `synbot start` in it.
 /// If child_args is ["setup"], on Windows only: install firewall/WFP rules then exit (no daemon).
 pub async fn cmd_sandbox(child_args: Vec<String>) -> Result<()> {
+    let child_args = apply_root_dir_from_sandbox_child_args(child_args);
     progress("Loading config...");
     let cfg = crate::config::load_config(None).context("Load config for sandbox")?;
 
@@ -44,11 +84,11 @@ pub async fn cmd_sandbox(child_args: Vec<String>) -> Result<()> {
     let monitoring = &cfg.sandbox_monitoring;
     progress("Building sandbox config...");
     let sandbox_config =
-        crate::config::build_app_sandbox_config(app_cfg, monitoring).context("Build app sandbox config")?;
+        crate::config::build_app_sandbox_config(app_cfg, &cfg, monitoring).context("Build app sandbox config")?;
 
     // Windows-only: setup adds firewall/WFP rules once (run as Administrator). After that, normal users can start the sandbox.
     if child_args.get(0).map(|s| s.as_str()) == Some("setup") {
-        return run_sandbox_setup(&sandbox_config).await;
+        return run_sandbox_setup(&cfg, &sandbox_config).await;
     }
 
     #[cfg(target_os = "windows")]
@@ -68,21 +108,68 @@ pub async fn cmd_sandbox(child_args: Vec<String>) -> Result<()> {
     }
 }
 
-/// Run `synbot sandbox setup`: add firewall and WFP rules for the AppContainer (Windows only).
+/// Run `synbot sandbox setup`: add firewall and WFP rules for AppContainer(s) (Windows only).
+/// Installs rules for **app** sandbox always; if `toolSandbox.sandboxType` is `appcontainer`, also installs rules for the tool sandbox profile (separate AppContainer SID).
 /// On Windows: requires Administrator. On other platforms: no-op with a message.
-async fn run_sandbox_setup(sandbox_config: &crate::sandbox::SandboxConfig) -> Result<()> {
+async fn run_sandbox_setup(
+    cfg: &crate::config::Config,
+    app_sandbox_config: &crate::sandbox::SandboxConfig,
+) -> Result<()> {
     #[cfg(target_os = "windows")]
     {
-        progress("Installing firewall and WFP rules for AppContainer (requires Administrator)...");
-        crate::sandbox::windows_appcontainer::install_windows_sandbox_network_rules(sandbox_config.clone())
-            .context("Install Windows sandbox network rules")?;
-        progress("Rules installed. You can now run `synbot sandbox start` as a normal user.");
+        progress("Installing firewall and WFP rules for app AppContainer (requires Administrator)...");
+        // Only grant parent/ancestor traverse ACLs when the **tool sandbox** also uses AppContainer.
+        // If tool sandbox is not AppContainer (or not enabled), keep ACL edits scoped to the target folders.
+        let tool_is_appcontainer = cfg
+            .tool_sandbox
+            .as_ref()
+            .and_then(|t| t.sandbox_type.as_deref())
+            .map(|s| s.eq_ignore_ascii_case("appcontainer"))
+            .unwrap_or(false);
+        crate::sandbox::windows_appcontainer::install_windows_sandbox_network_rules(
+            app_sandbox_config.clone(),
+            tool_is_appcontainer,
+        )
+            .context("Install Windows app sandbox network rules")?;
+
+        if let Some(ref tool_cfg) = cfg.tool_sandbox {
+            let st = tool_cfg.sandbox_type.as_deref().unwrap_or("gvisor-docker");
+            if st == "appcontainer" {
+                let workspace_path = crate::config::effective_workspace_path(cfg);
+                let skills_dir = crate::config::skills_dir();
+                match crate::config::build_tool_sandbox_config(
+                    tool_cfg,
+                    &cfg.sandbox_monitoring,
+                    &workspace_path,
+                    &skills_dir,
+                ) {
+                    Ok(tool_sandbox_config) => {
+                        progress("Installing firewall and WFP rules for tool AppContainer (tool sandbox)...");
+                        // Tool sandbox is AppContainer: it needs parent/ancestor traverse ACLs so the
+                        // AppContainer SID can reach configured paths.
+                        crate::sandbox::windows_appcontainer::install_windows_sandbox_network_rules(
+                            tool_sandbox_config,
+                            true,
+                        )
+                        .context("Install Windows tool sandbox network rules")?;
+                    }
+                    Err(e) => {
+                        progress(&format!(
+                            "Skipping tool sandbox setup (invalid tool sandbox config): {}",
+                            e
+                        ));
+                    }
+                }
+            }
+        }
+
+        progress("Rules installed. You can run `synbot sandbox start` and tool sandbox as a normal user.");
         Ok(())
     }
 
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = sandbox_config;
+        let _ = (cfg, app_sandbox_config);
         progress("setup is only needed on Windows (AppContainer). On this platform you can run `synbot sandbox start` directly.");
         Ok(())
     }
@@ -189,4 +276,29 @@ async fn run_sandbox_nono(
 
     progress(&format!("Child exited with code {}", code));
     std::process::exit(code);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_root_dir_from_child_args;
+    use std::path::Path;
+
+    #[test]
+    fn strip_root_dir_removes_flag_and_value() {
+        let (root, rest) = strip_root_dir_from_child_args(vec![
+            "setup".into(),
+            "--root-dir".into(),
+            r"c:\synbot".into(),
+        ]);
+        assert_eq!(root.as_ref().map(|p| p.as_path()), Some(Path::new(r"c:\synbot")));
+        assert_eq!(rest, vec!["setup".to_string()]);
+    }
+
+    #[test]
+    fn strip_root_dir_equals_form() {
+        let (root, rest) =
+            strip_root_dir_from_child_args(vec![r"--root-dir=d:\inst".into(), "start".into()]);
+        assert_eq!(root.as_ref().map(|p| p.as_path()), Some(Path::new(r"d:\inst")));
+        assert_eq!(rest, vec!["start".to_string()]);
+    }
 }

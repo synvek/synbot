@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 
 use crate::agent::memory::MemoryStore;
 use crate::agent::skills::{CompositeSkillProvider, SkillProvider};
+use crate::config;
+use crate::sandbox::types::ToolSandboxExecKind;
 
 const BOOTSTRAP_FILES: &[&str] = &["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"];
 
@@ -15,20 +17,20 @@ pub struct ContextBuilder {
     agent_id: String,
     memory: MemoryStore,
     skills: CompositeSkillProvider,
-    /// When true, exec runs in tool sandbox (Docker); workspace is mounted at /workspace. Used to add workspace hints in identity_section.
-    tool_sandbox_enabled: bool,
+    /// When set, exec runs in the tool sandbox; Docker vs host-native changes prompt text (paths, `/workspace`, etc.).
+    tool_sandbox_exec_kind: Option<ToolSandboxExecKind>,
 }
 
 impl ContextBuilder {
     /// `workspace`: where to load bootstrap files (AGENTS.md, SOUL.md, etc.) from.
     /// `agent_id`: which agent's memory to use (e.g. "main" or role name); stored at ~/.synbot/memory/{agent_id}.
     /// `skills_dir`: global skills root (e.g. `config::skills_dir()`), i.e. `~/.synbot/skills/`.
-    /// `tool_sandbox_enabled`: when true, exec runs in tool sandbox and workspace is at /workspace in container; identity_section will add environment and workspace hints.
+    /// `tool_sandbox_exec_kind`: `Some(Docker)` vs `Some(HostNative)` vs `None` (no tool sandbox) controls environment/workspace hints in the system prompt.
     pub fn new(
         workspace: &Path,
         agent_id: &str,
         skills_dir: &Path,
-        tool_sandbox_enabled: bool,
+        tool_sandbox_exec_kind: Option<ToolSandboxExecKind>,
     ) -> Self {
         let agent_id = if agent_id.is_empty() {
             "main".to_string()
@@ -36,11 +38,11 @@ impl ContextBuilder {
             agent_id.to_string()
         };
         Self {
-            workspace: workspace.to_path_buf(),
+            workspace: config::normalize_workspace_path(workspace),
             memory: MemoryStore::new(&agent_id),
             skills: CompositeSkillProvider::default_with_fs(skills_dir),
             agent_id,
-            tool_sandbox_enabled,
+            tool_sandbox_exec_kind,
         }
     }
 
@@ -82,34 +84,48 @@ impl ContextBuilder {
         let ws = self.workspace.display();
         let in_app_sandbox = std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some();
 
-        let env_section = if in_app_sandbox || self.tool_sandbox_enabled {
+        let tool_sandbox_active = self.tool_sandbox_exec_kind.is_some();
+
+        let env_section = if in_app_sandbox || tool_sandbox_active {
             let mut lines = vec!["## Environment".to_string()];
             if in_app_sandbox {
                 lines.push(
                     "- The **main process** is running inside the **app sandbox** (restricted environment).".to_string(),
                 );
             }
-            if self.tool_sandbox_enabled {
-                lines.push(
-                    "- The **exec** tool runs inside the **tool sandbox** (Docker container). \
-                     File read/write/list tools are not available; use **exec** to run shell commands. \
-                     The workspace is mounted inside the container at a fixed path (see Workspace below).".to_string(),
-                );
+            if let Some(kind) = self.tool_sandbox_exec_kind {
+                let exec_hint = match kind {
+                    ToolSandboxExecKind::Docker => "- The **exec** tool runs inside the **tool sandbox** (Docker). \
+                     File read/write/list tools are not available; use **exec** for shell. \
+                     The workspace is mounted in the container at a fixed path (see Workspace below)."
+                        .to_string(),
+                    ToolSandboxExecKind::HostNative => "- The **exec** tool runs inside the **tool sandbox** (host-native isolation: \
+                     Windows AppContainer, macOS Seatbelt, etc.). \
+                     File read/write/list tools are not available; use **exec** for shell. \
+                     Use **real host paths** for the workspace — there is no `/workspace` bind mount (see Workspace below)."
+                        .to_string(),
+                };
+                lines.push(exec_hint);
             }
             format!("{}\n\n", lines.join("\n"))
         } else {
             String::new()
         };
 
-        let workspace_section = if self.tool_sandbox_enabled {
-            format!(
+        let workspace_section = match self.tool_sandbox_exec_kind {
+            Some(ToolSandboxExecKind::Docker) => format!(
                 "## Workspace\n\
                  - **Workspace (host, for reference):** {ws}\n\
                  - **Workspace inside tool sandbox (use this for exec paths):** `/workspace`\n\n\
                  When using the **exec** tool, use paths under `/workspace` (e.g. `/workspace/README.md`, `cd /workspace`).\n"
-            )
-        } else {
-            format!("## Workspace\n{ws}\n")
+            ),
+            Some(ToolSandboxExecKind::HostNative) => format!(
+                "## Workspace\n\
+                 **Workspace path (use for exec; same path as on the host):** {ws}\n\n\
+                 Use normal paths for this OS in **exec** (e.g. Windows: `dir`, `type file.txt`). \
+                 Do not use `/workspace` unless you are on a Docker-based tool sandbox.\n"
+            ),
+            None => format!("## Workspace\n{ws}\n"),
         };
 
         format!(
@@ -142,7 +158,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let skills_dir = dir.path().join("skills");
         std::fs::create_dir_all(&skills_dir).unwrap();
-        let ctx = ContextBuilder::new(dir.path(), "main", &skills_dir, false);
+        let ctx = ContextBuilder::new(dir.path(), "main", &skills_dir, None);
         let prompt = ctx.build_system_prompt();
         assert!(prompt.contains("Synbot"));
         assert!(prompt.contains("Workspace"));
@@ -154,7 +170,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let skills_dir = dir.path().join("skills");
         std::fs::create_dir_all(&skills_dir).unwrap();
-        let ctx = ContextBuilder::new(dir.path(), "main", &skills_dir, false);
+        let ctx = ContextBuilder::new(dir.path(), "main", &skills_dir, None);
         let prompt = ctx.build_system_prompt_with_role_prompt("You are a helpful tester.");
         assert!(prompt.contains("Synbot"));
         assert!(prompt.contains("You are a helpful tester."));
@@ -165,7 +181,47 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let skills_dir = dir.path().join("skills");
         std::fs::create_dir_all(&skills_dir).unwrap();
-        let _ctx = ContextBuilder::new(dir.path(), "", &skills_dir, false);
+        let _ctx = ContextBuilder::new(dir.path(), "", &skills_dir, None);
         // Just ensure it doesn't panic; agent_id "main" is used for memory path
+    }
+
+    #[test]
+    fn identity_host_native_tool_sandbox_mentions_appcontainer_not_docker() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills_dir = dir.path().join("skills");
+        std::fs::create_dir_all(&skills_dir).unwrap();
+        let ctx = ContextBuilder::new(
+            dir.path(),
+            "main",
+            &skills_dir,
+            Some(ToolSandboxExecKind::HostNative),
+        );
+        let id = ctx.build_system_prompt_with_role_prompt("");
+        assert!(
+            id.contains("Windows AppContainer") && id.contains("host-native isolation"),
+            "expected host-native sandbox hint, got: {}",
+            id
+        );
+        assert!(
+            !id.contains("**tool sandbox** (Docker)"),
+            "host-native must not describe exec as Docker-only: {}",
+            id
+        );
+    }
+
+    #[test]
+    fn identity_docker_tool_sandbox_mentions_workspace_mount() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills_dir = dir.path().join("skills");
+        std::fs::create_dir_all(&skills_dir).unwrap();
+        let ctx = ContextBuilder::new(
+            dir.path(),
+            "main",
+            &skills_dir,
+            Some(ToolSandboxExecKind::Docker),
+        );
+        let id = ctx.build_system_prompt_with_role_prompt("");
+        assert!(id.contains("/workspace"), "docker prompt should mention /workspace: {}", id);
+        assert!(id.contains("Docker"), "docker prompt should mention Docker: {}", id);
     }
 }

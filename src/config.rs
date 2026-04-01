@@ -1498,8 +1498,8 @@ pub struct AppSandboxConfig {
     pub resources: Option<SandboxResourceConfig>,
     #[serde(default)]
     pub process: Option<SandboxProcessConfig>,
-    /// Working directory for the child process in app sandbox. Defaults to `"~"` (home).
-    /// config_dir() uses home.join(".synbot") or, if home fails, ".".join(".synbot"); so cwd must be home, not ~/.synbot.
+    /// Working directory for the child process in app sandbox. When omitted, defaults to the
+    /// config root directory (`~/.synbot`, or `--root-dir`), not the whole home folder.
     #[serde(default)]
     pub work_dir: Option<String>,
 }
@@ -1630,6 +1630,35 @@ pub fn config_json_schema() -> schemars::schema::RootSchema {
     schemars::schema_for!(Config)
 }
 
+/// Strip Win32 verbatim prefix (`\\?\` / `\\?\UNC\`) so paths work as `CreateProcessW` cwd and for cmd.exe.
+/// `std::fs::canonicalize` on Windows returns `\\?\C:\...`, which many shells reject as a working directory.
+#[cfg(windows)]
+fn strip_windows_verbatim_prefix(path: &Path) -> PathBuf {
+    let s = path.to_string_lossy();
+    let Some(rest) = s.strip_prefix(r"\\?\") else {
+        return path.to_path_buf();
+    };
+    if let Some(unc_tail) = rest.strip_prefix("UNC\\") {
+        PathBuf::from(format!(r"\\{}", unc_tail))
+    } else {
+        PathBuf::from(rest.to_string())
+    }
+}
+
+/// Collapse `.` / `..` in path strings and canonicalize when the path exists (fixes e.g. `C:\Users\x\.\.synbot`).
+fn finalize_sandbox_path_string(expanded: String) -> String {
+    let t = expanded.trim();
+    if t.is_empty() {
+        return expanded;
+    }
+    let cleaned: PathBuf = Path::new(t).components().collect();
+    let resolved = std::fs::canonicalize(&cleaned).unwrap_or(cleaned);
+    #[cfg(windows)]
+    let resolved = strip_windows_verbatim_prefix(&resolved);
+    let resolved = collapse_path_components(&resolved);
+    resolved.to_string_lossy().into_owned()
+}
+
 /// Expand paths that start with "~" to the user's home directory.
 fn expand_sandbox_paths(paths: &[String]) -> Vec<String> {
     let home = dirs::home_dir();
@@ -1637,7 +1666,7 @@ fn expand_sandbox_paths(paths: &[String]) -> Vec<String> {
         .iter()
         .map(|p| {
             let s = p.trim();
-            if s.starts_with("~/") || s == "~" {
+            let expanded = if s.starts_with("~/") || s == "~" {
                 home.as_ref()
                     .map(|h| h.join(s.trim_start_matches('~').trim_start_matches('/')).display().to_string())
                     .unwrap_or_else(|| p.to_string())
@@ -1650,7 +1679,8 @@ fn expand_sandbox_paths(paths: &[String]) -> Vec<String> {
                     .unwrap_or_else(|| p.to_string())
             } else {
                 p.to_string()
-            }
+            };
+            finalize_sandbox_path_string(expanded)
         })
         .collect()
 }
@@ -1707,9 +1737,30 @@ fn build_sandbox_monitoring(mon: &Option<SandboxMonitoringConfig>) -> crate::san
     }
 }
 
+/// Merge dirs the main synbot process always needs (config, workspace, logs, workflows).
+/// Same idea as [`build_tool_sandbox_config`] for host-native backends: keeps `appSandbox.filesystem`
+/// optional while AppContainer setup / nono still get correct path grants.
+fn merge_implicit_app_sandbox_host_paths(full: &Config, writable: &mut Vec<String>) {
+    let mut push_w = |pb: PathBuf| {
+        let host = pb.to_string_lossy().to_string();
+        let exp = expand_sandbox_paths(&[host])
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| pb.to_string_lossy().to_string());
+        if !sandbox_path_list_contains(writable, &exp) {
+            writable.push(exp);
+        }
+    };
+    push_w(config_dir());
+    push_w(effective_workspace_path(full));
+    push_w(normalize_workspace_path(&log_dir_path(full)));
+    push_w(normalize_workspace_path(&workflows_root(full)));
+}
+
 /// Build SandboxConfig for app sandbox from Config.
 pub fn build_app_sandbox_config(
     cfg: &AppSandboxConfig,
+    full: &Config,
     monitoring: &Option<SandboxMonitoringConfig>,
 ) -> anyhow::Result<crate::sandbox::types::SandboxConfig> {
     let platform = cfg
@@ -1743,16 +1794,31 @@ pub fn build_app_sandbox_config(
         .transpose()?
         .unwrap_or(10 * 1024 * 1024 * 1024);
     let process = cfg.process.as_ref();
-    // Default workDir to "~" so child cwd is home and config_dir() resolves to ~/.synbot (see comment in sandbox spawn).
-    let work_dir_raw = cfg.work_dir.as_deref().unwrap_or("~");
-    let child_work_dir = expand_sandbox_paths(&[work_dir_raw.to_string()]).into_iter().next();
+    // Default cwd to `config_dir()` (~/.synbot) so AppContainer ACL matches the data root; using "~"
+    // alone made setup grant `%USERPROFILE%` first and (with the old order) skipped inheritable ACL on `.synbot`.
+    let child_work_dir = match cfg.work_dir.as_deref() {
+        Some(w) => expand_sandbox_paths(&[w.to_string()])
+            .into_iter()
+            .next()
+            .map(rewrite_legacy_synbot_path_string),
+        None => {
+            let p = config_dir();
+            expand_sandbox_paths(&[p.to_string_lossy().to_string()])
+                .into_iter()
+                .next()
+                .map(rewrite_legacy_synbot_path_string)
+        }
+    };
+    let mut readonly_paths = rewrite_legacy_synbot_paths_for_root_override(expand_sandbox_paths(&fs.readonly_paths));
+    let mut writable_paths = rewrite_legacy_synbot_paths_for_root_override(expand_sandbox_paths(&fs.writable_paths));
+    merge_implicit_app_sandbox_host_paths(full, &mut writable_paths);
     Ok(crate::sandbox::types::SandboxConfig {
         sandbox_id: "synbot-app".to_string(),
         platform,
         filesystem: crate::sandbox::types::FilesystemConfig {
-            readonly_paths: expand_sandbox_paths(&fs.readonly_paths),
-            writable_paths: expand_sandbox_paths(&fs.writable_paths),
-            hidden_paths: expand_sandbox_paths(&fs.hidden_paths),
+            readonly_paths,
+            writable_paths,
+            hidden_paths: rewrite_legacy_synbot_paths_for_root_override(expand_sandbox_paths(&fs.hidden_paths)),
             ..Default::default()
         },
         network: crate::sandbox::types::NetworkConfig {
@@ -1796,14 +1862,15 @@ pub fn build_tool_sandbox_config(
         mount_skills_dir: f.mount_skills_dir,
     }).unwrap_or_default();
     let mount_skills = fs.mount_skills_dir != Some(false) && skills_dir.exists();
-    let mut readonly_paths = expand_sandbox_paths(&fs.readonly_paths);
-    let mut writable_paths = expand_sandbox_paths(&fs.writable_paths);
+    let mut readonly_paths = rewrite_legacy_synbot_paths_for_root_override(expand_sandbox_paths(&fs.readonly_paths));
+    let mut writable_paths = rewrite_legacy_synbot_paths_for_root_override(expand_sandbox_paths(&fs.writable_paths));
     let workspace_host = workspace_path.to_string_lossy().to_string();
-    let workspace_expanded =
+    let workspace_expanded = rewrite_legacy_synbot_path_string(
         expand_sandbox_paths(&[workspace_host.clone()])
             .into_iter()
             .next()
-            .unwrap_or_else(|| workspace_host.clone());
+            .unwrap_or_else(|| workspace_host.clone()),
+    );
 
     if !is_docker {
         if !sandbox_path_list_contains(&writable_paths, &workspace_expanded) {
@@ -1811,10 +1878,12 @@ pub fn build_tool_sandbox_config(
         }
         if mount_skills {
             let sk = skills_dir.to_string_lossy().to_string();
-            let sk_exp = expand_sandbox_paths(&[sk])
-                .into_iter()
-                .next()
-                .unwrap();
+            let sk_exp = rewrite_legacy_synbot_path_string(
+                expand_sandbox_paths(&[sk])
+                    .into_iter()
+                    .next()
+                    .unwrap(),
+            );
             if !sandbox_path_list_contains(&readonly_paths, &sk_exp) {
                 readonly_paths.push(sk_exp);
             }
@@ -1873,7 +1942,7 @@ pub fn build_tool_sandbox_config(
         filesystem: crate::sandbox::types::FilesystemConfig {
             readonly_paths,
             writable_paths,
-            hidden_paths: expand_sandbox_paths(&fs.hidden_paths),
+            hidden_paths: rewrite_legacy_synbot_paths_for_root_override(expand_sandbox_paths(&fs.hidden_paths)),
             workspace_mount,
             skills_mount,
         },
@@ -2480,6 +2549,114 @@ pub fn config_path() -> PathBuf {
     config_dir().join("config.json")
 }
 
+fn normalize_path_cmp_key(p: &std::path::Path) -> String {
+    let mut s = p.to_string_lossy().replace('\\', "/").to_lowercase();
+    while s.len() > 1 && s.ends_with('/') {
+        s.pop();
+    }
+    s
+}
+
+fn path_is_same_or_under(desc: &std::path::Path, root: &std::path::Path) -> bool {
+    let rk = normalize_path_cmp_key(root);
+    let dk = normalize_path_cmp_key(desc);
+    if dk == rk {
+        return true;
+    }
+    let prefix = format!("{}/", rk);
+    dk.starts_with(&prefix)
+}
+
+/// Resolved workspace directory for this process.
+///
+/// When [`set_root_dir`] is in effect, a config that still points [`workspace_path`] at the legacy
+/// `%USERPROFILE%\.synbot\...` tree would make `synbot sandbox setup` apply inheritable ACLs under
+/// the user profile (very slow) and disagree with the instance root. In that case we use
+/// [`config_dir`]`/workspace` instead.
+pub fn effective_workspace_path(cfg: &Config) -> PathBuf {
+    let root = config_dir();
+    let ws_abs = normalize_workspace_path(&workspace_path(cfg));
+    let Some(home) = dirs::home_dir() else {
+        return ws_abs;
+    };
+    let legacy_synbot_tree = home.join(".synbot");
+    if get_root_dir_override().is_some()
+        && path_is_same_or_under(&ws_abs, &legacy_synbot_tree)
+        && normalize_path_cmp_key(&ws_abs) != normalize_path_cmp_key(&root)
+    {
+        log::warn!(
+            "mainAgent.workspace is under {} but --root-dir is {}; using {} for workspace and sandbox paths",
+            legacy_synbot_tree.display(),
+            root.display(),
+            root.join("workspace").display()
+        );
+        normalize_workspace_path(&root.join("workspace"))
+    } else {
+        ws_abs
+    }
+}
+
+/// When `--root-dir` is set, config may still list absolute paths under `%USERPROFILE%\.synbot\...`.
+/// Remap those to the same relative path under [`config_dir`], so sandbox ACL setup matches the instance root.
+fn rewrite_legacy_synbot_paths_for_root_override(paths: Vec<String>) -> Vec<String> {
+    if get_root_dir_override().is_none() {
+        return paths;
+    }
+    let Some(home) = dirs::home_dir() else {
+        return paths;
+    };
+    let legacy_root = normalize_workspace_path(&home.join(".synbot"));
+    let instance_root = normalize_workspace_path(&config_dir());
+    if normalize_path_cmp_key(&legacy_root) == normalize_path_cmp_key(&instance_root) {
+        return paths;
+    }
+
+    paths
+        .into_iter()
+        .map(|s| {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                return s;
+            }
+            let p = normalize_workspace_path(Path::new(trimmed));
+            if !path_is_same_or_under(&p, &legacy_root) {
+                return s;
+            }
+            let rel = if normalize_path_cmp_key(&p) == normalize_path_cmp_key(&legacy_root) {
+                PathBuf::new()
+            } else {
+                match p.strip_prefix(&legacy_root) {
+                    Ok(r) => r.to_path_buf(),
+                    Err(_) => return s,
+                }
+            };
+            let mapped = if rel.as_os_str().is_empty() {
+                instance_root.clone()
+            } else {
+                instance_root.join(&rel)
+            };
+            let out = normalize_workspace_path(&mapped)
+                .to_string_lossy()
+                .into_owned();
+            if out != s {
+                log::info!(
+                    "sandbox path remapped (--root-dir): {} -> {}",
+                    trimmed,
+                    out
+                );
+            }
+            out
+        })
+        .collect()
+}
+
+fn rewrite_legacy_synbot_path_string(s: String) -> String {
+    rewrite_legacy_synbot_paths_for_root_override(vec![s])
+        .into_iter()
+        .next()
+        .unwrap_or_default()
+}
+
 /// Memory root directory: `~/.synbot/memory/`.
 pub fn memory_root() -> PathBuf {
     config_dir().join("memory")
@@ -2534,12 +2711,48 @@ pub fn skills_dir() -> PathBuf {
 pub fn workspace_path(cfg: &Config) -> PathBuf {
     let raw = &cfg.main_agent.workspace;
     if raw.starts_with('~') {
-        dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(raw.trim_start_matches("~/"))
+        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        let rest = raw
+            .trim_start_matches('~')
+            .trim_start_matches('/')
+            .trim_start_matches('\\');
+        // Avoid `C:\Users\you\.\.synbot` when config has `~/.\.synbot` — collapse `.` segments.
+        let tail: PathBuf = Path::new(rest).components().collect();
+        home.join(tail)
     } else {
         PathBuf::from(raw)
     }
+}
+
+/// Collapse redundant `.` / `..` segments (e.g. `C:\Users\x\.\.synbot` → `C:\Users\x\.synbot`).
+fn collapse_path_components(path: &Path) -> PathBuf {
+    path.components().collect()
+}
+
+/// Resolve a workspace or exec `cwd` to an absolute path (canonicalize when possible).
+///
+/// Relative paths (e.g. `.\.synbot\...`) break Windows `CreateProcessW` current directory and
+/// AppContainer ACL grants; tool sandbox + exec should use a stable absolute path.
+pub fn normalize_workspace_path(path: &Path) -> PathBuf {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(path)
+    };
+    let resolved = std::fs::canonicalize(&absolute).unwrap_or(absolute);
+    let resolved = {
+        #[cfg(windows)]
+        {
+            strip_windows_verbatim_prefix(&resolved)
+        }
+        #[cfg(not(windows))]
+        {
+            resolved
+        }
+    };
+    collapse_path_components(&resolved)
 }
 
 pub fn log_dir_path(cfg: &Config) -> PathBuf {

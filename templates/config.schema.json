@@ -510,7 +510,7 @@
           ]
         },
         "workDir": {
-          "description": "Working directory for the child process in app sandbox. Defaults to `\"~\"` (home). config_dir() uses home.join(\".synbot\") or, if home fails, \".\".join(\".synbot\"); so cwd must be home, not ~/.synbot.",
+          "description": "Working directory for the child process in app sandbox. When omitted, defaults to the config root directory (`~/.synbot`, or `--root-dir`), not the entire user profile.",
           "default": null,
           "type": [
             "string",

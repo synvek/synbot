@@ -19,13 +19,14 @@ use super::types::{
     ExecutionResult, HealthStatus, SandboxConfig, SandboxInfo, SandboxState, SandboxStatus,
 };
 use chrono::Utc;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 use std::io::{Read, Write};
+use std::os::windows::io::{FromRawHandle, RawHandle};
 use std::path::{Path, PathBuf};
 use std::ptr::null_mut;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use windows::core::{HRESULT, PCWSTR};
 use windows::Win32::Foundation::{
     CloseHandle, HANDLE, HLOCAL, LocalFree, WAIT_OBJECT_0, WAIT_TIMEOUT,
@@ -42,10 +43,14 @@ use windows::Win32::Security::{
     SECURITY_CAPABILITIES, SUB_CONTAINERS_AND_OBJECTS_INHERIT,
 };
 use windows::Win32::Security::DACL_SECURITY_INFORMATION;
-use windows::Win32::Storage::FileSystem::{FILE_GENERIC_READ, FILE_GENERIC_WRITE};
+use windows::Win32::Storage::FileSystem::{
+    CreateFileW, QueryDosDeviceW, FILE_FLAG_BACKUP_SEMANTICS, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ,
+    FILE_GENERIC_WRITE, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+};
+use windows::Win32::Storage::FileSystem::GetVolumeInformationW;
 use windows::Win32::Security::ACL;
 use windows::Win32::Security::PSECURITY_DESCRIPTOR;
-use windows::Win32::Foundation::{ERROR_SUCCESS, SetHandleInformation, HANDLE_FLAG_INHERIT};
+use windows::Win32::Foundation::{ERROR_SUCCESS, SetHandleInformation, HANDLE_FLAG_INHERIT, HANDLE_FLAGS};
 use windows::Win32::System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE};
 use windows::Win32::System::Pipes::CreatePipe;
 use windows::Win32::System::Threading::{
@@ -178,6 +183,122 @@ impl WindowsAppContainerSandbox {
 /// Convert a Rust string to null-terminated wide string (caller must free with drop or LocalFree).
 fn to_wide_null(s: &str) -> Vec<u16> {
     OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
+}
+
+/// Resolve `X:\...` paths that are DOS device mappings (e.g. SUBST drives).
+///
+/// AppContainer file access can fail when a SUBST drive letter is used (e.g. `S:\...`), even if
+/// the underlying target path (e.g. `C:\...`) was granted in ACL setup. Resolve `X:` via
+/// `QueryDosDeviceW` and, when it is of the form `\??\C:\...`, rewrite to the underlying target.
+fn resolve_windows_dos_device_path(p: &Path) -> PathBuf {
+    let s = p.to_string_lossy();
+    let bytes = s.as_bytes();
+    if bytes.len() < 3 || bytes[1] != b':' || (bytes[2] != b'\\' && bytes[2] != b'/') {
+        return p.to_path_buf();
+    }
+    let drive = &s[0..2]; // "C:"
+    let drive_w = to_wide_null(drive);
+    let mut buf: Vec<u16> = vec![0; 32 * 1024];
+    let n = unsafe { QueryDosDeviceW(PCWSTR::from_raw(drive_w.as_ptr()), Some(&mut buf)) };
+    if n == 0 {
+        return p.to_path_buf();
+    }
+    let end = buf.iter().position(|c| *c == 0).unwrap_or(n as usize);
+    let target = String::from_utf16_lossy(&buf[..end]).replace('/', "\\");
+    let mapped_root = target
+        .strip_prefix(r"\\??\\")
+        .or_else(|| target.strip_prefix(r"\??\"));
+    let Some(mapped_root) = mapped_root else {
+        return p.to_path_buf();
+    };
+    let suffix = &s[3..]; // after "X:\"
+    let mut out = PathBuf::from(mapped_root);
+    if !suffix.is_empty() {
+        out.push(suffix);
+    }
+    out
+}
+
+fn normalize_host_path_for_appcontainer(p: &Path) -> PathBuf {
+    crate::config::normalize_workspace_path(&resolve_windows_dos_device_path(p))
+}
+
+fn windows_volume_root_for_path(path: &Path) -> Option<PathBuf> {
+    use std::path::Component;
+    let mut comps = path.components();
+    match (comps.next(), comps.next()) {
+        (Some(Component::Prefix(prefix)), Some(Component::RootDir)) => {
+            Some(PathBuf::from(prefix.as_os_str()).join(r"\"))
+        }
+        _ => None,
+    }
+}
+
+fn log_windows_volume_acl_capability(path: &Path) {
+    let Some(root) = windows_volume_root_for_path(path) else {
+        return;
+    };
+    let root_s = root.to_string_lossy();
+    let root_w = to_wide_null(&root_s);
+    let mut fs_name_buf: Vec<u16> = vec![0; 64];
+    let mut flags: u32 = 0;
+    unsafe {
+        let ok = GetVolumeInformationW(
+            PCWSTR::from_raw(root_w.as_ptr()),
+            None,
+            None,
+            None,
+            Some(&mut flags),
+            Some(&mut fs_name_buf),
+        )
+        .is_ok();
+        if !ok {
+            log::warn!("Volume info query failed for {}", root.display());
+            return;
+        }
+    }
+    let fs_name_end = fs_name_buf.iter().position(|c| *c == 0).unwrap_or(fs_name_buf.len());
+    let fs_name = String::from_utf16_lossy(&fs_name_buf[..fs_name_end]);
+    // From Win32 `GetVolumeInformationW` docs: FILE_PERSISTENT_ACLS = 0x00000008
+    const FILE_PERSISTENT_ACLS: u32 = 0x0000_0008;
+    let has_persistent_acls = (flags & FILE_PERSISTENT_ACLS) != 0;
+    log::info!(
+        "Volume capability: root={} fs={} flags=0x{:08x} persistent_acls={}",
+        root.display(),
+        fs_name,
+        flags,
+        has_persistent_acls
+    );
+    if !has_persistent_acls {
+        log::warn!(
+            "Volume {} filesystem {} does not report FILE_PERSISTENT_ACLS; AppContainer ACL grants may not work on this drive",
+            root.display(),
+            fs_name
+        );
+    }
+}
+
+fn host_preflight_open_dir(path: &Path) -> std::result::Result<(), u32> {
+    let wide = to_wide_null(&path.to_string_lossy());
+    unsafe {
+        // Open directory handle (requires FILE_FLAG_BACKUP_SEMANTICS).
+        let h = CreateFileW(
+            PCWSTR::from_raw(wide.as_ptr()),
+            (FILE_GENERIC_READ | FILE_GENERIC_EXECUTE).0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS,
+            None,
+        );
+        match h {
+            Ok(handle) => {
+                let _ = CloseHandle(handle);
+                Ok(())
+            }
+            Err(e) => Err(e.code().0 as u32),
+        }
+    }
 }
 
 /// Returns true if the current process is running with elevated privileges (Administrator).
@@ -819,6 +940,502 @@ fn add_firewall_inbound_rule_for_port(rule_name: &str, port: u16) -> Result<()> 
     Ok(())
 }
 
+/// `CreateProcessW` with a non-null application name only resolves partial names against the
+/// **current directory**, not `PATH`. The exec tool passes bare `cmd`.
+///
+/// On Windows, `Path::new("cmd").parent()` is `Some("")` (empty), which breaks ACL APIs with
+/// `ERROR_INVALID_NAME` (123).
+fn resolve_windows_command_for_create_process(command: &str) -> PathBuf {
+    let cmd = command.trim();
+    if cmd.is_empty() {
+        return PathBuf::from(cmd);
+    }
+    let path = Path::new(cmd);
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+    if cmd.contains('\\') || cmd.contains('/') {
+        return path.to_path_buf();
+    }
+    let lower = cmd.to_ascii_lowercase();
+    if lower == "cmd" || lower == "cmd.exe" {
+        if let Ok(c) = std::env::var("ComSpec") {
+            let p = PathBuf::from(c.trim());
+            if !p.as_os_str().is_empty() {
+                return p;
+            }
+        }
+        return PathBuf::from(r"C:\Windows\System32\cmd.exe");
+    }
+    PathBuf::from(cmd)
+}
+
+/// Skip DACL edits under well-known Windows install roots (often `ERROR_ACCESS_DENIED` for
+/// non-elevated callers; AppContainer can still run system binaries per policy).
+fn is_windows_skip_acl_dir(path: &Path) -> bool {
+    let s = path.to_string_lossy().replace('\\', "/").to_lowercase();
+    s == "c:/windows"
+        || s.starts_with("c:/windows/")
+        || s == "c:/program files"
+        || s.starts_with("c:/program files/")
+        || s == "c:/program files (x86)"
+        || s.starts_with("c:/program files (x86)/")
+}
+
+fn normalize_windows_path_cmp_key(path: &Path) -> String {
+    let mut s = path.to_string_lossy().replace('\\', "/").to_lowercase();
+    while s.len() > 1 && s.ends_with('/') {
+        s.pop();
+    }
+    s
+}
+
+/// `desc` is `root` or a subdirectory of `root` (compares normalized path keys).
+fn path_is_under_or_equal_directory(desc: &Path, root: &Path) -> bool {
+    let root_key = normalize_windows_path_cmp_key(root);
+    if root_key.is_empty() {
+        return false;
+    }
+    let mut cur = Some(desc);
+    while let Some(p) = cur {
+        if normalize_windows_path_cmp_key(p) == root_key {
+            return true;
+        }
+        cur = p.parent();
+    }
+    false
+}
+
+/// Keep only outermost paths. Inheritable `SetNamedSecurityInfoW` on each nested folder can make
+/// Windows propagate ACLs through the **entire** subtree each time — extremely slow when
+/// `C:\Users\…\.synbot` already covers `…\.synbot\workspace`, logs, workflows, etc.
+fn collapse_nested_paths_outermost(paths: &[String]) -> Vec<String> {
+    if paths.is_empty() {
+        return vec![];
+    }
+    let parsed: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
+    let mut order: Vec<usize> = (0..parsed.len()).collect();
+    order.sort_by_key(|&i| parsed[i].components().count());
+    let mut kept: Vec<usize> = Vec::new();
+    for &i in &order {
+        if kept
+            .iter()
+            .any(|&j| path_is_under_or_equal_directory(&parsed[i], &parsed[j]))
+        {
+            continue;
+        }
+        kept.retain(|&j| !path_is_under_or_equal_directory(&parsed[j], &parsed[i]));
+        kept.push(i);
+    }
+    kept.into_iter().map(|i| paths[i].clone()).collect()
+}
+
+/// `C:\` style path — stop ancestor traverse before the volume root.
+fn is_windows_volume_root(path: &Path) -> bool {
+    use std::path::Component;
+    let mut it = path.components();
+    match (it.next(), it.next(), it.next()) {
+        (Some(Component::Prefix(_)), Some(Component::RootDir), None) => true,
+        _ => false,
+    }
+}
+
+/// `SetNamedSecurityInfoW` with inheritable ACE on the profile root propagates through the entire tree.
+fn windows_path_is_user_profile_root(path: &Path) -> bool {
+    let Some(prof) = std::env::var_os("USERPROFILE") else {
+        return false;
+    };
+    let pb = Path::new(&prof);
+    if pb.as_os_str().is_empty() {
+        return false;
+    }
+    normalize_windows_path_cmp_key(path) == normalize_windows_path_cmp_key(pb)
+}
+
+fn normalized_work_dir_path(s: &str) -> PathBuf {
+    normalize_host_path_for_appcontainer(Path::new(s.trim()))
+}
+
+/// Directory safe to pass as `CreateProcessW` `lpCurrentDirectory` when the desired user folder
+/// may be rejected for the AppContainer token (PowerShell reports “current directory invalid”).
+fn windows_host_create_process_cwd() -> PathBuf {
+    std::env::var_os("SystemRoot")
+        .map(|root| PathBuf::from(root).join("System32"))
+        .filter(|p| p.is_dir())
+        .unwrap_or_else(|| PathBuf::from(r"C:\Windows\System32"))
+}
+
+fn join_args_for_cmd_c_tail(parts: &[String]) -> String {
+    match parts.len() {
+        0 => String::new(),
+        1 => parts[0].clone(),
+        _ => parts.join(" "),
+    }
+}
+
+/// `cd /d` target for `cmd /c`: avoid quoting the path when possible.
+///
+/// If we emit `cd /d "C:\path"` and the whole `/C` argument is later wrapped in `"..."` for
+/// `CreateProcessW`, we end up with embedded `\"`, which `cmd` often parses as **invalid path
+/// syntax** (Win32 123 — 文件名、目录名或卷标语法不正确).
+fn cmd_cd_path_segment_for_c(user_workdir: &Path) -> String {
+    let s = user_workdir.to_string_lossy();
+    let s = s.trim();
+    let needs_quotes = s.contains(' ')
+        || s.contains('&')
+        || s.contains('(')
+        || s.contains(')')
+        || s.contains('^')
+        || s.contains('%')
+        || s.contains('\t');
+    if needs_quotes {
+        let inner = s.replace('"', "");
+        format!("\"{inner}\"")
+    } else {
+        s.to_string()
+    }
+}
+
+fn cmd_pushd_path_segment_for_c(user_workdir: &Path) -> String {
+    // pushd has similar parsing pitfalls to cd; reuse the same quoting rules.
+    cmd_cd_path_segment_for_c(user_workdir)
+}
+
+/// Use host System32 as the process current directory, then `cd` / `Set-Location` into
+/// `user_workdir` inside the shell so listing and tools see the intended folder.
+fn wrap_spawn_args_for_user_workdir(exe: &Path, args: &[String], user_workdir: &Path) -> Vec<String> {
+    let stem = exe
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let wd_lit = user_workdir.to_string_lossy();
+
+    if stem == "cmd" {
+        if args.len() >= 2 && args[0].eq_ignore_ascii_case("/c") {
+            let user_cmd = join_args_for_cmd_c_tail(&args[1..]);
+            // Prefer `pushd` over `cd /d` for AppContainer: it tends to behave better with drive changes
+            // and avoids some "current directory invalid" cases when the process cwd is System32.
+            let target = cmd_pushd_path_segment_for_c(user_workdir);
+            let combined = if user_cmd.is_empty() {
+                format!("pushd {target}")
+            } else {
+                format!("pushd {target} && {user_cmd}")
+            };
+            return vec!["/C".to_string(), combined];
+        }
+    }
+    if stem == "powershell" || stem == "pwsh" {
+        for i in 0..args.len().saturating_sub(1) {
+            let fl = args[i].to_ascii_lowercase();
+            if fl == "-command" || fl == "-c" {
+                let wd_ps = wd_lit.replace('\'', "''");
+                let script = args[i + 1].clone();
+                let combined = format!("Set-Location -LiteralPath '{}'; {}", wd_ps, script);
+                let mut out = args.to_vec();
+                out[i + 1] = combined;
+                return out;
+            }
+        }
+    }
+    args.to_vec()
+}
+
+/// Main synbot runs inside the app sandbox (`SYNBOT_IN_APP_SANDBOX`): the token cannot change
+/// host folder DACLs (`SetNamedSecurityInfoW` → access denied). Grants must be done once from
+/// `synbot sandbox setup` (Administrator, not under app sandbox).
+fn skip_runtime_appcontainer_acl_grants() -> bool {
+    std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some()
+}
+
+/// Runtime `SetNamedSecurityInfoW` from a **non-elevated** process can be extremely slow or appear
+/// to hang (AV / policy / contention on system folders). `synbot sandbox setup` (Administrator)
+/// already applies DACLs; skip duplicate edits on `synbot sandbox start` as a normal user.
+fn should_apply_runtime_appcontainer_acl_grants() -> bool {
+    !skip_runtime_appcontainer_acl_grants() && is_process_elevated()
+}
+
+/// Non-inheriting read on each parent directory so the AppContainer SID can **traverse** to the target.
+/// Without this, ACEs only on e.g. `...\yangxb\.synbot\workspace` do not grant traverse on `...\yangxb`.
+/// Deduplicated across all paths in one setup run (cheap: O(depth) per path, no subtree propagation).
+fn grant_appcontainer_path_ancestors_traverse(
+    path: &Path,
+    container_sid: *mut std::ffi::c_void,
+    ancestor_seen: &mut HashSet<String>,
+) {
+    if container_sid.is_null() {
+        return;
+    }
+    let phase_start = Instant::now();
+    let target = path.display().to_string();
+    let mut new_ancestor_grants: u32 = 0;
+    let _ = writeln!(
+        std::io::stderr(),
+        "[synbot sandbox]   Ancestors for {} — each line below is one DACL edit (slow on large ACLs / AV hooks)...",
+        target
+    );
+    let _ = std::io::stderr().flush();
+    let path = normalize_host_path_for_appcontainer(path);
+    let mut current = path.parent();
+    while let Some(dir) = current {
+        if dir.as_os_str().is_empty() {
+            break;
+        }
+        if is_windows_volume_root(dir) {
+            // Traverse into e.g. C:\Users\… requires rights on the volume root (e.g. C:\).
+            log_windows_volume_acl_capability(dir);
+            let key = dir.to_string_lossy().to_lowercase();
+            if ancestor_seen.insert(key) {
+                new_ancestor_grants += 1;
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "[synbot sandbox]   Ancestor: {} (volume root)...",
+                    dir.display()
+                );
+                let _ = std::io::stderr().flush();
+                let t = Instant::now();
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "[synbot sandbox]     ACL {} (read, this folder only) …",
+                    dir.display()
+                );
+                let _ = std::io::stderr().flush();
+                if let Err(e) = grant_appcontainer_path_access(dir, container_sid, true, false) {
+                    let wall_ms = t.elapsed().as_secs_f64() * 1000.0;
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "[synbot sandbox]     ACL ancestor failed after {:.0}ms: {}",
+                        wall_ms, e
+                    );
+                    let _ = std::io::stderr().flush();
+                    log::warn!(
+                        "sandbox setup: ancestor traverse ACL grant failed for {}: {}",
+                        dir.display(),
+                        e
+                    );
+                } else {
+                    let wall_ms = t.elapsed().as_secs_f64() * 1000.0;
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "[synbot sandbox]     ACL ancestor finished in {:.0}ms (details: RUST_LOG=info)",
+                        wall_ms
+                    );
+                    let _ = std::io::stderr().flush();
+                }
+            }
+            break;
+        }
+        if is_windows_skip_acl_dir(dir) {
+            break;
+        }
+        let key = dir.to_string_lossy().to_lowercase();
+        if !ancestor_seen.insert(key) {
+            current = dir.parent();
+            continue;
+        }
+        new_ancestor_grants += 1;
+        let _ = writeln!(
+            std::io::stderr(),
+            "[synbot sandbox]   Ancestor: {} ...",
+            dir.display()
+        );
+        let _ = std::io::stderr().flush();
+        let t = Instant::now();
+        let _ = writeln!(
+            std::io::stderr(),
+            "[synbot sandbox]     ACL {} (read, this folder only) …",
+            dir.display()
+        );
+        let _ = std::io::stderr().flush();
+        if let Err(e) = grant_appcontainer_path_access(dir, container_sid, true, false) {
+            let wall_ms = t.elapsed().as_secs_f64() * 1000.0;
+            let _ = writeln!(
+                std::io::stderr(),
+                "[synbot sandbox]     ACL ancestor failed after {:.0}ms: {}",
+                wall_ms, e
+            );
+            let _ = std::io::stderr().flush();
+            log::warn!(
+                "sandbox setup: ancestor traverse ACL grant failed for {}: {}",
+                dir.display(),
+                e
+            );
+        } else {
+            let wall_ms = t.elapsed().as_secs_f64() * 1000.0;
+            let _ = writeln!(
+                std::io::stderr(),
+                "[synbot sandbox]     ACL ancestor finished in {:.0}ms (details: RUST_LOG=info)",
+                wall_ms
+            );
+            let _ = std::io::stderr().flush();
+        }
+        current = dir.parent();
+    }
+    let phase_ms = phase_start.elapsed().as_secs_f64() * 1000.0;
+    let _ = writeln!(
+        std::io::stderr(),
+        "[synbot sandbox]   Ancestors finished for {}: {} new grant(s) in {:.0}ms",
+        target, new_ancestor_grants, phase_ms
+    );
+    let _ = std::io::stderr().flush();
+    if new_ancestor_grants > 0 {
+        log::info!(
+            "sandbox ACL ancestors for target={}: {} new directory grant(s), phase_total_ms={:.1}",
+            target,
+            new_ancestor_grants,
+            phase_ms
+        );
+    } else {
+        log::debug!(
+            "sandbox ACL ancestors for target={}: all ancestors already granted (deduped), phase_total_ms={:.1}",
+            target,
+            phase_ms
+        );
+    }
+}
+
+/// One-time grants for `synbot sandbox setup` (elevated host process). Same AppContainer SID as runtime.
+fn grant_config_paths_for_appcontainer_sid(
+    config: &super::types::SandboxConfig,
+    container_sid: *mut std::ffi::c_void,
+    grant_parent_traverse_acl: bool,
+) {
+    if container_sid.is_null() {
+        return;
+    }
+    let setup_acl_start = Instant::now();
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut ancestor_seen: HashSet<String> = HashSet::new();
+    let mut try_one = |raw: &str, read_only: bool, inherit_requested: bool| {
+        let raw = raw.trim();
+        if raw.is_empty() {
+            return;
+        }
+        let path = normalize_host_path_for_appcontainer(Path::new(raw));
+        if path.as_os_str().is_empty() {
+            return;
+        }
+        let key = path.to_string_lossy().to_lowercase();
+        if !seen.insert(key) {
+            return;
+        }
+        if is_windows_skip_acl_dir(&path) {
+            return;
+        }
+
+        let inherit = inherit_requested && !windows_path_is_user_profile_root(&path);
+
+        let _ = writeln!(
+            std::io::stderr(),
+            "[synbot sandbox]   Path: {} ({}{}) — walking parent directories next (each may take seconds)...",
+            path.display(),
+            if read_only { "read" } else { "read/write" },
+            if inherit {
+                ", propagate to children"
+            } else {
+                ", this folder only"
+            }
+        );
+        let _ = std::io::stderr().flush();
+
+        if grant_parent_traverse_acl {
+            grant_appcontainer_path_ancestors_traverse(&path, container_sid, &mut ancestor_seen);
+        }
+
+        let _ = writeln!(
+            std::io::stderr(),
+            "[synbot sandbox]   ACL {} ({}{}) …",
+            path.display(),
+            if read_only { "read" } else { "read/write" },
+            if inherit {
+                ", propagate to children"
+            } else {
+                ", this folder only"
+            }
+        );
+        let _ = std::io::stderr().flush();
+
+        let t_path = Instant::now();
+        match grant_appcontainer_path_access(&path, container_sid, read_only, inherit) {
+            Ok(()) => {
+                let wall_ms = t_path.elapsed().as_secs_f64() * 1000.0;
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "[synbot sandbox]   ACL target finished in {:.0}ms (details: RUST_LOG=info)",
+                    wall_ms
+                );
+                let _ = std::io::stderr().flush();
+            }
+            Err(e) => {
+                let wall_ms = t_path.elapsed().as_secs_f64() * 1000.0;
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "[synbot sandbox]   ACL target failed after {:.0}ms: {}",
+                    wall_ms, e
+                );
+                let _ = std::io::stderr().flush();
+                log::warn!(
+                    "sandbox setup: ACL grant failed for {}: {}",
+                    path.display(),
+                    e
+                );
+            }
+        }
+    };
+
+    // Process writable/readonly before `child_work_dir`. If work dir was processed first with
+    // object-only ACE, the same path in `writable_paths` was skipped (`seen`) and never got an
+    // inheritable ACE — AppContainer could not access files under e.g. `~/.synbot`.
+    let writ_collapsed = collapse_nested_paths_outermost(&config.filesystem.writable_paths);
+    let read_not_under_writ: Vec<String> = config
+        .filesystem
+        .readonly_paths
+        .iter()
+        .filter(|r| {
+            let rp = Path::new(r.trim());
+            !writ_collapsed
+                .iter()
+                .any(|w| path_is_under_or_equal_directory(rp, Path::new(w.trim())))
+        })
+        .cloned()
+        .collect();
+    let read_collapsed = collapse_nested_paths_outermost(&read_not_under_writ);
+
+    let skipped_writ = config.filesystem.writable_paths.len().saturating_sub(writ_collapsed.len());
+    let skipped_read_ro = config
+        .filesystem
+        .readonly_paths
+        .len()
+        .saturating_sub(read_not_under_writ.len());
+    let skipped_read_nested =
+        read_not_under_writ.len().saturating_sub(read_collapsed.len());
+    if skipped_writ + skipped_read_ro + skipped_read_nested > 0 {
+        let _ = writeln!(
+            std::io::stderr(),
+            "[synbot sandbox]   Skipping {} redundant path(s): one inheritable ACL on the parent folder covers nested dirs (avoids very slow setup when the profile tree is large).",
+            skipped_writ + skipped_read_ro + skipped_read_nested
+        );
+        let _ = std::io::stderr().flush();
+    }
+
+    for p in &writ_collapsed {
+        try_one(p, false, true);
+    }
+    for p in &read_collapsed {
+        try_one(p, true, true);
+    }
+    if let Some(ref wd) = config.child_work_dir {
+        // Request inherit; `windows_path_is_user_profile_root` forces object-only on `%USERPROFILE%`.
+        try_one(wd, false, true);
+    }
+
+    log::info!(
+        "sandbox ACL setup complete sandbox_id={} total_elapsed_ms={:.1}",
+        config.sandbox_id,
+        setup_acl_start.elapsed().as_secs_f64() * 1000.0
+    );
+}
+
 /// Grant the AppContainer loopback exemption so processes on the same machine can connect
 /// to ports bound inside the AppContainer (e.g. the web server on 127.0.0.1).
 /// Equivalent to: CheckNetIsolation.exe LoopbackExempt -a -n="<profile_name>"
@@ -843,21 +1460,41 @@ fn add_loopback_exemption_for_appcontainer(container_sid: *mut std::ffi::c_void)
 }
 
 /// Grant the AppContainer SID read-only or read+write access to a path (file or directory).
+/// When `inherit` is true, the ACE is inheritable by children (used for workspace roots).
+/// When `inherit` is false, the ACE applies to this object only (no inheritance to children).
 /// Caller must run with sufficient privileges to modify the path's DACL.
-fn grant_appcontainer_path_access(path: &Path, container_sid: *mut std::ffi::c_void, read_only: bool) -> Result<()> {
+fn grant_appcontainer_path_access(
+    path: &Path,
+    container_sid: *mut std::ffi::c_void,
+    read_only: bool,
+    inherit: bool,
+) -> Result<()> {
     if container_sid.is_null() {
         return Err(SandboxError::CreationFailed("container_sid is null".to_string()));
     }
+    if path.as_os_str().is_empty() {
+        return Err(SandboxError::CreationFailed(
+            "Grant ACL: path is empty".to_string(),
+        ));
+    }
+    let path_disp = path.display().to_string();
+    let t_total = Instant::now();
     let path_wide = to_wide_null(&path.to_string_lossy());
     // Writable needs DELETE (0x10000) so that rename(tmp, target) can overwrite existing
     // session files (MoveFileEx overwrite requires DELETE on the target in AppContainer).
     const FILE_DELETE: u32 = 0x0001_0000;
+    // NOTE: For *directories*, AppContainer needs "execute/traverse" rights to `cd` / `Set-Location`
+    // and to traverse ancestors. `FILE_GENERIC_EXECUTE` maps to `FILE_TRAVERSE` on directories.
     let perms = if read_only {
-        FILE_GENERIC_READ.0
+        FILE_GENERIC_READ.0 | FILE_GENERIC_EXECUTE.0
     } else {
-        FILE_GENERIC_READ.0 | FILE_GENERIC_WRITE.0 | FILE_DELETE
+        FILE_GENERIC_READ.0 | FILE_GENERIC_WRITE.0 | FILE_GENERIC_EXECUTE.0 | FILE_DELETE
     };
+    let mut ms_get = 0.0f64;
+    let mut ms_entries = 0.0f64;
+    let mut ms_set = 0.0f64;
     unsafe {
+        let t_get = Instant::now();
         let mut sd: PSECURITY_DESCRIPTOR = PSECURITY_DESCRIPTOR(null_mut());
         let mut dacl: *mut ACL = null_mut();
         let err = GetNamedSecurityInfoW(
@@ -870,7 +1507,12 @@ fn grant_appcontainer_path_access(path: &Path, container_sid: *mut std::ffi::c_v
             None,
             &mut sd,
         );
+        ms_get = t_get.elapsed().as_secs_f64() * 1000.0;
         if err != ERROR_SUCCESS {
+            log::warn!(
+                "sandbox ACL GetNamedSecurityInfoW failed path={} after {:.1}ms err={:?}",
+                path_disp, ms_get, err
+            );
             return Err(SandboxError::CreationFailed(format!(
                 "GetNamedSecurityInfoW({}) failed: {:?}",
                 path.display(),
@@ -882,19 +1524,30 @@ fn grant_appcontainer_path_access(path: &Path, container_sid: *mut std::ffi::c_v
         let explicit_access = EXPLICIT_ACCESS_W {
             grfAccessPermissions: perms,
             grfAccessMode: GRANT_ACCESS,
-            grfInheritance: SUB_CONTAINERS_AND_OBJECTS_INHERIT,
+            grfInheritance: if inherit {
+                SUB_CONTAINERS_AND_OBJECTS_INHERIT
+            } else {
+                windows::Win32::Security::ACE_FLAGS(0)
+            },
             Trustee: trustee,
         };
         let mut new_acl: *mut ACL = null_mut();
+        let t_entries = Instant::now();
         let err2 = SetEntriesInAclW(Some(&[explicit_access]), Some(dacl), &mut new_acl);
+        ms_entries = t_entries.elapsed().as_secs_f64() * 1000.0;
         if err2 != ERROR_SUCCESS {
             let _ = LocalFree(HLOCAL(sd.0));
+            log::warn!(
+                "sandbox ACL SetEntriesInAclW failed path={} after get={:.1}ms entries={:.1}ms err={:?}",
+                path_disp, ms_get, ms_entries, err2
+            );
             return Err(SandboxError::CreationFailed(format!(
                 "SetEntriesInAclW({}) failed: {:?}",
                 path.display(),
                 err2
             )));
         }
+        let t_set = Instant::now();
         let err3 = SetNamedSecurityInfoW(
             PCWSTR::from_raw(path_wide.as_ptr()),
             SE_FILE_OBJECT,
@@ -904,9 +1557,14 @@ fn grant_appcontainer_path_access(path: &Path, container_sid: *mut std::ffi::c_v
             Some(new_acl),
             None,
         );
+        ms_set = t_set.elapsed().as_secs_f64() * 1000.0;
         let _ = LocalFree(HLOCAL(new_acl as *mut _));
         let _ = LocalFree(HLOCAL(sd.0));
         if err3 != ERROR_SUCCESS {
+            log::warn!(
+                "sandbox ACL SetNamedSecurityInfoW failed path={} after get={:.1}ms entries={:.1}ms set={:.1}ms err={:?}",
+                path_disp, ms_get, ms_entries, ms_set, err3
+            );
             return Err(SandboxError::CreationFailed(format!(
                 "SetNamedSecurityInfoW({}) failed: {:?}",
                 path.display(),
@@ -914,6 +1572,17 @@ fn grant_appcontainer_path_access(path: &Path, container_sid: *mut std::ffi::c_v
             )));
         }
     }
+    let ms_total = t_total.elapsed().as_secs_f64() * 1000.0;
+    log::info!(
+        "sandbox ACL grant ok path={} read_only={} inherit={} ms: get_dacl={:.1} set_entries={:.1} set_dacl={:.1} wall_total={:.1}",
+        path_disp,
+        read_only,
+        inherit,
+        ms_get,
+        ms_entries,
+        ms_set,
+        ms_total
+    );
     Ok(())
 }
 
@@ -946,44 +1615,50 @@ impl WindowsAppContainerSandbox {
         let cmd_wide = to_wide_null(&cmd_line);
         let exe_wide = to_wide_null(&exe.to_string_lossy());
 
-        let is_system_path = |path: &Path| {
-            let s = path.to_string_lossy().replace('\\', "/").to_lowercase();
-            s == "c:/windows"
-                || s.starts_with("c:/windows/")
-                || s == "c:/program files"
-                || s.starts_with("c:/program files/")
-                || s == "c:/program files (x86)"
-                || s.starts_with("c:/program files (x86)/")
-        };
-
-        // Grant AppContainer SID access to exe directory and config paths.
-        if let Some(parent) = exe.parent() {
-            let _ = writeln!(std::io::stderr(), "[synbot sandbox] Grant access: exe dir {}...", parent.display());
-            let _ = std::io::stderr().flush();
-            if let Err(e) = grant_appcontainer_path_access(parent, container_sid, false) {
-                log::warn!("Grant access to exe dir {}: {} (child may fail to start)", parent.display(), e);
+        // Grant AppContainer SID access to exe directory and config paths (host only; see skip_runtime_*).
+        if skip_runtime_appcontainer_acl_grants() {
+            log::debug!(
+                "Skipping per-exec AppContainer ACL grants (main process is in app sandbox). \
+                 Run `synbot sandbox setup` as Administrator on the host so DACLs are applied once."
+            );
+        } else if should_apply_runtime_appcontainer_acl_grants() {
+            if let Some(parent) = exe.parent() {
+                if !parent.as_os_str().is_empty() && !is_windows_skip_acl_dir(parent) {
+                    let _ = writeln!(std::io::stderr(), "[synbot sandbox] Grant access: exe dir {}...", parent.display());
+                    let _ = std::io::stderr().flush();
+                    if let Err(e) = grant_appcontainer_path_access(parent, container_sid, false, true) {
+                        log::warn!("Grant access to exe dir {}: {} (child may fail to start)", parent.display(), e);
+                    }
+                }
             }
-        }
-        for p in &self.config.filesystem.writable_paths {
-            let path = Path::new(p);
-            let _ = writeln!(std::io::stderr(), "[synbot sandbox] Grant write: {}...", path.display());
-            let _ = std::io::stderr().flush();
-            if let Err(e) = grant_appcontainer_path_access(path, container_sid, false) {
-                log::warn!("Grant write access to {}: {}", path.display(), e);
-            }
-        }
-        for p in &self.config.filesystem.readonly_paths {
-            let path = Path::new(p);
-            if is_system_path(path) {
-                let _ = writeln!(std::io::stderr(), "[synbot sandbox] Skip ACL for system path: {} (would block)", path.display());
+            for p in &self.config.filesystem.writable_paths {
+                let path = Path::new(p);
+                let _ = writeln!(std::io::stderr(), "[synbot sandbox] Grant write: {}...", path.display());
                 let _ = std::io::stderr().flush();
-                continue;
+                if let Err(e) = grant_appcontainer_path_access(path, container_sid, false, true) {
+                    log::warn!("Grant write access to {}: {}", path.display(), e);
+                }
             }
-            let _ = writeln!(std::io::stderr(), "[synbot sandbox] Grant read: {}...", path.display());
+            for p in &self.config.filesystem.readonly_paths {
+                let path = Path::new(p);
+                if is_windows_skip_acl_dir(path) {
+                    let _ = writeln!(std::io::stderr(), "[synbot sandbox] Skip ACL for system path: {} (would block)", path.display());
+                    let _ = std::io::stderr().flush();
+                    continue;
+                }
+                let _ = writeln!(std::io::stderr(), "[synbot sandbox] Grant read: {}...", path.display());
+                let _ = std::io::stderr().flush();
+                if let Err(e) = grant_appcontainer_path_access(path, container_sid, true, true) {
+                    log::warn!("Grant read access to {}: {}", path.display(), e);
+                }
+            }
+        } else {
+            let _ = writeln!(
+                std::io::stderr(),
+                "[synbot sandbox] Skipping runtime ACL edits (not elevated). \
+                 DACLs should already exist from `synbot sandbox setup`; if the child fails with access denied, run setup again as Administrator."
+            );
             let _ = std::io::stderr().flush();
-            if let Err(e) = grant_appcontainer_path_access(path, container_sid, true) {
-                log::warn!("Grant read access to {}: {}", path.display(), e);
-            }
         }
 
         // Working directory: use config child_work_dir if set (e.g. "~" or "C:\Users\you"), else first writable or exe dir.
@@ -991,15 +1666,19 @@ impl WindowsAppContainerSandbox {
             .config
             .child_work_dir
             .as_ref()
-            .map(|s| Path::new(s).to_path_buf())
+            .map(|s| normalized_work_dir_path(s))
             .or_else(|| {
                 self.config
                     .filesystem
                     .writable_paths
                     .first()
-                    .map(|s| Path::new(s).to_path_buf())
+                    .map(|s| normalized_work_dir_path(s))
             })
-            .or_else(|| exe.parent().map(|p| p.to_path_buf()));
+            .or_else(|| {
+                exe.parent()
+                    .filter(|p| !p.as_os_str().is_empty())
+                    .map(|p| crate::config::normalize_workspace_path(p))
+            });
         let work_dir_wide = work_dir.as_ref().map(|p| to_wide_null(&p.to_string_lossy()));
 
         let (h_stdin, h_stdout, h_stderr) = unsafe {
@@ -1147,9 +1826,157 @@ impl WindowsAppContainerSandbox {
         let container_sid = self
             .container_sid
             .ok_or_else(|| SandboxError::CreationFailed("AppContainer not started".to_string()))?;
+        let sid_str = unsafe { sid_to_string(container_sid) }.unwrap_or_else(|| "<unknown>".to_string());
+
+        if skip_runtime_appcontainer_acl_grants() {
+            log::debug!(
+                "Skipping per-exec AppContainer ACL grants (main process is in app sandbox). \
+                 Run `synbot sandbox setup` as Administrator on the host so DACLs are applied once."
+            );
+        } else if should_apply_runtime_appcontainer_acl_grants() {
+            if let Some(parent) = exe.parent() {
+                if !parent.as_os_str().is_empty() && !is_windows_skip_acl_dir(parent) {
+                    if let Err(e) = grant_appcontainer_path_access(parent, container_sid, false, true) {
+                        log::warn!(
+                            "Grant access to exe dir {}: {} (child may fail to start)",
+                            parent.display(),
+                            e
+                        );
+                    }
+                }
+            }
+            for p in &self.config.filesystem.writable_paths {
+                let path = normalize_host_path_for_appcontainer(Path::new(p));
+                if let Err(e) = grant_appcontainer_path_access(&path, container_sid, false, true) {
+                    log::warn!("Grant write access to {}: {}", path.display(), e);
+                }
+            }
+            for p in &self.config.filesystem.readonly_paths {
+                let path = normalize_host_path_for_appcontainer(Path::new(p));
+                if is_windows_skip_acl_dir(&path) {
+                    continue;
+                }
+                if let Err(e) = grant_appcontainer_path_access(&path, container_sid, true, true) {
+                    log::warn!("Grant read access to {}: {}", path.display(), e);
+                }
+            }
+        } else {
+            log::debug!(
+                "Skipping runtime ACL edits for piped spawn (not elevated); rely on `synbot sandbox setup` DACLs"
+            );
+        }
+
+        let work_dir: Option<PathBuf> = working_dir_override
+            .map(|p| normalize_host_path_for_appcontainer(p))
+            .or_else(|| {
+                self.config
+                    .child_work_dir
+                    .as_ref()
+                    .map(|s| normalized_work_dir_path(s))
+            })
+            .or_else(|| {
+                self.config
+                    .filesystem
+                    .writable_paths
+                    .first()
+                    .map(|s| normalized_work_dir_path(s))
+            })
+            .or_else(|| {
+                exe.parent()
+                    .filter(|p| !p.as_os_str().is_empty())
+                    .map(|p| normalize_host_path_for_appcontainer(p))
+            });
+
+        log::debug!(
+            "AppContainer spawn request: sandbox_id={}, container_sid={}, exe={}, args={:?}, working_dir_override={:?}, resolved_work_dir={:?}",
+            self.config.sandbox_id,
+            sid_str,
+            exe.display(),
+            args,
+            working_dir_override.map(|p| p.display().to_string()),
+            work_dir.as_ref().map(|p| p.display().to_string())
+        );
+
+        let mut work_dir_preflight_ok = false;
+        if let Some(wd) = work_dir.as_ref() {
+            // Log volume capabilities for the workdir volume on each spawn. This helps diagnose
+            // "ACL setup looks fine but AppContainer still denies access" cases on non-NTFS volumes
+            // (e.g. exFAT / FAT / some virtual volumes).
+            log_windows_volume_acl_capability(wd);
+            match host_preflight_open_dir(wd) {
+                Ok(()) => {
+                    work_dir_preflight_ok = true;
+                    log::debug!("Host preflight: working_dir open ok: {}", wd.display());
+                }
+                Err(code) => {
+                    log::warn!(
+                        "Host preflight: working_dir open FAILED: {} (win32_error={})",
+                        wd.display(),
+                        code
+                    );
+                }
+            }
+        }
+
+        // Prefer setting `lpCurrentDirectory` directly when the directory is accessible to the
+        // AppContainer token. This avoids `cmd.exe cd /d ...` failures even when ACLs look fine.
+        // If current dir is rejected, fall back to a safe System32 cwd and do an in-shell `cd`.
+        let stem = exe
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let cmd_c_payload = if stem == "cmd" && args.len() >= 2 && args[0].eq_ignore_ascii_case("/c") {
+            join_args_for_cmd_c_tail(&args[1..]).to_ascii_lowercase()
+        } else {
+            String::new()
+        };
+        let cmd_payload_mentions_powershell =
+            stem == "cmd" && (cmd_c_payload.contains("powershell") || cmd_c_payload.contains("pwsh"));
+
+        let (spawn_args, create_process_cwd_wide): (Vec<String>, Option<Vec<u16>>) = match work_dir.as_ref() {
+            // PowerShell is known to emit “当前目录无效” when inheriting some AppContainer cwd values.
+            // When cmd.exe is being used to launch PowerShell, prefer System32 + in-shell cd.
+            Some(wd) if cmd_payload_mentions_powershell => (
+                wrap_spawn_args_for_user_workdir(exe, args, wd),
+                Some(to_wide_null(&windows_host_create_process_cwd().to_string_lossy())),
+            ),
+            // For cmd.exe, prefer System32 + in-shell pushd even if the directory is accessible.
+            // cmd has been observed to fail with Access Denied or Current Directory Invalid when
+            // inheriting an AppContainer cwd on non-system volumes.
+            Some(wd) if stem == "cmd" => (
+                wrap_spawn_args_for_user_workdir(exe, args, wd),
+                Some(to_wide_null(&windows_host_create_process_cwd().to_string_lossy())),
+            ),
+            Some(wd) if work_dir_preflight_ok => (args.to_vec(), Some(to_wide_null(&wd.to_string_lossy()))),
+            Some(wd) => (
+                wrap_spawn_args_for_user_workdir(exe, args, wd),
+                Some(to_wide_null(&windows_host_create_process_cwd().to_string_lossy())),
+            ),
+            None => (args.to_vec(), None),
+        };
+        log::debug!(
+            "AppContainer CreateProcessW cwd choice: sandbox_id={}, cwd_mode={}, lpCurrentDirectory={}",
+            self.config.sandbox_id,
+            if work_dir.is_some() && cmd_payload_mentions_powershell {
+                "system32+cd(powershell)"
+            } else if work_dir.is_some() && stem == "cmd" {
+                "system32+pushd(cmd)"
+            } else if work_dir.as_ref().is_some_and(|_| work_dir_preflight_ok) {
+                "direct"
+            } else if work_dir.is_some() {
+                "system32+cd"
+            } else {
+                "none"
+            },
+            create_process_cwd_wide
+                .as_ref()
+                .map(|w| String::from_utf16_lossy(&w[..w.len().saturating_sub(1)]))
+                .unwrap_or_else(|| "<null>".to_string())
+        );
 
         let cmd_line: String = std::iter::once(exe.as_os_str().to_string_lossy().into_owned())
-            .chain(args.iter().cloned())
+            .chain(spawn_args.iter().cloned())
             .map(|s| {
                 if s.contains(' ') || s.is_empty() {
                     format!("\"{}\"", s.replace('\"', "\\\""))
@@ -1161,59 +1988,6 @@ impl WindowsAppContainerSandbox {
             .join(" ");
         let cmd_wide = to_wide_null(&cmd_line);
         let exe_wide = to_wide_null(&exe.to_string_lossy());
-
-        let is_system_path = |path: &Path| {
-            let s = path.to_string_lossy().replace('\\', "/").to_lowercase();
-            s == "c:/windows"
-                || s.starts_with("c:/windows/")
-                || s == "c:/program files"
-                || s.starts_with("c:/program files/")
-                || s == "c:/program files (x86)"
-                || s.starts_with("c:/program files (x86)/")
-        };
-
-        if let Some(parent) = exe.parent() {
-            if let Err(e) = grant_appcontainer_path_access(parent, container_sid, false) {
-                log::warn!(
-                    "Grant access to exe dir {}: {} (child may fail to start)",
-                    parent.display(),
-                    e
-                );
-            }
-        }
-        for p in &self.config.filesystem.writable_paths {
-            let path = Path::new(p);
-            if let Err(e) = grant_appcontainer_path_access(path, container_sid, false) {
-                log::warn!("Grant write access to {}: {}", path.display(), e);
-            }
-        }
-        for p in &self.config.filesystem.readonly_paths {
-            let path = Path::new(p);
-            if is_system_path(path) {
-                continue;
-            }
-            if let Err(e) = grant_appcontainer_path_access(path, container_sid, true) {
-                log::warn!("Grant read access to {}: {}", path.display(), e);
-            }
-        }
-
-        let work_dir: Option<PathBuf> = working_dir_override
-            .map(|p| p.to_path_buf())
-            .or_else(|| {
-                self.config
-                    .child_work_dir
-                    .as_ref()
-                    .map(|s| Path::new(s).to_path_buf())
-            })
-            .or_else(|| {
-                self.config
-                    .filesystem
-                    .writable_paths
-                    .first()
-                    .map(|s| Path::new(s).to_path_buf())
-            })
-            .or_else(|| exe.parent().map(|p| p.to_path_buf()));
-        let work_dir_wide = work_dir.as_ref().map(|p| to_wide_null(&p.to_string_lossy()));
 
         let sa = SECURITY_ATTRIBUTES {
             nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
@@ -1249,13 +2023,13 @@ impl WindowsAppContainerSandbox {
                 )));
             }
 
-            let _ = SetHandleInformation(stdout_r, HANDLE_FLAG_INHERIT, 0);
-            let _ = SetHandleInformation(stderr_r, HANDLE_FLAG_INHERIT, 0);
+            let _ = SetHandleInformation(stdout_r, 1, HANDLE_FLAGS(0));
+            let _ = SetHandleInformation(stderr_r, 1, HANDLE_FLAGS(0));
 
             let h_stdin = GetStdHandle(STD_INPUT_HANDLE).unwrap_or_default();
-            let _ = SetHandleInformation(h_stdin, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
+            let _ = SetHandleInformation(h_stdin, 1, HANDLE_FLAG_INHERIT);
 
-            let current_dir = work_dir_wide
+            let current_dir = create_process_cwd_wide
                 .as_ref()
                 .map(|w| PCWSTR::from_raw(w.as_ptr()))
                 .unwrap_or(PCWSTR::from_raw(std::ptr::null()));
@@ -1374,12 +2148,13 @@ impl WindowsAppContainerSandbox {
             let _ = CloseHandle(stderr_w);
             let _ = CloseHandle(pi.hThread);
 
-            let out_h = stdout_r;
-            let err_h = stderr_r;
+            let out_h = stdout_r.0 as usize;
+            let err_h = stderr_r.0 as usize;
             let stdout_j = thread::spawn(move || {
                 let mut v = Vec::new();
                 unsafe {
-                    let mut f = std::fs::File::from_raw_handle(out_h.0);
+                    let mut f =
+                        std::fs::File::from_raw_handle(out_h as RawHandle);
                     let _ = f.read_to_end(&mut v);
                 }
                 v
@@ -1387,7 +2162,8 @@ impl WindowsAppContainerSandbox {
             let stderr_j = thread::spawn(move || {
                 let mut v = Vec::new();
                 unsafe {
-                    let mut f = std::fs::File::from_raw_handle(err_h.0);
+                    let mut f =
+                        std::fs::File::from_raw_handle(err_h as RawHandle);
                     let _ = f.read_to_end(&mut v);
                 }
                 v
@@ -1590,10 +2366,63 @@ impl WindowsAppContainerSandbox {
 /// can start the sandbox without admin. The rules are keyed by AppContainer SID (deterministic
 /// from profile name); the profile is created then deleted so the next `synbot sandbox start`
 /// will recreate the same profile and reuse the rules.
-pub fn install_windows_sandbox_network_rules(config: SandboxConfig) -> Result<()> {
+pub fn install_windows_sandbox_network_rules(
+    config: SandboxConfig,
+    grant_parent_traverse_acl: bool,
+) -> Result<()> {
     let mut sandbox = WindowsAppContainerSandbox::new(config)?;
     sandbox.create_profile_and_add_network_rules()?;
     if let Some(sid) = sandbox.container_sid.take() {
+        if is_process_elevated() {
+            let _ = writeln!(
+                std::io::stderr(),
+                "[synbot sandbox] AppContainer profile: {}",
+                sandbox.profile_name
+            );
+            if let Some(sid_str) = unsafe { sid_to_string(sid) } {
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "[synbot sandbox] AppContainer SID: {}",
+                    sid_str
+                );
+            }
+            let _ = writeln!(
+                std::io::stderr(),
+                "[synbot sandbox] Sandbox filesystem config: writable_paths={}, readonly_paths={}, hidden_paths={}, child_work_dir={}",
+                sandbox.config.filesystem.writable_paths.len(),
+                sandbox.config.filesystem.readonly_paths.len(),
+                sandbox.config.filesystem.hidden_paths.len(),
+                sandbox
+                    .config
+                    .child_work_dir
+                    .as_ref()
+                    .map(|s| s.as_str())
+                    .unwrap_or("<none>")
+            );
+            for p in &sandbox.config.filesystem.writable_paths {
+                let _ = writeln!(std::io::stderr(), "[synbot sandbox]   writable: {}", p);
+            }
+            for p in &sandbox.config.filesystem.readonly_paths {
+                let _ = writeln!(std::io::stderr(), "[synbot sandbox]   readonly: {}", p);
+            }
+            let _ = std::io::stderr().flush();
+
+            let _ = writeln!(
+                std::io::stderr(),
+                "[synbot sandbox] Granting filesystem ACLs for this AppContainer on configured paths..."
+            );
+            let _ = writeln!(
+                std::io::stderr(),
+                "[synbot sandbox]   (Nested dirs share one inheritable grant per root; very large trees can still take a few minutes.)"
+            );
+            let _ = std::io::stderr().flush();
+            grant_config_paths_for_appcontainer_sid(&sandbox.config, sid, grant_parent_traverse_acl);
+            let _ = writeln!(
+                std::io::stderr(),
+                "[synbot sandbox] Filesystem ACL grants finished (check logs if any path failed)."
+            );
+            let _ = std::io::stderr().flush();
+        }
         let name_wide = to_wide_null(&sandbox.profile_name);
         unsafe {
             let _ = DeleteAppContainerProfile(PCWSTR::from_raw(name_wide.as_ptr()));
@@ -1662,10 +2491,10 @@ impl Sandbox for WindowsAppContainerSandbox {
         }
 
         let start = Instant::now();
-        let exe = Path::new(command);
+        let exe = resolve_windows_command_for_create_process(command);
         let wd = working_dir.filter(|s| !s.is_empty()).map(Path::new);
         let (code, stdout, stderr) =
-            self.spawn_child_in_container_piped(exe, args, wd, timeout)?;
+            self.spawn_child_in_container_piped(&exe, args, wd, timeout)?;
         let duration = start.elapsed();
 
         Ok(ExecutionResult {

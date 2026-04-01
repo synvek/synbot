@@ -3,6 +3,8 @@
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
+
+use crate::config;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::process::Command;
@@ -270,10 +272,16 @@ impl DynTool for ExecTool {
             .map(PathBuf::from)
             .unwrap_or_else(|| self.workspace.clone());
 
-        if self.restrict_to_workspace {
-            validate_workspace_path(&self.workspace, &cwd)
-                .map_err(|e| anyhow::anyhow!(e))?;
-        }
+        let cwd = if self.restrict_to_workspace {
+            validate_workspace_path(&self.workspace, &cwd).map_err(|e| anyhow::anyhow!(e))?
+        } else {
+            let resolved = if cwd.is_absolute() {
+                cwd
+            } else {
+                self.workspace.join(&cwd)
+            };
+            config::normalize_workspace_path(&resolved)
+        };
 
         let approval_cwd = match &self.sandbox_context {
             Some((

@@ -238,7 +238,7 @@ async fn run_subagent_task(
             &workspace,
             &agent_id,
             config::skills_dir().as_path(),
-            false,
+            None,
         );
         let system_prompt = context.build_system_prompt();
         let tool_defs = tools.rig_definitions();

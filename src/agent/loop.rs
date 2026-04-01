@@ -17,8 +17,8 @@ use crate::agent::directive::DirectiveParser;
 use crate::agent::session_state::SharedSessionState;
 use crate::agent::subagent::{SubagentManager, SubagentStatus};
 use crate::bus::{InboundMessage, OutboundMessage};
-use crate::config::Config;
-use crate::config;
+use crate::config::{self, Config};
+use crate::sandbox::types::ToolSandboxExecKind;
 use crate::hooks::{HookEvent, HookRegistry};
 use crate::tools::{scope, ToolContext, ToolRegistry};
 use crate::agent::control_commands::{parse_control_command, busy_hint_commands, ControlCommand};
@@ -48,7 +48,7 @@ pub struct AgentLoop {
     session_state: SharedSessionState,
     agent_registry: Arc<AgentRegistry>,
     subagent_manager: Arc<Mutex<SubagentManager>>,
-    tool_sandbox_enabled: bool,
+    tool_sandbox_exec_kind: Option<ToolSandboxExecKind>,
     hooks: Option<Arc<HookRegistry>>,
     tool_result_preview_chars: usize,
     workflow_store: WorkflowStore,
@@ -67,7 +67,7 @@ impl AgentLoop {
         config: &Config,
         session_state: SharedSessionState,
         agent_registry: Arc<AgentRegistry>,
-        tool_sandbox_enabled: bool,
+        tool_sandbox_exec_kind: Option<ToolSandboxExecKind>,
         hooks: Option<Arc<HookRegistry>>,
     ) -> Self {
         let subagent_manager = SubagentManager::new(
@@ -86,7 +86,7 @@ impl AgentLoop {
             session_state,
             agent_registry,
             subagent_manager: Arc::new(Mutex::new(subagent_manager)),
-            tool_sandbox_enabled,
+            tool_sandbox_exec_kind,
             hooks,
             tool_result_preview_chars,
             workflow_store,
@@ -704,7 +704,7 @@ impl AgentLoop {
                 &agent_ctx.workspace_dir,
                 &agent_id,
                 config::skills_dir().as_path(),
-                self.tool_sandbox_enabled,
+                self.tool_sandbox_exec_kind,
             );
             let system_prompt = context_builder.build_system_prompt_with_role_prompt(&agent_ctx.system_prompt);
             let model_max_iterations = agent_ctx.params.max_iterations;
@@ -874,7 +874,7 @@ impl AgentLoop {
                 &agent_ctx.workspace_dir,
                 &agent_id,
                 config::skills_dir().as_path(),
-                self.tool_sandbox_enabled,
+                self.tool_sandbox_exec_kind,
             );
             let system_prompt = context_builder.build_system_prompt_with_role_prompt(&agent_ctx.system_prompt);
             let model_max_iterations = agent_ctx.params.max_iterations;

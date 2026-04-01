@@ -107,7 +107,7 @@ pub async fn cmd_start() -> Result<()> {
         }
     }
 
-    let ws = config::workspace_path(&cfg);
+    let ws = config::effective_workspace_path(&cfg);
 
     // Subagent manager (shared via Arc<Mutex<>>)
     let subagent_mgr = std::sync::Arc::new(
@@ -259,10 +259,9 @@ pub async fn cmd_start() -> Result<()> {
         crate::cron::service::CronService::new(cron_store_path),
     ));
 
-    let tool_sandbox_enabled = sandbox_context
+    let tool_sandbox_exec_kind = sandbox_context
         .as_ref()
-        .and_then(|(_, id, _)| id.as_ref())
-        .is_some();
+        .and_then(|(_, id, kind)| id.as_ref().map(|_| *kind));
 
     // Start agent loop (Arc<Mutex<>> so /stop or /cancel can cancel a running agent task)
     let agent_loop = crate::agent::r#loop::AgentLoop::new(
@@ -274,7 +273,7 @@ pub async fn cmd_start() -> Result<()> {
         &cfg,
         shared_session_state.clone(),
         std::sync::Arc::clone(&agent_registry),
-        tool_sandbox_enabled,
+        tool_sandbox_exec_kind,
         Some(std::sync::Arc::new(hook_registry)),
     )
     .await;
@@ -426,7 +425,7 @@ async fn init_sandbox_if_configured(
         // When in_app_sandbox we are already inside the sandbox (started via `synbot sandbox start`).
     }
 
-    let workspace_path = config::workspace_path(cfg);
+    let workspace_path = config::effective_workspace_path(cfg);
     let skills_dir = config::skills_dir();
     if let Some(ref tool_cfg) = cfg.tool_sandbox {
         match config::build_tool_sandbox_config(tool_cfg, monitoring, &workspace_path, &skills_dir) {
