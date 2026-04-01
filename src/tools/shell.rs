@@ -417,7 +417,8 @@ impl DynTool for ExecTool {
                 ),
                 crate::sandbox::types::ToolSandboxExecKind::HostNative => {
                     let wd = cwd.display().to_string();
-                    if cfg!(windows) {
+                    #[cfg(windows)]
+                    {
                         let inner = rewrite_windows_tool_sandbox_host_cmd(&cmd_str);
                         (
                             "cmd".to_string(),
@@ -425,7 +426,9 @@ impl DynTool for ExecTool {
                             wd.clone(),
                             wd,
                         )
-                    } else {
+                    }
+                    #[cfg(not(windows))]
+                    {
                         (
                             "sh".to_string(),
                             vec!["-c".to_string(), cmd_str.to_string()],
