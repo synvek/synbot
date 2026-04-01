@@ -312,12 +312,22 @@ async fn run_subagent_task(
                     id: None,
                     content,
                 });
-                for (id, result_str) in tool_results {
+                if !tool_results.is_empty() {
+                    let user_parts: Vec<UserContent> = tool_results
+                        .into_iter()
+                        .map(|(id, result_str)| {
+                            UserContent::tool_result(
+                                id,
+                                OneOrMany::one(ToolResultContent::text(result_str)),
+                            )
+                        })
+                        .collect();
+                    let user_content = match user_parts.len() {
+                        1 => OneOrMany::one(user_parts.into_iter().next().unwrap()),
+                        _ => OneOrMany::many(user_parts).expect("non-empty tool results"),
+                    };
                     history.push(Message::User {
-                        content: OneOrMany::one(UserContent::tool_result(
-                            id,
-                            OneOrMany::one(ToolResultContent::text(result_str)),
-                        )),
+                        content: user_content,
                     });
                 }
             }

@@ -1153,6 +1153,57 @@ fn truncate_debug(s: &str, max_len: usize) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Chat history window helpers
+// ---------------------------------------------------------------------------
+
+/// True if this user message carries tool results (serialized as `role: tool` for DeepSeek/OpenAI).
+fn user_message_contains_tool_results(msg: &Message) -> bool {
+    match msg {
+        Message::User { content } => content
+            .iter()
+            .any(|c| matches!(c, UserContent::ToolResult(_))),
+        _ => false,
+    }
+}
+
+fn assistant_message_has_tool_calls(msg: &Message) -> bool {
+    match msg {
+        Message::Assistant { content, .. } => content
+            .iter()
+            .any(|c| matches!(c, AssistantContent::ToolCall(_))),
+        _ => false,
+    }
+}
+
+/// When the last-N message window is taken, it can start at a `User` message that only contains
+/// tool results while the preceding `Assistant` (with `tool_calls`) falls **outside** the slice.
+/// DeepSeek rejects `role: tool` without that assistant in the same request. Walk the window start
+/// backward until tool results are preceded by the issuing assistant inside the slice, or we hit the
+/// beginning of history.
+fn fix_window_start_for_tool_results(history: &[Message], mut start: usize) -> usize {
+    loop {
+        if start >= history.len() {
+            return start;
+        }
+        if !user_message_contains_tool_results(&history[start]) {
+            return start;
+        }
+        if start == 0 {
+            warn!(
+                "Chat history window starts with tool results but no preceding assistant; \
+                 include more history or reset the session to avoid provider errors"
+            );
+            return start;
+        }
+        if assistant_message_has_tool_calls(&history[start - 1]) {
+            // Include `history[start - 1]` so the request is never `tool` without prior `tool_calls`.
+            return start.saturating_sub(1);
+        }
+        start -= 1;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Standalone completion loop
 // ---------------------------------------------------------------------------
 
@@ -1211,7 +1262,9 @@ async fn run_completion_loop(
         let history_for_model: Vec<Message> = if history.len() <= max_chat_history_messages as usize {
             history.clone()
         } else {
-            history[history.len() - max_chat_history_messages as usize..].to_vec()
+            let mut start = history.len() - max_chat_history_messages as usize;
+            start = fix_window_start_for_tool_results(history, start);
+            history[start..].to_vec()
         };
         let chat_history = if history_for_model.is_empty() {
             OneOrMany::one(Message::user(""))
@@ -1414,12 +1467,22 @@ async fn run_completion_loop(
                 id: None,
                 content,
             });
-            for (id, result_str) in tool_results {
+            if !tool_results.is_empty() {
+                let user_parts: Vec<UserContent> = tool_results
+                    .into_iter()
+                    .map(|(id, result_str)| {
+                        UserContent::tool_result(
+                            id,
+                            OneOrMany::one(ToolResultContent::text(result_str)),
+                        )
+                    })
+                    .collect();
+                let user_content = match user_parts.len() {
+                    1 => OneOrMany::one(user_parts.into_iter().next().unwrap()),
+                    _ => OneOrMany::many(user_parts).expect("non-empty tool results"),
+                };
                 history.push(Message::User {
-                    content: OneOrMany::one(UserContent::tool_result(
-                        id,
-                        OneOrMany::one(ToolResultContent::text(result_str)),
-                    )),
+                    content: user_content,
                 });
             }
         }
@@ -1447,5 +1510,55 @@ async fn run_completion_loop(
     }
 
     Ok(iterations)
+}
+
+#[cfg(test)]
+mod history_window_tests {
+    use super::*;
+    use rig::message::{AssistantContent, ToolResultContent, UserContent};
+
+    fn user_tool(id: &str, text: &str) -> Message {
+        Message::User {
+            content: OneOrMany::one(UserContent::tool_result(
+                id.to_string(),
+                OneOrMany::one(ToolResultContent::text(text.to_string())),
+            )),
+        }
+    }
+
+    fn assistant_with_tools() -> Message {
+        Message::Assistant {
+            id: None,
+            content: OneOrMany::one(AssistantContent::tool_call(
+                "call_1",
+                "echo",
+                serde_json::json!({}),
+            )),
+        }
+    }
+
+    #[test]
+    fn fix_window_extends_back_to_include_assistant_before_tool_results() {
+        // 25 messages: indices 0–3 filler, 4 = assistant+tool_calls, 5 = tool result, 6–24 filler.
+        // Last-20 window starts at index 5 (tool user) and would drop the assistant at index 4.
+        let mut history: Vec<Message> = (0..4)
+            .map(|i| Message::user(&format!("filler {i}")))
+            .collect();
+        history.push(assistant_with_tools());
+        history.push(user_tool("a", "result a"));
+        history.extend((6..25).map(|i| Message::user(&format!("filler {i}"))));
+        assert_eq!(history.len(), 25);
+        let naive_start = history.len() - 20; // 5: first message in window is tool-only user
+        let fixed = fix_window_start_for_tool_results(&history, naive_start);
+        assert_eq!(fixed, 4, "window must include the assistant before tool results");
+        assert!(assistant_message_has_tool_calls(&history[fixed]));
+    }
+
+    #[test]
+    fn fix_window_unchanged_when_first_message_is_plain_user() {
+        let history = vec![Message::user("hello"), assistant_with_tools(), user_tool("x", "y")];
+        let start = fix_window_start_for_tool_results(&history, 1);
+        assert_eq!(start, 1);
+    }
 }
 

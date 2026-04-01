@@ -413,10 +413,13 @@ impl DeepSeekDirectModel {
         Self {
             http,
             api_key,
-            api_base: if api_base.trim().is_empty() {
-                DEEPSEEK_API_BASE.to_string()
-            } else {
-                api_base.trim().to_string()
+            api_base: {
+                let s = if api_base.trim().is_empty() {
+                    DEEPSEEK_API_BASE.to_string()
+                } else {
+                    api_base.trim().to_string()
+                };
+                s.trim_end_matches('/').to_string()
             },
             model,
         }
@@ -510,6 +513,8 @@ impl DeepSeekDirectModel {
             }
         }
 
+        strip_leading_orphan_tool_messages(&mut messages);
+
         // Tools
         let tools: Vec<Value> = req
             .tools
@@ -548,6 +553,23 @@ impl DeepSeekDirectModel {
             }
         }
         body
+    }
+}
+
+/// Remove `role: tool` entries that appear before any user/assistant message (e.g. truncated history).
+fn strip_leading_orphan_tool_messages(messages: &mut Vec<Value>) {
+    let mut i = 0;
+    while i < messages.len() {
+        let role = messages[i].get("role").and_then(|v| v.as_str());
+        if role == Some("system") {
+            i += 1;
+            continue;
+        }
+        if role == Some("tool") {
+            messages.remove(i);
+            continue;
+        }
+        break;
     }
 }
 
