@@ -1,4 +1,4 @@
-//! Control commands: /stop, /resume, /status, /clear (case-insensitive prefix).
+//! Control commands: /stop, /resume, /status, /clear, /commands (case-insensitive prefix).
 //! /skills is not a control command; the user message is passed to the model, which answers from the # Skills section in the system prompt.
 
 /// Control command parsed from user message (trimmed content).
@@ -12,6 +12,8 @@ pub enum ControlCommand {
     Status,
     /// Clear session (same as reset_session tool).
     Clear,
+    /// List available slash commands (help).
+    Commands,
 }
 
 const PREFIX_STOP: &str = "/stop";
@@ -19,6 +21,8 @@ const PREFIX_CANCEL: &str = "/cancel";
 const PREFIX_RESUME: &str = "/resume";
 const PREFIX_STATUS: &str = "/status";
 const PREFIX_CLEAR: &str = "/clear";
+const PREFIX_COMMANDS: &str = "/commands";
+const PREFIX_HELP: &str = "/help";
 
 /// Returns true if content is exactly the command or command followed by optional whitespace only.
 /// Uses get() for slicing so we never split in the middle of a multi-byte UTF-8 character.
@@ -51,12 +55,29 @@ pub fn parse_control_command(content: &str) -> Option<ControlCommand> {
     if match_prefix(c, PREFIX_CLEAR) {
         return Some(ControlCommand::Clear);
     }
+    if match_prefix(c, PREFIX_COMMANDS) || match_prefix(c, PREFIX_HELP) {
+        return Some(ControlCommand::Commands);
+    }
     None
 }
 
 /// Hint text shown when agent/workflow is busy: list available control commands.
 pub fn busy_hint_commands() -> &'static str {
-    "Available commands: /stop or /cancel (stop current work), /status (show session and workflow state), /clear (clear session), /resume (resume workflow)."
+    "Available commands: /commands (list commands), /stop or /cancel (stop current work), /status (show session and workflow state), /clear (clear session), /resume (resume workflow)."
+}
+
+/// User-facing help text for slash commands.
+pub fn slash_commands_help_text() -> &'static str {
+    "Slash commands (case-insensitive; command must be alone or with trailing spaces):\n\
+\n\
+- /workflow <description>: create and run a workflow from a task description\n\
+- /workflow continue: continue the current session's saved workflow\n\
+- /workflow + JSON: create a workflow from a JSON definition (bot will confirm)\n\
+- /resume: resume workflow (same as /workflow continue)\n\
+- /stop or /cancel: stop the current running workflow/agent task\n\
+- /status: show current session info and workflow state\n\
+- /clear: clear the current session (history + workflow state)\n\
+- /commands (or /help): show this list"
 }
 
 #[cfg(test)]
@@ -86,6 +107,15 @@ mod tests {
         assert_eq!(parse_control_command("/resume"), Some(ControlCommand::Resume));
         assert_eq!(parse_control_command("/status"), Some(ControlCommand::Status));
         assert_eq!(parse_control_command("/clear"), Some(ControlCommand::Clear));
+    }
+
+    #[test]
+    fn commands_and_help() {
+        assert_eq!(parse_control_command("/commands"), Some(ControlCommand::Commands));
+        assert_eq!(parse_control_command("/help"), Some(ControlCommand::Commands));
+        assert_eq!(parse_control_command("  /commands  "), Some(ControlCommand::Commands));
+        assert_eq!(parse_control_command("/help  "), Some(ControlCommand::Commands));
+        assert_eq!(parse_control_command("/commands now"), None);
     }
 
     #[test]

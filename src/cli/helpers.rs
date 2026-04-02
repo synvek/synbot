@@ -170,6 +170,9 @@ pub fn build_default_tools(
     reg.register(std::sync::Arc::new(skills_tool::InstallSystemSkillTool::new()))
         .expect("register InstallSystemSkillTool");
 
+    reg.register(std::sync::Arc::new(list_commands::ListCommandsTool::new()))
+        .expect("register ListCommandsTool");
+
     reg.register(std::sync::Arc::new(message::MessageTool {
         outbound_tx: outbound_tx.clone(),
         default_channel: String::new(),

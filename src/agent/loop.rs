@@ -21,7 +21,9 @@ use crate::config::{self, Config};
 use crate::sandbox::types::ToolSandboxExecKind;
 use crate::hooks::{HookEvent, HookRegistry};
 use crate::tools::{scope, ToolContext, ToolRegistry};
-use crate::agent::control_commands::{parse_control_command, busy_hint_commands, ControlCommand};
+use crate::agent::control_commands::{
+    busy_hint_commands, parse_control_command, slash_commands_help_text, ControlCommand,
+};
 use crate::workflow::{
     generate_workflow, parse_workflow_trigger, run_workflow, PendingConfirmStore,
     PendingWorkflowInputStore, WorkflowDef, WorkflowState, WorkflowStore, WorkflowTrigger,
@@ -151,6 +153,15 @@ impl AgentLoop {
                                         ));
                                     }
                                 }
+                                ControlCommand::Commands => {
+                                    let _ = loop_ref.lock().await.outbound_tx.send(OutboundMessage::chat(
+                                        msg.channel.clone(),
+                                        msg.chat_id.clone(),
+                                        format!("[Commands]\n{}", slash_commands_help_text()),
+                                        vec![],
+                                        None,
+                                    ));
+                                }
                             }
                         } else if msg.session_key() == running_session_key {
                             let _ = loop_ref.lock().await.outbound_tx.send(OutboundMessage::chat(
@@ -247,6 +258,16 @@ impl AgentLoop {
                     }
                     ControlCommand::Clear => {
                         self.handle_clear(&msg).await?;
+                        return Ok(None);
+                    }
+                    ControlCommand::Commands => {
+                        let _ = self.outbound_tx.send(OutboundMessage::chat(
+                            msg.channel.clone(),
+                            msg.chat_id.clone(),
+                            format!("[Commands]\n{}", slash_commands_help_text()),
+                            vec![],
+                            None,
+                        ));
                         return Ok(None);
                     }
                     ControlCommand::Resume => {

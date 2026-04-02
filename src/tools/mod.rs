@@ -26,6 +26,7 @@ pub mod filesystem;
 pub mod generation;
 pub mod heartbeat_cron;
 pub mod list_tools;
+pub mod list_commands;
 pub mod memory_tool;
 pub mod message;
 #[cfg(feature = "mcp")]

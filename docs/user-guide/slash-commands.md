@@ -18,6 +18,7 @@ Synbot supports **slash commands** in chat: type a command (e.g. `/clear`) to co
 | `/resume` | Resume the current session’s workflow (same as `/workflow continue`). |
 | `/status` | Show current session info and workflow state (if any). |
 | `/clear` | Clear the current session (conversation history and workflow state). |
+| `/commands` (or `/help`) | List available slash commands. |
 
 ---
 
@@ -77,6 +78,10 @@ Clear the current session: conversation history and workflow state for this chat
 ### `/skills`
 
 `/skills` is **not** a control command. The message is passed to the model, which can answer using the **Skills** section in the system prompt (e.g. list or describe available skills). It does not stop or change workflow/session state.
+
+### `/commands` (or `/help`)
+
+List available slash commands and their short descriptions. This is safe to use even while a workflow/agent task is running.
 
 ---
 
