@@ -15,6 +15,7 @@ use tracing::{debug, warn};
 
 use crate::agent::session_id::SessionId;
 use crate::agent::session_manager::SessionMeta;
+use crate::agent::timestamp_serde;
 
 const TOOL_RESULT_PREVIEW_LEN: usize = 150;
 
@@ -39,7 +40,7 @@ fn truncate_preview(s: &str, max_len: usize) -> String {
 pub struct SessionMessage {
     pub role: String,
     pub content: String,
-    #[serde(default = "Utc::now")]
+    #[serde(default = "Utc::now", with = "timestamp_serde::rfc3339_local")]
     pub timestamp: DateTime<Utc>,
 }
 

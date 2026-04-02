@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 use crate::agent::session::SessionMessage;
 use crate::agent::session_id::{SessionId, SessionScope};
+use crate::agent::timestamp_serde;
 
 // ---------------------------------------------------------------------------
 // Session metadata
@@ -22,8 +23,10 @@ pub struct SessionMeta {
     /// List of participant identifiers (e.g. `"telegram"`, `"telegram:12345"`).
     pub participants: Vec<String>,
     /// When the session was first created.
+    #[serde(with = "timestamp_serde::rfc3339_local")]
     pub created_at: DateTime<Utc>,
     /// When the session was last updated (message appended).
+    #[serde(with = "timestamp_serde::rfc3339_local")]
     pub updated_at: DateTime<Utc>,
 }
 
