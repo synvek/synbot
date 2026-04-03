@@ -153,6 +153,9 @@ pub fn build_default_tools(
     })).expect("register SpawnTool");
     reg.register(std::sync::Arc::new(memory_tool::RememberTool::new("main"))).expect("register RememberTool");
     reg.register(std::sync::Arc::new(memory_tool::ListMemoryTool::new("main"))).expect("register ListMemoryTool");
+    #[cfg(feature = "memory-index")]
+    reg.register(std::sync::Arc::new(memory_tool::SearchMemoryTool::new("main")))
+        .expect("register SearchMemoryTool");
     reg.register(std::sync::Arc::new(session_tools::ListSessionsTool::new(
         shared_session_state.clone(),
     )))

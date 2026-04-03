@@ -1,10 +1,12 @@
 //! Memory backend abstraction — trait and default file+SQLite implementation.
 
+use std::sync::Arc;
+
 use chrono::NaiveDate;
 
 use crate::agent::memory::MemoryStore;
-use crate::agent::memory_index::{hybrid_search, reindex_agent, IndexedChunk};
-use crate::config::{memory_dir, MemoryConfig};
+use crate::agent::memory_index::{hybrid_search_with_config, reindex_agent_blocking, IndexedChunk};
+use crate::config::{memory_dir, MemoryConfig, Config};
 
 /// Options for building memory context (e.g. recent days, use search).
 #[derive(Debug, Clone)]
@@ -48,9 +50,7 @@ pub trait MemoryBackend: Send + Sync {
         content: &str,
     ) -> anyhow::Result<()>;
 
-    fn index_now(&self, agent_id: &str) -> anyhow::Result<usize> {
-        reindex_agent(agent_id)
-    }
+    fn index_now(&self, agent_id: &str) -> anyhow::Result<usize>;
 }
 
 /// Returns true if compression is enabled and message count exceeds threshold.
@@ -59,13 +59,27 @@ pub fn should_compress(config: &MemoryConfig, message_count: usize) -> bool {
         && message_count > config.compression.max_conversation_turns as usize
 }
 
+fn truncate_long_term_text(s: &str, max_chars: u32) -> String {
+    if max_chars == 0 || s.len() <= max_chars as usize {
+        return s.to_string();
+    }
+    let mut end = max_chars as usize;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!(
+        "{}\n\n… (long-term memory truncated; configure memory.longTermMaxChars or use search_memory)",
+        &s[..end]
+    )
+}
+
 /// Default backend: ~/.synbot/memory/{agentId}, MEMORY.md + memory/YYYY-MM-DD.md + SQLite index.
 pub struct FileSqliteMemoryBackend {
-    config: MemoryConfig,
+    config: Arc<Config>,
 }
 
 impl FileSqliteMemoryBackend {
-    pub fn new(config: MemoryConfig) -> Self {
+    pub fn new(config: Arc<Config>) -> Self {
         Self { config }
     }
 }
@@ -79,8 +93,12 @@ impl MemoryBackend for FileSqliteMemoryBackend {
         let store = MemoryStore::new(agent_id);
         let mut parts = Vec::new();
 
-        let lt = store.read_long_term();
+        let mut lt = store.read_long_term();
         if !lt.is_empty() {
+            let maxc = self.config.memory.long_term_max_chars;
+            if maxc > 0 {
+                lt = truncate_long_term_text(&lt, maxc);
+            }
             parts.push(format!("## Long-term Memory\n\n{}", lt));
         }
 
@@ -97,13 +115,15 @@ impl MemoryBackend for FileSqliteMemoryBackend {
         if let Some(ref q) = options.query_for_search {
             if !q.trim().is_empty() {
                 let limit = options.search_limit.min(10);
-                if let Ok(conn) = crate::agent::memory_index::open_index(agent_id) {
-                    if let Ok(hits) = hybrid_search(
+                let dim = self.config.memory.embedding_dimensions;
+                if let Ok(conn) =
+                    crate::agent::memory_index::open_index(agent_id, dim)
+                {
+                    if let Ok(hits) = hybrid_search_with_config(
                         &conn,
-                        q,
+                        q.trim(),
                         limit,
-                        self.config.vector_weight as f64,
-                        self.config.text_weight as f64,
+                        &self.config,
                     ) {
                         if !hits.is_empty() {
                             let search_block: String = hits
@@ -111,7 +131,10 @@ impl MemoryBackend for FileSqliteMemoryBackend {
                                 .map(|c| format!("- [{}] {}", c.source, c.content))
                                 .collect::<Vec<_>>()
                                 .join("\n\n");
-                            parts.push(format!("## Relevant memory (search)\n\n{}", search_block));
+                            parts.push(format!(
+                                "## Relevant memory (search)\n\n{}",
+                                search_block
+                            ));
                         }
                     }
                 }
@@ -127,14 +150,9 @@ impl MemoryBackend for FileSqliteMemoryBackend {
         query: &str,
         limit: usize,
     ) -> anyhow::Result<Vec<IndexedChunk>> {
-        let conn = crate::agent::memory_index::open_index(agent_id)?;
-        hybrid_search(
-            &conn,
-            query,
-            limit,
-            self.config.vector_weight as f64,
-            self.config.text_weight as f64,
-        )
+        let dim = self.config.memory.embedding_dimensions;
+        let conn = crate::agent::memory_index::open_index(agent_id, dim)?;
+        hybrid_search_with_config(&conn, query, limit, &self.config)
     }
 
     fn append_long_term(&self, agent_id: &str, content: &str) -> anyhow::Result<()> {
@@ -169,5 +187,9 @@ impl MemoryBackend for FileSqliteMemoryBackend {
         };
         std::fs::write(path, new_content)?;
         Ok(())
+    }
+
+    fn index_now(&self, agent_id: &str) -> anyhow::Result<usize> {
+        reindex_agent_blocking(agent_id, &self.config)
     }
 }

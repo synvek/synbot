@@ -363,13 +363,8 @@ impl DoctorCheck for MemoryCheck {
     }
 
     async fn run(&self, config: &Config) -> CheckResult {
-        // Only check if memory backend is configured (non-empty backend string)
-        if config.memory.backend.is_empty() {
-            return CheckResult::skip(self.name(), "memory backend not configured");
-        }
-
-        // Try to open the SQLite index for the main agent
-        match crate::agent::memory_index::open_index("main") {
+        // Try to open the SQLite index for the main agent (dimension from config)
+        match crate::agent::memory_index::open_index("main", config.memory.embedding_dimensions) {
             Ok(_conn) => {
                 CheckResult::pass(self.name(), "SQLite database accessible and sqlite-vec extension loaded")
             }

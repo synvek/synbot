@@ -3,10 +3,12 @@ pub mod control_commands;
 pub mod context;
 pub mod directive;
 pub mod memory;
+pub mod embeddings;
 #[cfg(feature = "memory-index")]
 pub mod memory_backend;
 #[cfg(feature = "memory-index")]
 pub mod memory_index;
+pub mod session_compactor;
 pub mod r#loop;
 pub mod role_registry;
 pub mod session;

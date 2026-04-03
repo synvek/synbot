@@ -234,6 +234,15 @@ async fn run_subagent_task(
     };
 
     scope(tool_ctx, async move {
+        #[cfg(feature = "memory-index")]
+        let context = ContextBuilder::new(
+            &workspace,
+            &agent_id,
+            config::skills_dir().as_path(),
+            None,
+            None,
+        );
+        #[cfg(not(feature = "memory-index"))]
         let context = ContextBuilder::new(
             &workspace,
             &agent_id,

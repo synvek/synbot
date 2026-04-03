@@ -2,8 +2,14 @@
 
 use chrono::Local;
 use std::path::{Path, PathBuf};
+#[cfg(feature = "memory-index")]
+use std::sync::Arc;
 
 use crate::agent::memory::MemoryStore;
+#[cfg(feature = "memory-index")]
+use crate::agent::memory_backend::{FileSqliteMemoryBackend, MemoryBackend, MemoryContextOptions};
+#[cfg(feature = "memory-index")]
+use crate::config::Config;
 use crate::agent::skills::{CompositeSkillProvider, SkillProvider};
 use crate::config;
 use crate::sandbox::types::ToolSandboxExecKind;
@@ -12,20 +18,42 @@ const BOOTSTRAP_FILES: &[&str] = &["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"
 
 pub struct ContextBuilder {
     workspace: PathBuf,
-    /// Used for memory path (~/.synbot/memory/{agent_id}) and later for hybrid search.
-    #[allow(dead_code)]
     agent_id: String,
     memory: MemoryStore,
+    #[cfg(feature = "memory-index")]
+    full_config: Option<Arc<Config>>,
     skills: CompositeSkillProvider,
-    /// When set, exec runs in the tool sandbox; Docker vs host-native changes prompt text (paths, `/workspace`, etc.).
     tool_sandbox_exec_kind: Option<ToolSandboxExecKind>,
 }
 
+#[cfg(feature = "memory-index")]
 impl ContextBuilder {
-    /// `workspace`: where to load bootstrap files (AGENTS.md, SOUL.md, etc.) from.
-    /// `agent_id`: which agent's memory to use (e.g. "main" or role name); stored at ~/.synbot/memory/{agent_id}.
-    /// `skills_dir`: global skills root (e.g. `config::skills_dir()`), i.e. `~/.synbot/skills/`.
-    /// `tool_sandbox_exec_kind`: `Some(Docker)` vs `Some(HostNative)` vs `None` (no tool sandbox) controls environment/workspace hints in the system prompt.
+    /// `full_config`: when `Some`, memory uses file + SQLite hybrid retrieval per [`crate::agent::memory_backend`].
+    pub fn new(
+        workspace: &Path,
+        agent_id: &str,
+        skills_dir: &Path,
+        tool_sandbox_exec_kind: Option<ToolSandboxExecKind>,
+        full_config: Option<Arc<Config>>,
+    ) -> Self {
+        let agent_id = if agent_id.is_empty() {
+            "main".to_string()
+        } else {
+            agent_id.to_string()
+        };
+        Self {
+            workspace: config::normalize_workspace_path(workspace),
+            memory: MemoryStore::new(&agent_id),
+            full_config,
+            skills: CompositeSkillProvider::default_with_fs(skills_dir),
+            agent_id,
+            tool_sandbox_exec_kind,
+        }
+    }
+}
+
+#[cfg(not(feature = "memory-index"))]
+impl ContextBuilder {
     pub fn new(
         workspace: &Path,
         agent_id: &str,
@@ -45,15 +73,21 @@ impl ContextBuilder {
             tool_sandbox_exec_kind,
         }
     }
+}
 
+impl ContextBuilder {
     /// Build the full system prompt (identity + bootstrap from workspace + memory + skills).
     pub fn build_system_prompt(&self) -> String {
-        self.build_system_prompt_with_role_prompt(&self.load_bootstrap_files())
+        self.build_system_prompt_with_role_prompt(&self.load_bootstrap_files(), None)
     }
 
     /// Build the full system prompt using a pre-built role prompt instead of loading bootstrap from workspace.
-    /// Used when all agents get their behavior from a role (identity + role_prompt + memory + skills).
-    pub fn build_system_prompt_with_role_prompt(&self, role_prompt: &str) -> String {
+    /// `memory_query`: optional text (e.g. current user message) to drive hybrid memory search.
+    pub fn build_system_prompt_with_role_prompt(
+        &self,
+        role_prompt: &str,
+        memory_query: Option<&str>,
+    ) -> String {
         let mut parts = Vec::new();
 
         parts.push(self.identity_section());
@@ -62,12 +96,11 @@ impl ContextBuilder {
             parts.push(role_prompt.trim().to_string());
         }
 
-        let mem = self.memory.get_memory_context();
+        let mem = self.build_memory_section(memory_query);
         if !mem.is_empty() {
             parts.push(format!("# Memory\n\n{}", mem));
         }
 
-        // Always include Skills section so the model knows about the skill list (from ~/.synbot/skills or config root).
         let skills = self.skills.build_skills_summary();
         let skills_section = if skills.is_empty() {
             "No skills are currently loaded. Skills are subdirectories containing SKILL.md under the config skills directory.".to_string()
@@ -77,6 +110,26 @@ impl ContextBuilder {
         parts.push(format!("# Skills\n\n{}", skills_section));
 
         parts.join("\n\n---\n\n")
+    }
+
+    fn build_memory_section(&self, memory_query: Option<&str>) -> String {
+        #[cfg(feature = "memory-index")]
+        {
+            if let Some(ref cfg) = self.full_config {
+                let backend = FileSqliteMemoryBackend::new(Arc::clone(cfg));
+                let q = memory_query.map(|s| s.chars().take(512).collect::<String>());
+                let opts = MemoryContextOptions {
+                    recent_days: cfg.memory.recent_days.max(1),
+                    query_for_search: q,
+                    search_limit: cfg.memory.search_limit.max(1) as usize,
+                };
+                return backend
+                    .get_memory_context(&self.agent_id, &opts)
+                    .unwrap_or_default();
+            }
+        }
+        let _ = memory_query;
+        self.memory.get_memory_context()
     }
 
     fn identity_section(&self) -> String {
@@ -159,6 +212,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let skills_dir = dir.path().join("skills");
         std::fs::create_dir_all(&skills_dir).unwrap();
+        #[cfg(feature = "memory-index")]
+        let ctx = ContextBuilder::new(dir.path(), "main", &skills_dir, None, None);
+        #[cfg(not(feature = "memory-index"))]
         let ctx = ContextBuilder::new(dir.path(), "main", &skills_dir, None);
         let prompt = ctx.build_system_prompt();
         assert!(prompt.contains("Synbot"));
@@ -171,8 +227,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let skills_dir = dir.path().join("skills");
         std::fs::create_dir_all(&skills_dir).unwrap();
+        #[cfg(feature = "memory-index")]
+        let ctx = ContextBuilder::new(dir.path(), "main", &skills_dir, None, None);
+        #[cfg(not(feature = "memory-index"))]
         let ctx = ContextBuilder::new(dir.path(), "main", &skills_dir, None);
-        let prompt = ctx.build_system_prompt_with_role_prompt("You are a helpful tester.");
+        let prompt =
+            ctx.build_system_prompt_with_role_prompt("You are a helpful tester.", None);
         assert!(prompt.contains("Synbot"));
         assert!(prompt.contains("You are a helpful tester."));
     }
@@ -182,8 +242,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let skills_dir = dir.path().join("skills");
         std::fs::create_dir_all(&skills_dir).unwrap();
+        #[cfg(feature = "memory-index")]
+        let _ctx = ContextBuilder::new(dir.path(), "", &skills_dir, None, None);
+        #[cfg(not(feature = "memory-index"))]
         let _ctx = ContextBuilder::new(dir.path(), "", &skills_dir, None);
-        // Just ensure it doesn't panic; agent_id "main" is used for memory path
     }
 
     #[test]
@@ -191,13 +253,22 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let skills_dir = dir.path().join("skills");
         std::fs::create_dir_all(&skills_dir).unwrap();
+        #[cfg(feature = "memory-index")]
+        let ctx = ContextBuilder::new(
+            dir.path(),
+            "main",
+            &skills_dir,
+            Some(ToolSandboxExecKind::HostNative),
+            None,
+        );
+        #[cfg(not(feature = "memory-index"))]
         let ctx = ContextBuilder::new(
             dir.path(),
             "main",
             &skills_dir,
             Some(ToolSandboxExecKind::HostNative),
         );
-        let id = ctx.build_system_prompt_with_role_prompt("");
+        let id = ctx.build_system_prompt_with_role_prompt("", None);
         assert!(
             id.contains("Windows AppContainer") && id.contains("host-native isolation"),
             "expected host-native sandbox hint, got: {}",
@@ -215,13 +286,22 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let skills_dir = dir.path().join("skills");
         std::fs::create_dir_all(&skills_dir).unwrap();
+        #[cfg(feature = "memory-index")]
+        let ctx = ContextBuilder::new(
+            dir.path(),
+            "main",
+            &skills_dir,
+            Some(ToolSandboxExecKind::Docker),
+            None,
+        );
+        #[cfg(not(feature = "memory-index"))]
         let ctx = ContextBuilder::new(
             dir.path(),
             "main",
             &skills_dir,
             Some(ToolSandboxExecKind::Docker),
         );
-        let id = ctx.build_system_prompt_with_role_prompt("");
+        let id = ctx.build_system_prompt_with_role_prompt("", None);
         assert!(id.contains("/workspace"), "docker prompt should mention /workspace: {}", id);
         assert!(id.contains("Docker"), "docker prompt should mention Docker: {}", id);
     }

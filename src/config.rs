@@ -999,6 +999,9 @@ pub struct MemoryCompressionConfig {
     pub max_conversation_turns: u32,
     #[serde(default = "default_summary_write_to_memory")]
     pub summary_write_to_memory: bool,
+    /// When compressing, keep this many **most recent** messages; if `None`, use the agent's `max_chat_history_messages`.
+    #[serde(default)]
+    pub keep_recent_messages: Option<u32>,
 }
 
 fn default_compression_max_turns() -> u32 {
@@ -1014,6 +1017,7 @@ impl Default for MemoryCompressionConfig {
             enabled: false,
             max_conversation_turns: default_compression_max_turns(),
             summary_write_to_memory: default_summary_write_to_memory(),
+            keep_recent_messages: None,
         }
     }
 }
@@ -1026,18 +1030,45 @@ pub struct MemoryConfig {
     pub backend: String,
     #[serde(default = "default_embedding_model")]
     pub embedding_model: String,
+    /// `none` (stub vectors), `ollama`, or `openai` (OpenAI-compatible `/v1/embeddings`).
+    #[serde(default = "default_embedding_provider")]
+    pub embedding_provider: String,
+    /// Must match the chosen embedding model output size (sqlite-vec table dimension).
+    #[serde(default = "default_embedding_dimensions")]
+    pub embedding_dimensions: u32,
     #[serde(default = "default_vector_weight")]
     pub vector_weight: f32,
     #[serde(default = "default_text_weight")]
     pub text_weight: f32,
     #[serde(default = "default_auto_index")]
     pub auto_index: bool,
+    /// Days of `memory/YYYY-MM-DD.md` to include in the memory section (default 1).
+    #[serde(default = "default_memory_recent_days")]
+    pub recent_days: u32,
+    /// Max chunks from hybrid search injected into the system prompt (capped at 10 in backend).
+    #[serde(default = "default_memory_search_limit")]
+    pub search_limit: u32,
+    /// Max characters of `MEMORY.md` injected as long-term memory; `0` means unlimited.
+    #[serde(default)]
+    pub long_term_max_chars: u32,
     #[serde(default)]
     pub compression: MemoryCompressionConfig,
 }
 
 fn default_embedding_model() -> String {
     "local/default".to_string()
+}
+fn default_embedding_provider() -> String {
+    "none".to_string()
+}
+fn default_embedding_dimensions() -> u32 {
+    384
+}
+fn default_memory_recent_days() -> u32 {
+    1
+}
+fn default_memory_search_limit() -> u32 {
+    5
 }
 fn default_vector_weight() -> f32 {
     0.7
@@ -1054,9 +1085,14 @@ impl Default for MemoryConfig {
         Self {
             backend: String::new(),
             embedding_model: default_embedding_model(),
+            embedding_provider: default_embedding_provider(),
+            embedding_dimensions: default_embedding_dimensions(),
             vector_weight: default_vector_weight(),
             text_weight: default_text_weight(),
             auto_index: default_auto_index(),
+            recent_days: default_memory_recent_days(),
+            search_limit: default_memory_search_limit(),
+            long_term_max_chars: 0,
             compression: MemoryCompressionConfig::default(),
         }
     }

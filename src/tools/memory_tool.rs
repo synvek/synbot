@@ -90,10 +90,27 @@ impl DynTool for RememberTool {
         if daily {
             Self::append_daily_note_for(&agent_id, content)?;
             let today = Local::now().format("%Y-%m-%d");
+            #[cfg(feature = "memory-index")]
+            trigger_reindex_if_needed(&agent_id).await;
             Ok(format!("Written to today's note ({}): {}", today, content))
         } else {
             Self::append_long_term_for(&agent_id, content)?;
+            #[cfg(feature = "memory-index")]
+            trigger_reindex_if_needed(&agent_id).await;
             Ok(format!("Written to long-term memory: {}", content))
+        }
+    }
+}
+
+#[cfg(feature = "memory-index")]
+async fn trigger_reindex_if_needed(agent_id: &str) {
+    if let Ok(cfg) = config::load_config(None) {
+        if cfg.memory.auto_index {
+            if let Err(e) =
+                crate::agent::memory_index::reindex_if_changed_async(agent_id, &cfg).await
+            {
+                tracing::warn!(error = %e, agent_id = %agent_id, "memory reindex after remember failed");
+            }
         }
     }
 }
@@ -164,5 +181,73 @@ impl DynTool for ListMemoryTool {
         } else {
             Ok(format!("Memory dir: {}\n\n{}", dir.display(), lines.join("\n")))
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// search_memory — hybrid FTS + vector search over indexed memory
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "memory-index")]
+pub struct SearchMemoryTool {
+    agent_id: String,
+}
+
+#[cfg(feature = "memory-index")]
+impl SearchMemoryTool {
+    pub fn new(agent_id: impl Into<String>) -> Self {
+        Self {
+            agent_id: agent_id.into(),
+        }
+    }
+}
+
+#[cfg(feature = "memory-index")]
+#[async_trait::async_trait]
+impl DynTool for SearchMemoryTool {
+    fn name(&self) -> &str {
+        "search_memory"
+    }
+
+    fn description(&self) -> &str {
+        "Search this agent's long-term and daily memory using keyword + vector index (SQLite). Use 'query' for natural language or keywords; optional 'limit' (default 5, max 20)."
+    }
+
+    fn parameters_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "query": { "type": "string", "description": "Search query" },
+                "limit": { "type": "integer", "description": "Max results (default 5, max 20)" }
+            },
+            "required": ["query"]
+        })
+    }
+
+    async fn call(&self, args: Value) -> Result<String> {
+        use std::sync::Arc;
+
+        use crate::agent::memory_backend::{FileSqliteMemoryBackend, MemoryBackend};
+
+        let agent_id = context::current_agent_id().unwrap_or_else(|| self.agent_id.clone());
+        let q = args["query"].as_str().unwrap_or("").trim();
+        if q.is_empty() {
+            return Ok("Provide non-empty 'query'.".to_string());
+        }
+        let limit = args["limit"].as_u64().unwrap_or(5).clamp(1, 20) as usize;
+        let cfg = config::load_config(None)?;
+        let backend = FileSqliteMemoryBackend::new(Arc::new(cfg));
+        let hits = backend.search(&agent_id, q, limit)?;
+        if hits.is_empty() {
+            return Ok("No matching memory chunks (index may be empty; use remember or wait for auto_index).".to_string());
+        }
+        let lines: Vec<String> = hits
+            .into_iter()
+            .map(|c| {
+                let score = c.score.map(|s| format!(" (score {:.3})", s)).unwrap_or_default();
+                format!("- [{}]{} {}", c.source, score, c.content)
+            })
+            .collect();
+        Ok(lines.join("\n\n"))
     }
 }

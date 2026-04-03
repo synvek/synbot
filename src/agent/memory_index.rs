@@ -9,7 +9,9 @@ use anyhow::{Context, Result};
 use rusqlite::Connection;
 use std::sync::Once;
 
+use crate::config::Config;
 use crate::config;
+use crate::agent::embeddings;
 
 /// Default embedding dimension when using stub provider (no real embedding).
 pub const DEFAULT_EMBED_DIM: u32 = 384;
@@ -25,25 +27,51 @@ fn ensure_vec_extension() {
     });
 }
 
-/// In-memory stub: returns a constant-dimension zero vector.
-/// Replace with a real EmbeddingProvider for production.
-fn stub_embedding(_text: &str, dim: u32) -> Vec<f32> {
+fn stub_embedding(dim: u32) -> Vec<f32> {
     vec![0.0; dim as usize]
 }
 
+fn db_path(agent_id: &str) -> std::path::PathBuf {
+    let dir = config::memory_dir(agent_id);
+    dir.join(format!("{}.sqlite", if agent_id.is_empty() { "main" } else { agent_id }))
+}
+
+fn dim_marker_path(agent_id: &str) -> std::path::PathBuf {
+    config::memory_dir(agent_id).join(".embedding_dim")
+}
+
+/// If embedding dimension changed, remove the SQLite DB so vec0 can be recreated with a new width.
+fn maybe_reset_sqlite_for_dim_change(agent_id: &str, dim: u32) -> Result<()> {
+    let dir = config::memory_dir(agent_id);
+    std::fs::create_dir_all(&dir)?;
+    let marker = dim_marker_path(agent_id);
+    let need_reset = match std::fs::read_to_string(&marker) {
+        Ok(s) => s.trim().parse::<u32>().ok() != Some(dim),
+        Err(_) => false,
+    };
+    if need_reset {
+        let db = db_path(agent_id);
+        let _ = std::fs::remove_file(&db);
+        let _ = std::fs::remove_file(dir.join(".last_index"));
+    }
+    std::fs::write(marker, format!("{}", dim))?;
+    Ok(())
+}
+
 /// Opens the index DB for an agent and ensures schema exists.
-pub fn open_index(agent_id: &str) -> Result<Connection> {
+pub fn open_index(agent_id: &str, embedding_dim: u32) -> Result<Connection> {
     ensure_vec_extension();
+    maybe_reset_sqlite_for_dim_change(agent_id, embedding_dim)?;
     let dir = config::memory_dir(agent_id);
     std::fs::create_dir_all(&dir).context("create memory dir")?;
-    let db_path = dir.join(format!("{}.sqlite", if agent_id.is_empty() { "main" } else { agent_id }));
+    let db_path = db_path(agent_id);
     let conn = Connection::open(&db_path).context("open index db")?;
-    create_tables_if_needed(&conn)?;
+    create_tables_if_needed(&conn, embedding_dim)?;
     Ok(conn)
 }
 
-fn create_tables_if_needed(conn: &Connection) -> Result<()> {
-    conn.execute_batch(
+fn create_tables_if_needed(conn: &Connection, embedding_dim: u32) -> Result<()> {
+    let vec_sql = format!(
         r#"
         CREATE TABLE IF NOT EXISTS chunks (
             id INTEGER PRIMARY KEY,
@@ -51,7 +79,7 @@ fn create_tables_if_needed(conn: &Connection) -> Result<()> {
             content TEXT NOT NULL
         );
         CREATE VIRTUAL TABLE IF NOT EXISTS vec_embeddings USING vec0(
-            embedding float[384],
+            embedding float[{dim}],
             +chunk_id INTEGER,
             +content TEXT,
             +source TEXT
@@ -61,7 +89,9 @@ fn create_tables_if_needed(conn: &Connection) -> Result<()> {
             content=''
         );
         "#,
-    )?;
+        dim = embedding_dim
+    );
+    conn.execute_batch(&vec_sql)?;
     Ok(())
 }
 
@@ -85,16 +115,20 @@ fn embedding_as_bytes(embedding: &[f32]) -> &[u8] {
     }
 }
 
-/// Add a text chunk to the index (embeds and inserts into vec + FTS).
-pub fn index_chunk(conn: &mut Connection, source: &str, content: &str) -> Result<i64> {
-    let embedding = stub_embedding(content, DEFAULT_EMBED_DIM);
+/// Add a text chunk with a precomputed embedding.
+pub fn index_chunk_with_embedding(
+    conn: &mut Connection,
+    source: &str,
+    content: &str,
+    embedding: &[f32],
+) -> Result<i64> {
     conn.execute(
         "INSERT INTO chunks (source, content) VALUES (?1, ?2)",
         [source, content],
     )?;
     let chunk_id = conn.last_insert_rowid();
 
-    let bytes = embedding_as_bytes(&embedding);
+    let bytes = embedding_as_bytes(embedding);
     conn.execute(
         "INSERT INTO vec_embeddings (embedding, chunk_id, content, source) VALUES (?1, ?2, ?3, ?4)",
         rusqlite::params![bytes, chunk_id, content, source],
@@ -132,27 +166,33 @@ pub fn chunk_text(content: &str, max_chunk_chars: usize) -> Vec<String> {
     chunks
 }
 
-/// Index all content from MEMORY.md and memory/*.md for an agent.
-/// Clears existing index and rebuilds (full reindex).
-pub fn reindex_agent(agent_id: &str) -> Result<usize> {
+/// Full reindex using async embeddings (loads config for API keys and dimensions).
+pub async fn reindex_agent_async(agent_id: &str, config: &Config) -> Result<usize> {
+    let dim = config.memory.embedding_dimensions;
+    maybe_reset_sqlite_for_dim_change(agent_id, dim)?;
     let dir = config::memory_dir(agent_id);
-    let mut conn = open_index(agent_id)?;
+    let mut conn = open_index(agent_id, dim)?;
 
     conn.execute("DELETE FROM chunks", [])?;
-    // Virtual tables: drop and recreate to clear (vec0 may not support DELETE)
     conn.execute_batch(
         r#"
         DROP TABLE IF EXISTS vec_embeddings;
         DROP TABLE IF EXISTS memory_fts;
+        "#,
+    )?;
+    let recreate = format!(
+        r#"
         CREATE VIRTUAL TABLE vec_embeddings USING vec0(
-            embedding float[384],
+            embedding float[{dim}],
             +chunk_id INTEGER,
             +content TEXT,
             +source TEXT
         );
         CREATE VIRTUAL TABLE memory_fts USING fts5(content, content='');
         "#,
-    )?;
+        dim = dim
+    );
+    conn.execute_batch(&recreate)?;
 
     let memory_md = dir.join("MEMORY.md");
     let notes_dir = dir.join("memory");
@@ -161,7 +201,8 @@ pub fn reindex_agent(agent_id: &str) -> Result<usize> {
     if memory_md.exists() {
         let content = std::fs::read_to_string(&memory_md).unwrap_or_default();
         for c in chunk_text(&content, 2000) {
-            index_chunk(&mut conn, "MEMORY.md", &c)?;
+            let emb = embeddings::embed_text(config, &c).await?;
+            index_chunk_with_embedding(&mut conn, "MEMORY.md", &c, &emb)?;
             count += 1;
         }
     }
@@ -174,7 +215,8 @@ pub fn reindex_agent(agent_id: &str) -> Result<usize> {
                 let source = path.file_name().and_then(|p| p.to_str()).unwrap_or("").to_string();
                 let content = std::fs::read_to_string(&path).unwrap_or_default();
                 for c in chunk_text(&content, 2000) {
-                    index_chunk(&mut conn, &source, &c)?;
+                    let emb = embeddings::embed_text(config, &c).await?;
+                    index_chunk_with_embedding(&mut conn, &source, &c, &emb)?;
                     count += 1;
                 }
             }
@@ -184,7 +226,24 @@ pub fn reindex_agent(agent_id: &str) -> Result<usize> {
     Ok(count)
 }
 
-const LAST_INDEX_META_KEY: &str = "last_index_mtime";
+/// Sync wrapper for contexts without an async runtime (e.g. tests).
+pub fn reindex_agent_blocking(agent_id: &str, config: &Config) -> Result<usize> {
+    if let Ok(h) = tokio::runtime::Handle::try_current() {
+        h.block_on(reindex_agent_async(agent_id, config))
+    } else {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .context("build tokio runtime for reindex")?
+            .block_on(reindex_agent_async(agent_id, config))
+    }
+}
+
+/// Backward-compatible sync entry (loads config from disk).
+pub fn reindex_agent(agent_id: &str) -> Result<usize> {
+    let cfg = config::load_config(None)?;
+    reindex_agent_blocking(agent_id, &cfg)
+}
 
 fn max_mtime_paths(dir: &std::path::Path) -> Option<std::time::SystemTime> {
     let memory_md = dir.join("MEMORY.md");
@@ -222,8 +281,7 @@ fn write_last_index_mtime(agent_id: &str, t: std::time::SystemTime) -> Result<()
 }
 
 /// If MEMORY.md or memory/*.md have changed since last index, run reindex and return count.
-/// Otherwise return Ok(0). Call this periodically (e.g. every 60s) or after file writes.
-pub fn reindex_if_changed(agent_id: &str) -> Result<usize> {
+pub async fn reindex_if_changed_async(agent_id: &str, config: &Config) -> Result<usize> {
     let dir = config::memory_dir(agent_id);
     let current = match max_mtime_paths(&dir) {
         Some(t) => t,
@@ -231,11 +289,30 @@ pub fn reindex_if_changed(agent_id: &str) -> Result<usize> {
     };
     let last = read_last_index_mtime(agent_id);
     if last.map_or(true, |l| current > l) {
-        let count = reindex_agent(agent_id)?;
+        let count = reindex_agent_async(agent_id, config).await?;
         write_last_index_mtime(agent_id, current)?;
         return Ok(count);
     }
     Ok(0)
+}
+
+/// Sync variant.
+pub fn reindex_if_changed_blocking(agent_id: &str, config: &Config) -> Result<usize> {
+    if let Ok(h) = tokio::runtime::Handle::try_current() {
+        h.block_on(reindex_if_changed_async(agent_id, config))
+    } else {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .context("build tokio runtime for reindex_if_changed")?
+            .block_on(reindex_if_changed_async(agent_id, config))
+    }
+}
+
+/// Legacy sync API (loads config from disk).
+pub fn reindex_if_changed(agent_id: &str) -> Result<usize> {
+    let cfg = config::load_config(None)?;
+    reindex_if_changed_blocking(agent_id, &cfg)
 }
 
 /// Result row from vector KNN (rowid = vec_embeddings rowid, not chunk_id).
@@ -245,18 +322,32 @@ struct VecHit {
 }
 
 /// Hybrid search: vector KNN + FTS5, union by chunk_id, then sort by weighted score.
-/// `vector_weight` + `text_weight` should be 1.0 (e.g. 0.7 and 0.3).
+/// When `query_embedding` is `None`, uses a zero vector of `embed_dim` (stub) for the query side.
 pub fn hybrid_search(
     conn: &Connection,
     query: &str,
     limit: usize,
     vector_weight: f64,
     text_weight: f64,
+    query_embedding: Option<&[f32]>,
+    embed_dim: u32,
 ) -> Result<Vec<IndexedChunk>> {
-    let embedding = stub_embedding(query, DEFAULT_EMBED_DIM);
+    let embedding: Vec<f32> = match query_embedding {
+        Some(e) => {
+            if e.len() != embed_dim as usize {
+                anyhow::bail!(
+                    "query embedding dim {} != {}",
+                    e.len(),
+                    embed_dim
+                );
+            }
+            e.to_vec()
+        }
+        None => stub_embedding(embed_dim),
+    };
     let bytes = embedding_as_bytes(&embedding);
 
-    // 1) Vector KNN: get rowid and distance from vec_embeddings
+    // 1) Vector KNN
     let vec_hits: Vec<VecHit> = conn
         .prepare(
             "SELECT rowid, distance FROM vec_embeddings WHERE embedding MATCH ?1 ORDER BY distance LIMIT ?2",
@@ -270,7 +361,6 @@ pub fn hybrid_search(
         .filter_map(Result::ok)
         .collect();
 
-    // Map vec rowid -> (chunk_id, vector_score). vec0 rowid may not equal chunk_id; we need chunk_id from auxiliary.
     let mut chunk_vec_score: std::collections::HashMap<i64, f64> = std::collections::HashMap::new();
     for hit in &vec_hits {
         let chunk_id: i64 = conn.query_row(
@@ -278,7 +368,6 @@ pub fn hybrid_search(
             [hit.rowid],
             |r| r.get(0),
         )?;
-        // Normalize distance to [0,1] score: 1/(1+distance)
         let score = 1.0 / (1.0 + hit.distance);
         chunk_vec_score
             .entry(chunk_id)
@@ -286,41 +375,41 @@ pub fn hybrid_search(
             .or_insert(score);
     }
 
-    // 2) FTS5: get rowid (chunk_id) and bm25 rank
+    // 2) FTS5
     let mut chunk_text_score: std::collections::HashMap<i64, f64> = std::collections::HashMap::new();
     let fts_query = query.replace('"', "\"\"");
-    if let Ok(mut stmt) = conn.prepare(
-        "SELECT rowid, bm25(memory_fts) FROM memory_fts WHERE memory_fts MATCH ?1 LIMIT ?2",
-    ) {
-        let rows = stmt.query_map(rusqlite::params![&fts_query, limit as i64], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?))
-        });
-        if let Ok(rows) = rows {
-            let mut min_rank = f64::INFINITY;
-            let mut max_rank = f64::NEG_INFINITY;
-            let mut raw: Vec<(i64, f64)> = Vec::new();
-            for r in rows.filter_map(Result::ok) {
-                raw.push(r);
-                min_rank = min_rank.min(r.1);
-                max_rank = max_rank.max(r.1);
-            }
-            let range = max_rank - min_rank;
-            for (chunk_id, rank) in raw {
-                // bm25: lower is better, so invert so best match has score 1
-                let normalized = if range > 0.0 {
-                    (max_rank - rank) / range
-                } else {
-                    1.0
-                };
-                chunk_text_score
-                    .entry(chunk_id)
-                    .and_modify(|s| *s = (*s).max(normalized))
-                    .or_insert(normalized);
+    if !fts_query.trim().is_empty() {
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT rowid, bm25(memory_fts) FROM memory_fts WHERE memory_fts MATCH ?1 LIMIT ?2",
+        ) {
+            let rows = stmt.query_map(rusqlite::params![&fts_query, limit as i64], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?))
+            });
+            if let Ok(rows) = rows {
+                let mut min_rank = f64::INFINITY;
+                let mut max_rank = f64::NEG_INFINITY;
+                let mut raw: Vec<(i64, f64)> = Vec::new();
+                for r in rows.filter_map(Result::ok) {
+                    raw.push(r);
+                    min_rank = min_rank.min(r.1);
+                    max_rank = max_rank.max(r.1);
+                }
+                let range = max_rank - min_rank;
+                for (chunk_id, rank) in raw {
+                    let normalized = if range > 0.0 {
+                        (max_rank - rank) / range
+                    } else {
+                        1.0
+                    };
+                    chunk_text_score
+                        .entry(chunk_id)
+                        .and_modify(|s| *s = (*s).max(normalized))
+                        .or_insert(normalized);
+                }
             }
         }
     }
 
-    // 3) Union chunk ids and weighted score
     let all_ids: std::collections::HashSet<i64> = chunk_vec_score
         .keys()
         .chain(chunk_text_score.keys())
@@ -338,7 +427,6 @@ pub fn hybrid_search(
     scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     scored.truncate(limit);
 
-    // 4) Load chunk content from chunks table
     let mut out = Vec::with_capacity(scored.len());
     for (id, score) in scored {
         if let Ok((source, content)) = conn.query_row(
@@ -357,10 +445,30 @@ pub fn hybrid_search(
     Ok(out)
 }
 
+/// Hybrid search using [`Config`] for embedding API and dimensions.
+pub fn hybrid_search_with_config(
+    conn: &Connection,
+    query: &str,
+    limit: usize,
+    config: &Config,
+) -> Result<Vec<IndexedChunk>> {
+    let dim = config.memory.embedding_dimensions;
+    let q_emb = embeddings::try_embed_query_sync(config, query);
+    let q_slice = q_emb.as_deref();
+    hybrid_search(
+        conn,
+        query,
+        limit,
+        config.memory.vector_weight as f64,
+        config.memory.text_weight as f64,
+        q_slice,
+        dim,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
 
     #[test]
     fn chunk_text_splits_paragraphs() {

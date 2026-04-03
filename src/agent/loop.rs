@@ -7,7 +7,7 @@ use rig::OneOrMany;
 use crate::rig_provider::SynbotCompletionModel;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{broadcast, mpsc, Mutex};
+use tokio::sync::{broadcast, mpsc, Mutex, RwLock};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn, Instrument};
 
@@ -57,6 +57,8 @@ pub struct AgentLoop {
     pending_workflow_input: PendingWorkflowInputStore,
     pending_workflow_confirm: PendingConfirmStore,
     workflow_user_input_timeout_secs: u64,
+    /// Live config (memory, compression, embeddings).
+    shared_config: Arc<RwLock<Config>>,
 }
 
 impl AgentLoop {
@@ -71,6 +73,7 @@ impl AgentLoop {
         agent_registry: Arc<AgentRegistry>,
         tool_sandbox_exec_kind: Option<ToolSandboxExecKind>,
         hooks: Option<Arc<HookRegistry>>,
+        shared_config: Arc<RwLock<Config>>,
     ) -> Self {
         let subagent_manager = SubagentManager::new(
             config.main_agent.max_concurrent_subagents,
@@ -95,6 +98,7 @@ impl AgentLoop {
             pending_workflow_input: PendingWorkflowInputStore::new(),
             pending_workflow_confirm: PendingConfirmStore::new(),
             workflow_user_input_timeout_secs,
+            shared_config,
         }
     }
 
@@ -721,13 +725,6 @@ impl AgentLoop {
             };
 
             let agent_ctx = self.agent_registry.get(&agent_id).unwrap();
-            let context_builder = ContextBuilder::new(
-                &agent_ctx.workspace_dir,
-                &agent_id,
-                config::skills_dir().as_path(),
-                self.tool_sandbox_exec_kind,
-            );
-            let system_prompt = context_builder.build_system_prompt_with_role_prompt(&agent_ctx.system_prompt);
             let model_max_iterations = agent_ctx.params.max_iterations;
 
             let session_id = {
@@ -756,6 +753,38 @@ impl AgentLoop {
                 )
             } else {
                 base_content
+            };
+
+            let cfg_snapshot = self.shared_config.read().await.clone();
+            #[cfg(feature = "memory-index")]
+            if cfg_snapshot.memory.auto_index {
+                let _ = crate::agent::memory_index::reindex_if_changed_async(&agent_id, &cfg_snapshot)
+                    .await;
+            }
+            let memory_cfg_arc = std::sync::Arc::new(cfg_snapshot);
+            #[cfg(feature = "memory-index")]
+            let system_prompt = {
+                let context_builder = ContextBuilder::new(
+                    &agent_ctx.workspace_dir,
+                    &agent_id,
+                    config::skills_dir().as_path(),
+                    self.tool_sandbox_exec_kind,
+                    Some(std::sync::Arc::clone(&memory_cfg_arc)),
+                );
+                context_builder.build_system_prompt_with_role_prompt(
+                    &agent_ctx.system_prompt,
+                    Some(user_content.as_str()),
+                )
+            };
+            #[cfg(not(feature = "memory-index"))]
+            let system_prompt = {
+                let context_builder = ContextBuilder::new(
+                    &agent_ctx.workspace_dir,
+                    &agent_id,
+                    config::skills_dir().as_path(),
+                    self.tool_sandbox_exec_kind,
+                );
+                context_builder.build_system_prompt_with_role_prompt(&agent_ctx.system_prompt, None)
             };
 
             let tool_defs = self.tools.rig_definitions();
@@ -810,6 +839,7 @@ impl AgentLoop {
                     self.hooks.clone(),
                     self.tool_result_preview_chars,
                     cancel.as_ref(),
+                    Some(memory_cfg_arc),
                 )
                 .await
             })
@@ -891,13 +921,6 @@ impl AgentLoop {
             };
 
             let agent_ctx = self.agent_registry.get(&agent_id).unwrap();
-            let context_builder = ContextBuilder::new(
-                &agent_ctx.workspace_dir,
-                &agent_id,
-                config::skills_dir().as_path(),
-                self.tool_sandbox_exec_kind,
-            );
-            let system_prompt = context_builder.build_system_prompt_with_role_prompt(&agent_ctx.system_prompt);
             let model_max_iterations = agent_ctx.params.max_iterations;
 
             let session_id = {
@@ -921,6 +944,38 @@ impl AgentLoop {
                 )
             } else {
                 base_content
+            };
+
+            let cfg_snapshot = self.shared_config.read().await.clone();
+            #[cfg(feature = "memory-index")]
+            if cfg_snapshot.memory.auto_index {
+                let _ = crate::agent::memory_index::reindex_if_changed_async(&agent_id, &cfg_snapshot)
+                    .await;
+            }
+            let memory_cfg_arc = std::sync::Arc::new(cfg_snapshot);
+            #[cfg(feature = "memory-index")]
+            let system_prompt = {
+                let context_builder = ContextBuilder::new(
+                    &agent_ctx.workspace_dir,
+                    &agent_id,
+                    config::skills_dir().as_path(),
+                    self.tool_sandbox_exec_kind,
+                    Some(std::sync::Arc::clone(&memory_cfg_arc)),
+                );
+                context_builder.build_system_prompt_with_role_prompt(
+                    &agent_ctx.system_prompt,
+                    Some(user_content.as_str()),
+                )
+            };
+            #[cfg(not(feature = "memory-index"))]
+            let system_prompt = {
+                let context_builder = ContextBuilder::new(
+                    &agent_ctx.workspace_dir,
+                    &agent_id,
+                    config::skills_dir().as_path(),
+                    self.tool_sandbox_exec_kind,
+                );
+                context_builder.build_system_prompt_with_role_prompt(&agent_ctx.system_prompt, None)
             };
 
             // Push user message into session history before spawning
@@ -964,6 +1019,7 @@ impl AgentLoop {
             let max_consecutive_tool_errors = agent_ctx.params.max_consecutive_tool_errors;
 
             let session_messages_clone = session_messages.clone();
+            let memory_cfg_for_task = memory_cfg_arc.clone();
             let label = format!(
                 "directive:{}:{}",
                 agent_id,
@@ -994,6 +1050,7 @@ impl AgentLoop {
                         hooks.clone(),
                         tool_result_preview_chars,
                         None, // subagent tasks use timeout; no /stop cancel
+                        Some(memory_cfg_for_task),
                     )
                     .await?;
                     let messages = history_guard.clone();
@@ -1246,7 +1303,21 @@ async fn run_completion_loop(
     hooks: Option<Arc<HookRegistry>>,
     tool_result_preview_chars: usize,
     cancel: Option<&CancellationToken>,
+    memory_cfg: Option<Arc<Config>>,
 ) -> Result<u32> {
+    if let Some(ref c) = memory_cfg {
+        if let Err(e) = crate::agent::session_compactor::maybe_compact_history(
+            model,
+            c.as_ref(),
+            agent_id,
+            history,
+            max_chat_history_messages,
+        )
+        .await
+        {
+            tracing::warn!(error = %e, "session compaction skipped");
+        }
+    }
     let message_ctx = Some((channel, chat_id, sender_id, session_id));
     let mut iterations = 0u32;
     let mut consecutive_tool_errors: u32 = 0;

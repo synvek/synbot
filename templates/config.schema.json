@@ -129,10 +129,16 @@
         "backend": "",
         "compression": {
           "enabled": false,
+          "keepRecentMessages": null,
           "maxConversationTurns": 50,
           "summaryWriteToMemory": true
         },
+        "embeddingDimensions": 384,
         "embeddingModel": "local/default",
+        "embeddingProvider": "none",
+        "longTermMaxChars": 0,
+        "recentDays": 1,
+        "searchLimit": 5,
         "textWeight": 0.30000001192092896,
         "vectorWeight": 0.699999988079071
       },
@@ -143,7 +149,7 @@
       ]
     },
     "pairings": {
-      "description": "Pairing approvals supplementing allowlist; use `synbot pairing approve`.",
+      "description": "Pairing approvals: supplement allowlist; matched by channel provider + MD5(chat_id) prefix.",
       "default": [],
       "type": "array",
       "items": {
@@ -424,26 +430,6 @@
         }
       }
     },
-    "PairingEntry": {
-      "description": "Approved pairing: grants access for one chat (by MD5(chatId) prefix) for a channel provider.",
-      "type": "object",
-      "required": [
-        "channel",
-        "pairingCode"
-      ],
-      "properties": {
-        "channel": {
-          "description": "Channel provider name (registry key): feishu, discord, telegram, …",
-          "type": "string"
-        },
-        "pairingCode": {
-          "description": "First 12 hex characters of MD5(chatId).",
-          "type": "string",
-          "minLength": 12,
-          "maxLength": 12
-        }
-      }
-    },
     "AppSandboxConfig": {
       "type": "object",
       "properties": {
@@ -510,7 +496,7 @@
           ]
         },
         "workDir": {
-          "description": "Working directory for the child process in app sandbox. When omitted, defaults to the config root directory (`~/.synbot`, or `--root-dir`), not the entire user profile.",
+          "description": "Working directory for the child process in app sandbox. When omitted, defaults to the config root directory (`~/.synbot`, or `--root-dir`), not the whole home folder.",
           "default": null,
           "type": [
             "string",
@@ -1140,7 +1126,7 @@
           "type": "string"
         },
         "allowlist": {
-          "description": "Allowlist of IRC channel names allowed to interact with the bot (e.g. `#general`, `#dev`).",
+          "description": "Allowlist entries: **channel** messages match `chatId` to the channel name (e.g. `#dev`); **direct messages** to the bot match `chatId` to the sender's **IRC nick** (e.g. `halloy1905`).",
           "default": [],
           "type": "array",
           "items": {
@@ -1382,7 +1368,7 @@
           ]
         },
         "allowlist": {
-          "description": "Matrix: chatId must be internal room id !id:server (Element Room settings → Advanced) or @user:server — not #alias. Empty allowlist + enableAllowlist denies all.",
+          "description": "For Matrix, `chatId` must be the internal **room id** (`!xx:server`, from Element → Room settings → Advanced) or a user **MXID** — not a room alias (`#name:server`). Matching ignores surrounding ASCII spaces and letter case.",
           "default": [],
           "type": "array",
           "items": {
@@ -1395,7 +1381,7 @@
           "type": "string"
         },
         "enableAllowlist": {
-          "description": "When true, only allowlist + CLI pairings are accepted; empty allowlist denies everyone. When false, allowlist is not checked.",
+          "description": "When true, only `allowlist` entries and CLI pairings are accepted; an empty allowlist denies everyone.",
           "default": true,
           "type": "boolean"
         },
@@ -1431,7 +1417,7 @@
           "type": "boolean"
         },
         "storePath": {
-          "description": "SQLite path for Matrix state and E2EE crypto store. Empty = default under sessions/matrix/{name}/store.sqlite. Tilde ~ is expanded.",
+          "description": "SQLite store path for Matrix sync state and Olm/Megolm keys (E2EE). Tilde `~` is expanded. When empty, defaults to `{sessions_dir}/matrix/{channelName}/store.sqlite` (see `sessions_root()`). The store is tied to user + device id; synbot uses a fixed device id `SYNBOT` for password login. Delete this file if you see a crypto store / device mismatch after upgrading.",
           "default": "",
           "type": "string"
         },
@@ -1518,6 +1504,16 @@
           "default": false,
           "type": "boolean"
         },
+        "keepRecentMessages": {
+          "description": "When compressing, keep this many **most recent** messages; if `None`, use the agent's `max_chat_history_messages`.",
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
         "maxConversationTurns": {
           "default": 50,
           "type": "integer",
@@ -1544,6 +1540,7 @@
         "compression": {
           "default": {
             "enabled": false,
+            "keepRecentMessages": null,
             "maxConversationTurns": 50,
             "summaryWriteToMemory": true
           },
@@ -1553,9 +1550,42 @@
             }
           ]
         },
+        "embeddingDimensions": {
+          "description": "Must match the chosen embedding model output size (sqlite-vec table dimension).",
+          "default": 384,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
         "embeddingModel": {
           "default": "local/default",
           "type": "string"
+        },
+        "embeddingProvider": {
+          "description": "`none` (stub vectors), `ollama`, or `openai` (OpenAI-compatible `/v1/embeddings`).",
+          "default": "none",
+          "type": "string"
+        },
+        "longTermMaxChars": {
+          "description": "Max characters of `MEMORY.md` injected as long-term memory; `0` means unlimited.",
+          "default": 0,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "recentDays": {
+          "description": "Days of `memory/YYYY-MM-DD.md` to include in the memory section (default 1).",
+          "default": 1,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "searchLimit": {
+          "description": "Max chunks from hybrid search injected into the system prompt (capped at 10 in backend).",
+          "default": 5,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
         },
         "textWeight": {
           "default": 0.30000001192092896,
@@ -1566,6 +1596,24 @@
           "default": 0.699999988079071,
           "type": "number",
           "format": "float"
+        }
+      }
+    },
+    "PairingEntry": {
+      "description": "Approved pairing: grants access for one chat (identified by pairing code derived from chat id) for a channel provider.",
+      "type": "object",
+      "required": [
+        "channel",
+        "pairingCode"
+      ],
+      "properties": {
+        "channel": {
+          "description": "Channel provider name (registry key): feishu, discord, telegram, …",
+          "type": "string"
+        },
+        "pairingCode": {
+          "description": "First 12 hex chars of MD5(chat_id), case-insensitive when matched.",
+          "type": "string"
         }
       }
     },
@@ -2036,7 +2084,7 @@
           "type": "boolean"
         },
         "groupMyName": {
-          "description": "When enable_allowlist is false, bot name used for group @ check (optional).",
+          "description": "Bot username for group @-mention gate: used when allowlist is off, when a chat is paired-only (not on allowlist), and as fallback for allowlisted groups without per-entry `myName`.",
           "default": null,
           "type": [
             "string",
@@ -2136,7 +2184,7 @@
           ]
         },
         "sandboxType": {
-          "description": "Tool sandbox backend: Docker \"gvisor-docker\" (default), \"plain-docker\"; Windows also \"wsl2-gvisor\" or host \"appcontainer\" (requires `synbot sandbox setup` once as Administrator for network). Linux/macOS host: \"nono\" (nono CLI on PATH). macOS only: \"seatbelt\" (`/usr/bin/sandbox-exec`; coarse network on/off only, not per-host rules). If the environment does not match, creation fails—pick an available type.",
+          "description": "Tool sandbox backend: \"gvisor-docker\" (default), \"plain-docker\"; on Windows also \"wsl2-gvisor\" or host-native \"appcontainer\". On Linux/macOS host-native: \"nono\"; on macOS only: \"seatbelt\" (sandbox-exec). If the environment does not match, tool sandbox creation fails; pick an available type.",
           "default": null,
           "type": [
             "string",

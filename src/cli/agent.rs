@@ -139,6 +139,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
 
     // Agent loop (CLI agent has no tool sandbox; hooks from plugins are used when configured).
     // Arc<Mutex<>> so /stop or /cancel can cancel a running agent task.
+    let shared_config_loop = std::sync::Arc::new(tokio::sync::RwLock::new(cfg.clone()));
     let agent_loop = crate::agent::r#loop::AgentLoop::new(
         completion_model,
         ws,
@@ -150,6 +151,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
         agent_registry,
         None,
         Some(std::sync::Arc::new(hook_registry)),
+        shared_config_loop,
     )
     .await;
     let loop_ref = std::sync::Arc::new(tokio::sync::Mutex::new(agent_loop));

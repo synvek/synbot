@@ -107,7 +107,7 @@ pub async fn cmd_start() -> Result<()> {
         }
     }
 
-    let ws = config::effective_workspace_path(&cfg);
+    let ws = config::workspace_path(&cfg);
 
     // Subagent manager (shared via Arc<Mutex<>>)
     let subagent_mgr = std::sync::Arc::new(
@@ -144,6 +144,17 @@ pub async fn cmd_start() -> Result<()> {
 
     // Optional sandbox: create and start app/tool sandboxes when configured.
     let sandbox_context = init_sandbox_if_configured(&cfg).await;
+    let tool_sandbox_delegate: crate::sandbox::SandboxContext =
+        match &sandbox_context {
+            None => None,
+            Some((mgr, Some(id), kind)) => Some(crate::sandbox::ToolSandboxDelegate::Local {
+                manager: std::sync::Arc::clone(mgr),
+                sandbox_id: id.clone(),
+                kind: *kind,
+            }),
+            Some((_, None, _)) => None,
+        };
+    let tool_sandbox_exec_kind = tool_sandbox_delegate.as_ref().map(|d| d.exec_kind());
 
     // Shared session state (in-memory + persistence); load before agent loop and tools
     let session_store = crate::agent::session::SessionStore::new(crate::config::sessions_root().as_path());
@@ -159,7 +170,7 @@ pub async fn cmd_start() -> Result<()> {
         std::sync::Arc::clone(&approval_manager),
         permission_policy.clone(),
         heartbeat_cron_ctx,
-        &sandbox_context,
+        &tool_sandbox_delegate,
         shared_session_state.clone(),
         bus.outbound_tx_clone(),
     );
@@ -249,7 +260,7 @@ pub async fn cmd_start() -> Result<()> {
     // Create main agent's SQLite index file so it exists and can be populated by reindex later
     #[cfg(feature = "memory-index")]
     {
-        let _ = crate::agent::memory_index::open_index("main");
+        let _ = crate::agent::memory_index::open_index("main", cfg.memory.embedding_dimensions);
     }
 
     let skills_loader = std::sync::Arc::new(skills_composite);
@@ -258,8 +269,6 @@ pub async fn cmd_start() -> Result<()> {
     let cron_service = std::sync::Arc::new(tokio::sync::RwLock::new(
         crate::cron::service::CronService::new(cron_store_path),
     ));
-
-    let tool_sandbox_exec_kind = sandbox_context.as_ref().map(|d| d.exec_kind());
 
     // Start agent loop (Arc<Mutex<>> so /stop or /cancel can cancel a running agent task)
     let agent_loop = crate::agent::r#loop::AgentLoop::new(
@@ -273,6 +282,7 @@ pub async fn cmd_start() -> Result<()> {
         std::sync::Arc::clone(&agent_registry),
         tool_sandbox_exec_kind,
         Some(std::sync::Arc::new(hook_registry)),
+        std::sync::Arc::clone(&shared_config),
     )
     .await;
     let loop_ref = std::sync::Arc::new(tokio::sync::Mutex::new(agent_loop));
@@ -346,12 +356,8 @@ pub async fn cmd_start() -> Result<()> {
         }
     }
 
-    // Allow running multiple instances (e.g. `synbot sandbox start` child) without binding the web UI port.
-    // The sandbox launcher can set this env var for the AppContainer child process.
-    let disable_web = std::env::var_os("SYNBOT_DISABLE_WEB").is_some();
-
     // Start web server if enabled
-    if cfg.web.enabled && !disable_web {
+    if cfg.web.enabled {
         let mut web_config = cfg.web.clone();
         // Inside AppContainer the process is network-isolated; bind to 0.0.0.0 so
         // LAN clients can reach the web UI (inbound firewall rule is added by the
@@ -386,9 +392,6 @@ pub async fn cmd_start() -> Result<()> {
             }
         }
     } else {
-        if disable_web && cfg.web.enabled {
-            info!("Web server disabled by SYNBOT_DISABLE_WEB=1 (running headless).");
-        }
         info!("🐈 synbot daemon running. Press Ctrl+C to stop.");
         tokio::signal::ctrl_c().await?;
         info!("Shutting down...");
@@ -396,12 +399,17 @@ pub async fn cmd_start() -> Result<()> {
     Ok(())
 }
 
-/// If app_sandbox or tool_sandbox is configured, create SandboxManager, create/start sandboxes,
-/// or (Windows) use a remote tool sandbox helper via IPC when launched from `synbot sandbox`.
+/// If app_sandbox or tool_sandbox is configured, create SandboxManager, create/start sandboxes.
+/// Returns (manager, Some(tool_sandbox_id)) when tool sandbox is running (exec uses it),
+/// or (manager, None) when only app sandbox is running (keeps manager alive so app sandbox is not stopped).
 /// When we are already inside the app sandbox (child of `synbot sandbox`), we skip creating/starting app sandbox.
 async fn init_sandbox_if_configured(
     cfg: &config::Config,
-) -> crate::sandbox::SandboxContext {
+) -> Option<(
+    std::sync::Arc<crate::sandbox::SandboxManager>,
+    Option<String>,
+    crate::sandbox::types::ToolSandboxExecKind,
+)> {
     let in_app_sandbox = std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some();
     let has_app = cfg.app_sandbox.is_some() && !in_app_sandbox;
     let has_tool = cfg.tool_sandbox.is_some();
@@ -409,52 +417,9 @@ async fn init_sandbox_if_configured(
         return None;
     }
 
-    #[cfg(target_os = "windows")]
-    if in_app_sandbox {
-        if let Some(ref tool_cfg) = cfg.tool_sandbox {
-            let st = tool_cfg.sandbox_type.as_deref().unwrap_or("gvisor-docker");
-            if st.eq_ignore_ascii_case("appcontainer") {
-                if let (Ok(pipe), Ok(auth)) = (
-                    std::env::var(crate::sandbox::tool_sandbox_ipc::ENV_TOOL_SANDBOX_PIPE),
-                    std::env::var(crate::sandbox::tool_sandbox_ipc::ENV_TOOL_SANDBOX_AUTH),
-                ) {
-                    let workspace_path = config::effective_workspace_path(cfg);
-                    let skills_dir = config::skills_dir();
-                    match config::build_tool_sandbox_config(
-                        tool_cfg,
-                        &cfg.sandbox_monitoring,
-                        &workspace_path,
-                        &skills_dir,
-                    ) {
-                        Ok(sc) => {
-                            let sandbox_id = sc.sandbox_id.clone();
-                            let kind = config::tool_sandbox_exec_kind(tool_cfg);
-                            let client = std::sync::Arc::new(
-                                crate::sandbox::tool_sandbox_ipc::ToolSandboxIpcClient::new(
-                                    pipe, auth,
-                                ),
-                            );
-                            info!(
-                                sandbox_id = %sandbox_id,
-                                "Tool sandbox: using host helper (named pipe IPC)"
-                            );
-                            return Some(crate::sandbox::ToolSandboxDelegate::Remote {
-                                client,
-                                sandbox_id,
-                                kind,
-                            });
-                        }
-                        Err(e) => {
-                            warn!(error = %e, "Tool sandbox config invalid (remote helper)");
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     let manager = std::sync::Arc::new(crate::sandbox::SandboxManager::with_defaults());
     let monitoring = &cfg.sandbox_monitoring;
+    let mut app_started = false;
 
     if let Some(_) = cfg.app_sandbox {
         if !in_app_sandbox {
@@ -468,7 +433,7 @@ async fn init_sandbox_if_configured(
         // When in_app_sandbox we are already inside the sandbox (started via `synbot sandbox start`).
     }
 
-    let workspace_path = config::effective_workspace_path(cfg);
+    let workspace_path = config::workspace_path(cfg);
     let skills_dir = config::skills_dir();
     if let Some(ref tool_cfg) = cfg.tool_sandbox {
         match config::build_tool_sandbox_config(tool_cfg, monitoring, &workspace_path, &skills_dir) {
@@ -480,11 +445,7 @@ async fn init_sandbox_if_configured(
                         } else {
                             info!(sandbox_id = %id, "Tool sandbox started (exec runs in sandbox)");
                             let kind = config::tool_sandbox_exec_kind(tool_cfg);
-                            return Some(crate::sandbox::ToolSandboxDelegate::Local {
-                                manager,
-                                sandbox_id: id,
-                                kind,
-                            });
+                            return Some((manager, Some(id), kind));
                         }
                     }
                     Err(e) => {
@@ -503,6 +464,14 @@ async fn init_sandbox_if_configured(
         }
     }
 
-    let _ = manager;
-    None
+    // Keep manager alive when app sandbox was started so it is not dropped and stopped.
+    if app_started {
+        Some((
+            manager,
+            None,
+            crate::sandbox::types::ToolSandboxExecKind::Docker,
+        ))
+    } else {
+        None
+    }
 }

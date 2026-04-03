@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{broadcast, mpsc, Mutex};
+use tokio::sync::{broadcast, mpsc, Mutex, RwLock};
 
 use synbot::agent::agent_registry::AgentRegistry;
 use synbot::agent::r#loop::AgentLoop;
@@ -97,6 +97,7 @@ async fn build_agent_loop(
 
     let mock_model = Arc::new(common::mock_completion_model("Hello from mock model"));
 
+    let shared_config = Arc::new(RwLock::new(config.clone()));
     let agent_loop = AgentLoop::new(
         mock_model,
         workspace,
@@ -108,6 +109,7 @@ async fn build_agent_loop(
         agent_registry,
         None, // tool_sandbox_exec_kind
         None,  // hooks
+        shared_config,
     )
     .await;
 

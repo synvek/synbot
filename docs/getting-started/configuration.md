@@ -778,17 +778,31 @@ The `mainChannel` specifies which channel to use for multi-agent features when m
 
 ## Memory Configuration
 
-Optional memory/embedding backend for conversation context (e.g. vector search when `memory-index` feature is enabled):
+With the default `memory-index` feature, Synbot stores long-term notes under `~/.synbot/memory/{agent}/MEMORY.md`, daily notes under `memory/YYYY-MM-DD.md`, and optionally builds a **SQLite** index (sqlite-vec + FTS5). The system prompt **Memory** section includes long-term text (optionally truncated via `longTermMaxChars`), the last `recentDays` of daily notes, and **hybrid search** snippets using the current user message as the query when an index exists. When `autoIndex` is true, changed files trigger a reindex before handling a message, and the `remember` tool triggers reindex after writes.
+
+- **embeddingProvider**: `none` (stub vectors; FTS still works), `ollama`, or `openai` (OpenAI-compatible embeddings using `providers.openai.apiKey`).
+- **embeddingDimensions**: must match the model output width; changing it recreates the vec table.
+- **compression**: when `enabled` and the session has more than `maxConversationTurns` messages, older messages are summarized once per run and a summary message is prepended; if `summaryWriteToMemory` is true, the summary is also appended to `MEMORY.md`. `keepRecentMessages` defaults to the agent’s `maxChatHistoryMessages` when omitted.
 
 ```json
 {
   "memory": {
     "backend": "",
+    "embeddingProvider": "none",
     "embeddingModel": "local/default",
+    "embeddingDimensions": 384,
     "vectorWeight": 0.7,
     "textWeight": 0.3,
     "autoIndex": true,
-    "compression": {}
+    "recentDays": 1,
+    "searchLimit": 5,
+    "longTermMaxChars": 0,
+    "compression": {
+      "enabled": false,
+      "maxConversationTurns": 50,
+      "summaryWriteToMemory": true,
+      "keepRecentMessages": null
+    }
   }
 }
 ```
