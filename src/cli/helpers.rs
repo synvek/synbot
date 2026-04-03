@@ -1,56 +1,11 @@
 //! Helper functions for CLI commands.
 
-use tracing::warn;
 use crate::config;
 
 /// Resolve API key and base URL for the given provider name.
 /// Returns the credentials for that provider only, so model and key stay consistent when multiple providers are configured.
 pub fn resolve_provider(cfg: &config::Config, provider_name: &str) -> (String, Option<String>) {
-    // Helper: trim empty to None, then normalize URL (IDN -> punycode) so reqwest does not fail
-    let normalize_base = |base: &Option<String>| -> Option<String> {
-        base.as_ref().and_then(|s| {
-            let trimmed = s.trim();
-            if trimmed.is_empty() {
-                return None;
-            }
-            match crate::url_utils::normalize_http_url(trimmed) {
-                Ok(normalized) => Some(normalized),
-                Err(e) => {
-                    warn!(url = %trimmed, error = %e, "Invalid api_base URL, using as-is (may cause request to fail)");
-                    Some(trimmed.to_string())
-                }
-            }
-        })
-    };
-
-    let name = provider_name.trim().to_lowercase();
-    let (key, base) = if let Some(entry) = cfg
-        .providers
-        .extra
-        .get(provider_name.trim())
-        .or_else(|| cfg.providers.extra.get(&name))
-    {
-        (entry.api_key.clone(), normalize_base(&entry.api_base))
-    } else if name.contains("openrouter") {
-        (cfg.providers.openrouter.api_key.clone(), normalize_base(&cfg.providers.openrouter.api_base))
-    } else if name.contains("anthropic") || name.contains("claude") {
-        (cfg.providers.anthropic.api_key.clone(), normalize_base(&cfg.providers.anthropic.api_base))
-    } else if name.contains("openai") {
-        (cfg.providers.openai.api_key.clone(), normalize_base(&cfg.providers.openai.api_base))
-    } else if name.contains("gemini") {
-        (cfg.providers.gemini.api_key.clone(), normalize_base(&cfg.providers.gemini.api_base))
-    } else if name.contains("deepseek") {
-        (cfg.providers.deepseek.api_key.clone(), normalize_base(&cfg.providers.deepseek.api_base))
-    } else if name.contains("moonshot") {
-        (cfg.providers.moonshot.api_key.clone(), normalize_base(&cfg.providers.moonshot.api_base))
-    } else if name.contains("kimi") {
-        (cfg.providers.kimi_code.api_key.clone(), normalize_base(&cfg.providers.kimi_code.api_base))
-    } else if name.contains("ollama") {
-        (cfg.providers.ollama.api_key.clone(), normalize_base(&cfg.providers.ollama.api_base))
-    } else {
-        (String::new(), normalize_base(&None))
-    };
-    (key, base)
+    config::resolve_provider(cfg, provider_name)
 }
 
 /// Build a rig completion model using rig-core (no rig-dyn). Returns Arc<dyn SynbotCompletionModel>.
@@ -82,6 +37,7 @@ pub use crate::sandbox::SandboxContext;
 /// spawn tool runs real subagents instead of no-ops.
 pub fn build_default_tools(
     cfg: &config::Config,
+    shared_config: std::sync::Arc<tokio::sync::RwLock<config::Config>>,
     ws: &std::path::Path,
     subagent_mgr: std::sync::Arc<tokio::sync::Mutex<crate::agent::subagent::SubagentManager>>,
     approval_manager: std::sync::Arc<crate::tools::approval::ApprovalManager>,
@@ -151,10 +107,21 @@ pub fn build_default_tools(
         manager: subagent_mgr,
         context: spawn_context.clone(),
     })).expect("register SpawnTool");
-    reg.register(std::sync::Arc::new(memory_tool::RememberTool::new("main"))).expect("register RememberTool");
+    #[cfg(feature = "memory-index")]
+    reg.register(std::sync::Arc::new(memory_tool::RememberTool::new(
+        "main",
+        std::sync::Arc::clone(&shared_config),
+    )))
+    .expect("register RememberTool");
+    #[cfg(not(feature = "memory-index"))]
+    reg.register(std::sync::Arc::new(memory_tool::RememberTool::new("main")))
+        .expect("register RememberTool");
     reg.register(std::sync::Arc::new(memory_tool::ListMemoryTool::new("main"))).expect("register ListMemoryTool");
     #[cfg(feature = "memory-index")]
-    reg.register(std::sync::Arc::new(memory_tool::SearchMemoryTool::new("main")))
+    reg.register(std::sync::Arc::new(memory_tool::SearchMemoryTool::new(
+        "main",
+        std::sync::Arc::clone(&shared_config),
+    )))
         .expect("register SearchMemoryTool");
     reg.register(std::sync::Arc::new(session_tools::ListSessionsTool::new(
         shared_session_state.clone(),

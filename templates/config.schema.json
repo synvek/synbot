@@ -133,7 +133,7 @@
           "maxConversationTurns": 50,
           "summaryWriteToMemory": true
         },
-        "embeddingDimensions": 384,
+        "embeddingDimensions": 768,
         "embeddingModel": "local/default",
         "embeddingProvider": "none",
         "longTermMaxChars": 0,
@@ -1552,17 +1552,18 @@
         },
         "embeddingDimensions": {
           "description": "Must match the chosen embedding model output size (sqlite-vec table dimension).",
-          "default": 384,
+          "default": 768,
           "type": "integer",
           "format": "uint32",
           "minimum": 0.0
         },
         "embeddingModel": {
+          "description": "Embedding model id; API style follows `embeddingProvider` (see `agent::embeddings`).",
           "default": "local/default",
           "type": "string"
         },
         "embeddingProvider": {
-          "description": "`none` (stub vectors), `ollama`, or `openai` (OpenAI-compatible `/v1/embeddings`).",
+          "description": "Provider **name** for embeddings only (independent of chat `mainAgent.provider`). Same keys as elsewhere: `ollama`, `openai`, `deepseek`, or `providers.extra` — credentials via [`resolve_provider`]. `none` or empty: stub vectors (FTS5 still works).",
           "default": "none",
           "type": "string"
         },

@@ -777,9 +777,9 @@ cargo run --example generate_config_schema --features schema -- -o templates/con
 
 默认构建包含 `memory-index` 特性：长期记忆文件（`~/.synbot/memory/{agent}/MEMORY.md`）、按日笔记（`memory/YYYY-MM-DD.md`）、以及可选的 **SQLite（sqlite-vec + FTS5）混合索引**。系统提示中的「Memory」会包含：长期记忆（可按 `longTermMaxChars` 截断）、最近 `recentDays` 天的笔记，以及用**当前用户消息**作为查询的检索片段（若索引存在）。`autoIndex` 为 true 时，在每次处理消息前若文件有变更会增量重索引；`remember` 工具写入后也会触发重索引。
 
-- **embeddingProvider**：`none`（查询向量与入库均为占位，主要靠 FTS 关键词）、`ollama`（`POST {ollama}/api/embeddings`）、`openai`（OpenAI 兼容 `POST {api_base}/v1/embeddings`，使用 `providers.openai.apiKey`）。
-- **embeddingDimensions**：必须与所选嵌入模型输出维度一致（sqlite-vec 表宽）；变更维度时会重建索引库。
-- **embeddingModel**：嵌入模型名；`none` 时可忽略。Ollama 未配置时默认尝试 `nomic-embed-text`，OpenAI 路径默认 `text-embedding-3-small`（请同时把 `embeddingDimensions` 设为该模型实际维度）。
+- **embeddingProvider**：记忆向量使用的 **provider 名称**，与对话用的 `mainAgent.provider` **无关**，可单独指定。填写与全局相同的名称即可复用 `providers` 里已有配置（`apiKey` / `apiBase`），无需再配一套端点。例如对话用 `deepseek`、嵌入用 `ollama` 或 `openai` 均可。可选值示例：`none`（占位向量，主要靠 FTS5）、`ollama`、`openai`、`deepseek`、`openrouter`、`moonshot`、`kimi`、或 `providers.extra` 的键名。名称含 `ollama` 时走 Ollama `/api/embeddings`；其余 OpenAI 兼容类走 `POST {api_base}/v1/embeddings`。**Anthropic / Gemini** 在此未接嵌入 API，向量侧为占位。
+- **embeddingDimensions**：必须与所选嵌入模型输出维度一致（sqlite-vec 表宽）；默认 **768**（与 Ollama 默认 `nomic-embed-text` 一致）；变更维度时会重建索引库。
+- **embeddingModel**：嵌入模型名；`local/default` 时 Ollama 默认 `nomic-embed-text`，OpenAI 兼容路径默认 `text-embedding-3-small`（请把 `embeddingDimensions` 设为该模型实际维度）。
 - **compression**：`enabled` 为 true 且会话消息条数超过 `maxConversationTurns` 时，在每次对话轮开始时对较早消息做 **LLM 摘要**，并插入一条摘要消息；`summaryWriteToMemory` 为 true 时同时追加到 `MEMORY.md`。`keepRecentMessages` 未设置时，保留条数与代理的 `maxChatHistoryMessages` 一致。
 
 ```json
@@ -788,7 +788,7 @@ cargo run --example generate_config_schema --features schema -- -o templates/con
     "backend": "",
     "embeddingProvider": "none",
     "embeddingModel": "local/default",
-    "embeddingDimensions": 384,
+    "embeddingDimensions": 768,
     "vectorWeight": 0.7,
     "textWeight": 0.3,
     "autoIndex": true,

@@ -69,9 +69,13 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
     // Bus is needed for MessageTool's outbound_tx; create before building tools
     let mut bus = crate::bus::MessageBus::new();
 
+    // Same source of truth as AgentLoop (embeddingDimensions, etc.); tools must not use load_config(None) alone.
+    let shared_config = std::sync::Arc::new(tokio::sync::RwLock::new(cfg.clone()));
+
     // Build tools (pass subagent manager, approval manager, permission policy, session state, and outbound_tx for message tool)
     let (mut tool_reg, spawn_context) = build_default_tools(
         &cfg,
+        std::sync::Arc::clone(&shared_config),
         &ws,
         std::sync::Arc::clone(&subagent_mgr),
         approval_manager,
@@ -139,7 +143,6 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
 
     // Agent loop (CLI agent has no tool sandbox; hooks from plugins are used when configured).
     // Arc<Mutex<>> so /stop or /cancel can cancel a running agent task.
-    let shared_config_loop = std::sync::Arc::new(tokio::sync::RwLock::new(cfg.clone()));
     let agent_loop = crate::agent::r#loop::AgentLoop::new(
         completion_model,
         ws,
@@ -151,7 +154,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
         agent_registry,
         None,
         Some(std::sync::Arc::new(hook_registry)),
-        shared_config_loop,
+        std::sync::Arc::clone(&shared_config),
     )
     .await;
     let loop_ref = std::sync::Arc::new(tokio::sync::Mutex::new(agent_loop));

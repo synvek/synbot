@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use tracing::warn;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock, RwLock};
 use std::time::SystemTime;
@@ -538,6 +539,78 @@ pub struct ProvidersConfig {
     pub extra: std::collections::HashMap<String, ProviderEntry>,
 }
 
+/// Resolve API key and base URL for the given provider name (same as chat/completion).
+pub fn resolve_provider(cfg: &Config, provider_name: &str) -> (String, Option<String>) {
+    let normalize_base = |base: &Option<String>| -> Option<String> {
+        base.as_ref().and_then(|s| {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                return None;
+            }
+            match crate::url_utils::normalize_http_url(trimmed) {
+                Ok(normalized) => Some(normalized),
+                Err(e) => {
+                    warn!(url = %trimmed, error = %e, "Invalid api_base URL, using as-is (may cause request to fail)");
+                    Some(trimmed.to_string())
+                }
+            }
+        })
+    };
+
+    let name = provider_name.trim().to_lowercase();
+    let (key, base) = if let Some(entry) = cfg
+        .providers
+        .extra
+        .get(provider_name.trim())
+        .or_else(|| cfg.providers.extra.get(&name))
+    {
+        (entry.api_key.clone(), normalize_base(&entry.api_base))
+    } else if name.contains("openrouter") {
+        (
+            cfg.providers.openrouter.api_key.clone(),
+            normalize_base(&cfg.providers.openrouter.api_base),
+        )
+    } else if name.contains("anthropic") || name.contains("claude") {
+        (
+            cfg.providers.anthropic.api_key.clone(),
+            normalize_base(&cfg.providers.anthropic.api_base),
+        )
+    } else if name.contains("openai") {
+        (
+            cfg.providers.openai.api_key.clone(),
+            normalize_base(&cfg.providers.openai.api_base),
+        )
+    } else if name.contains("gemini") {
+        (
+            cfg.providers.gemini.api_key.clone(),
+            normalize_base(&cfg.providers.gemini.api_base),
+        )
+    } else if name.contains("deepseek") {
+        (
+            cfg.providers.deepseek.api_key.clone(),
+            normalize_base(&cfg.providers.deepseek.api_base),
+        )
+    } else if name.contains("moonshot") {
+        (
+            cfg.providers.moonshot.api_key.clone(),
+            normalize_base(&cfg.providers.moonshot.api_base),
+        )
+    } else if name.contains("kimi") {
+        (
+            cfg.providers.kimi_code.api_key.clone(),
+            normalize_base(&cfg.providers.kimi_code.api_base),
+        )
+    } else if name.contains("ollama") {
+        (
+            cfg.providers.ollama.api_key.clone(),
+            normalize_base(&cfg.providers.ollama.api_base),
+        )
+    } else {
+        (String::new(), normalize_base(&None))
+    };
+    (key, base)
+}
+
 // ---------------------------------------------------------------------------
 // Agent config (runtime entity that references one role)
 // ---------------------------------------------------------------------------
@@ -1028,11 +1101,12 @@ impl Default for MemoryCompressionConfig {
 pub struct MemoryConfig {
     #[serde(default)]
     pub backend: String,
-    #[serde(default = "default_embedding_model")]
-    pub embedding_model: String,
-    /// `none` (stub vectors), `ollama`, or `openai` (OpenAI-compatible `/v1/embeddings`).
+    /// Provider **name** for embeddings only (independent of chat `mainAgent.provider`). Same keys as elsewhere: `ollama`, `openai`, `deepseek`, or `providers.extra` — credentials via [`resolve_provider`]. `none` or empty: stub vectors (FTS5 still works).
     #[serde(default = "default_embedding_provider")]
     pub embedding_provider: String,
+    /// Embedding model id; API style follows `embeddingProvider` (see `agent::embeddings`).
+    #[serde(default = "default_embedding_model")]
+    pub embedding_model: String,
     /// Must match the chosen embedding model output size (sqlite-vec table dimension).
     #[serde(default = "default_embedding_dimensions")]
     pub embedding_dimensions: u32,
@@ -1062,7 +1136,7 @@ fn default_embedding_provider() -> String {
     "none".to_string()
 }
 fn default_embedding_dimensions() -> u32 {
-    384
+    768
 }
 fn default_memory_recent_days() -> u32 {
     1
@@ -1084,8 +1158,8 @@ impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
             backend: String::new(),
-            embedding_model: default_embedding_model(),
             embedding_provider: default_embedding_provider(),
+            embedding_model: default_embedding_model(),
             embedding_dimensions: default_embedding_dimensions(),
             vector_weight: default_vector_weight(),
             text_weight: default_text_weight(),

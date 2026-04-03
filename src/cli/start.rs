@@ -165,6 +165,7 @@ pub async fn cmd_start() -> Result<()> {
 
     let (mut tool_reg, spawn_context) = build_default_tools(
         &cfg,
+        std::sync::Arc::clone(&shared_config),
         &ws,
         std::sync::Arc::clone(&subagent_mgr),
         std::sync::Arc::clone(&approval_manager),

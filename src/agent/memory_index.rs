@@ -14,7 +14,7 @@ use crate::config;
 use crate::agent::embeddings;
 
 /// Default embedding dimension when using stub provider (no real embedding).
-pub const DEFAULT_EMBED_DIM: u32 = 384;
+pub const DEFAULT_EMBED_DIM: u32 = 768;
 
 static VEC_EXTENSION_REGISTERED: Once = Once::new();
 
@@ -41,16 +41,18 @@ fn dim_marker_path(agent_id: &str) -> std::path::PathBuf {
 }
 
 /// If embedding dimension changed, remove the SQLite DB so vec0 can be recreated with a new width.
+/// If `.embedding_dim` is missing but `{agent}.sqlite` still exists (e.g. user deleted only the marker),
+/// the old vec0 width would not match new embeddings — remove the DB in that case too.
 fn maybe_reset_sqlite_for_dim_change(agent_id: &str, dim: u32) -> Result<()> {
     let dir = config::memory_dir(agent_id);
     std::fs::create_dir_all(&dir)?;
     let marker = dim_marker_path(agent_id);
+    let db = db_path(agent_id);
     let need_reset = match std::fs::read_to_string(&marker) {
         Ok(s) => s.trim().parse::<u32>().ok() != Some(dim),
-        Err(_) => false,
+        Err(_) => db.exists(),
     };
     if need_reset {
-        let db = db_path(agent_id);
         let _ = std::fs::remove_file(&db);
         let _ = std::fs::remove_file(dir.join(".last_index"));
     }
@@ -134,8 +136,9 @@ pub fn index_chunk_with_embedding(
         rusqlite::params![bytes, chunk_id, content, source],
     )?;
 
+    // Standard FTS5 row insert (avoids SQL logic errors with contentless / shadow-style forms).
     conn.execute(
-        "INSERT INTO memory_fts(memory_fts, rowid, content) VALUES ('insert', ?1, ?2)",
+        "INSERT INTO memory_fts(rowid, content) VALUES (?1, ?2)",
         rusqlite::params![chunk_id, content],
     )?;
 

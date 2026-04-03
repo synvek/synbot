@@ -780,8 +780,9 @@ The `mainChannel` specifies which channel to use for multi-agent features when m
 
 With the default `memory-index` feature, Synbot stores long-term notes under `~/.synbot/memory/{agent}/MEMORY.md`, daily notes under `memory/YYYY-MM-DD.md`, and optionally builds a **SQLite** index (sqlite-vec + FTS5). The system prompt **Memory** section includes long-term text (optionally truncated via `longTermMaxChars`), the last `recentDays` of daily notes, and **hybrid search** snippets using the current user message as the query when an index exists. When `autoIndex` is true, changed files trigger a reindex before handling a message, and the `remember` tool triggers reindex after writes.
 
-- **embeddingProvider**: `none` (stub vectors; FTS still works), `ollama`, or `openai` (OpenAI-compatible embeddings using `providers.openai.apiKey`).
-- **embeddingDimensions**: must match the model output width; changing it recreates the vec table.
+- **embeddingProvider**: provider **name** for memory vectors only — independent of the agent’s chat provider (`mainAgent.provider` / `agents[].provider`). Use the same string keys as elsewhere (`ollama`, `openai`, `deepseek`, `openrouter`, `moonshot`, `kimi`, or a `providers.extra` key); the same `resolve_provider` logic as chat supplies `apiKey` and `apiBase`, so you do not duplicate endpoint config. Example: chat uses DeepSeek, embeddings use `ollama` or `openai`. `none` or empty: stub vectors (FTS5 still works). Names containing `ollama` use `POST …/api/embeddings`; OpenAI-compatible backends use `POST {api_base}/v1/embeddings`. **Anthropic/Claude and Gemini** are not wired for embeddings here (vector stub; FTS5 works).
+- **embeddingDimensions**: must match the model output width; default **768** (matches Ollama default `nomic-embed-text`); changing it recreates the vec table.
+- **embeddingModel**: when `local/default`, Ollama defaults to `nomic-embed-text` and OpenAI-compatible paths default to `text-embedding-3-small`; set `embeddingDimensions` to match the model.
 - **compression**: when `enabled` and the session has more than `maxConversationTurns` messages, older messages are summarized once per run and a summary message is prepended; if `summaryWriteToMemory` is true, the summary is also appended to `MEMORY.md`. `keepRecentMessages` defaults to the agent’s `maxChatHistoryMessages` when omitted.
 
 ```json
@@ -790,7 +791,7 @@ With the default `memory-index` feature, Synbot stores long-term notes under `~/
     "backend": "",
     "embeddingProvider": "none",
     "embeddingModel": "local/default",
-    "embeddingDimensions": 384,
+    "embeddingDimensions": 768,
     "vectorWeight": 0.7,
     "textWeight": 0.3,
     "autoIndex": true,
