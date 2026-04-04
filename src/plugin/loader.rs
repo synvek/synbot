@@ -102,8 +102,8 @@ pub async fn load_extism_plugins(
     background: &mut BackgroundServiceRegistry,
     skills: &mut CompositeSkillProvider,
 ) {
-    // Register OpenAI-compatible providers for each config.providers.extra key (no code change needed).
-    rig_provider::register_extra_openai_compatible_providers(cfg);
+    // Register extra providers (OpenAI- or Anthropic-compatible per entry.apiStyle).
+    rig_provider::register_extra_providers_from_config(cfg);
 
     let http_client = Arc::new(appcontainer_dns::build_reqwest_client());
     for (plugin_id, plugin_value) in &cfg.plugins {

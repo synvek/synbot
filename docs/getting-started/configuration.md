@@ -403,16 +403,20 @@ Optional channel to connect to an IRC server (e.g. Libera). Supports TLS, NickSe
 }
 ```
 
-### Extra providers (OpenAI-compatible)
+### Extra providers
 
-You can add **any OpenAI Chat Completions–compatible provider** (e.g. Minimax, local proxies, other APIs) **without changing code**, by configuration only.
+You can add **custom endpoints** that mirror either the **OpenAI Chat Completions** API or the **Anthropic Messages** API **without changing code**, by configuration only.
 
 1. Add an entry under **`providers.extra`** with a **name** of your choice, plus `apiKey` and `apiBase`.
-2. Set **`mainAgent.provider`** (or the agent’s `provider` override) to that name.
+2. Optionally set **`apiStyle`**: `"openai"` (default) or `"anthropic"`. This selects which client and wire format to use.
+3. Set **`mainAgent.provider`** (or the agent’s `provider` override) to that name.
 
-Names in `extra` are treated as OpenAI-compatible: requests use the `/chat/completions` API against the given `apiBase`. Built-in provider names (e.g. `openai`, `anthropic`, `openrouter`) are not overridden by `extra`.
+- **`apiStyle`: `"openai"`** (or omitted): requests use the Chat Completions–compatible API against `apiBase` (e.g. `/v1/chat/completions` style).
+- **`apiStyle`: `"anthropic"`**: requests use the same Messages API shape as `api.anthropic.com` against your `apiBase` (for proxies or Anthropic-compatible gateways).
 
-Example — add Minimax:
+Built-in provider names (e.g. `openai`, `anthropic`, `openrouter`) are not overridden by `extra`.
+
+Example — add Minimax (OpenAI-compatible):
 
 ```json
 {
@@ -431,8 +435,30 @@ Example — add Minimax:
 }
 ```
 
+Example — Anthropic-compatible gateway (custom `apiBase`):
+
+```json
+{
+  "providers": {
+    "extra": {
+      "myClaudeProxy": {
+        "apiKey": "sk-ant-...",
+        "apiBase": "https://anthropic-proxy.example.com",
+        "apiStyle": "anthropic"
+      }
+    }
+  },
+  "mainAgent": {
+    "provider": "myClaudeProxy",
+    "model": "claude-3-5-sonnet-20241022"
+  }
+}
+```
+
 - **apiKey**: Your API key for that service.
-- **apiBase**: Base URL of the API (e.g. `https://api.minimax.chat/v1`). Must support OpenAI-style `POST .../chat/completions`. If omitted, `https://api.openai.com/v1` is used.
+- **apiBase**: Base URL for that provider. With **`apiStyle` `openai`** (default), the endpoint must support OpenAI-style `POST .../chat/completions`; if `apiBase` is omitted, `https://api.openai.com/v1` is used. With **`apiStyle` `anthropic`**, the endpoint must follow the Anthropic Messages API; if `apiBase` is omitted, `https://api.anthropic.com` is used.
+- **apiStyle** (optional): `"openai"` or `"anthropic"` (default: `openai`).
+- **maxTokensCap** (optional): Per-provider ceiling for completion `max_tokens` (applied after `mainAgent.maxTokens` / per-agent `maxTokens`). Use when the gateway enforces a lower output limit than your global `maxTokens`. For example, **MiniMax**’s Anthropic-compatible API caps `max_tokens` per request (commonly **196608** for models such as MiniMax-M2.7); set `"maxTokensCap": 196608` on that `extra` entry, or lower `mainAgent.maxTokens` to stay within the provider limit.
 
 ## Agent Configuration
 

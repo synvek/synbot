@@ -91,7 +91,7 @@ async fn build_agent_loop(
         agents: vec![],
     };
     agent_registry
-        .load_from_config(&main_agent, &role_registry, &workspace)
+        .load_from_config(&main_agent, &config.providers, &role_registry, &workspace)
         .expect("load agent registry");
     let agent_registry = Arc::new(agent_registry);
 

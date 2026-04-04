@@ -148,7 +148,7 @@ impl ProviderRegistry {
 }
 
 // ---------------------------------------------------------------------------
-// Extra providers: config-only OpenAI-compatible providers (no code change)
+// Extra providers: config-only OpenAI- or Anthropic-compatible providers (no code change)
 // ---------------------------------------------------------------------------
 
 /// Built-in provider names that must not be overridden by config.providers.extra.
@@ -166,9 +166,10 @@ const BUILTIN_PROVIDER_NAMES: &[&str] = &[
 ];
 
 const DEFAULT_OPENAI_API_BASE: &str = "https://api.openai.com/v1";
+const DEFAULT_ANTHROPIC_API_BASE: &str = "https://api.anthropic.com";
 
 /// Factory that builds an OpenAI Chat Completions–compatible client for any base URL.
-/// Used for config.providers.extra entries so users can add providers (e.g. Minimax, proxies) by config only.
+/// Used for config.providers.extra entries with [`crate::config::ProviderApiStyle::Openai`].
 struct OpenAiCompatibleProviderFactory;
 
 impl ProviderFactory for OpenAiCompatibleProviderFactory {
@@ -196,20 +197,57 @@ impl ProviderFactory for OpenAiCompatibleProviderFactory {
     }
 }
 
-/// Register an OpenAI-compatible provider for each key in `config.providers.extra` that is not a built-in.
-/// Allows users to add new OpenAI-compatible providers (e.g. Minimax, local proxies) by config only.
-pub fn register_extra_openai_compatible_providers(cfg: &crate::config::Config) {
-    let factory: Arc<dyn ProviderFactory> = Arc::new(OpenAiCompatibleProviderFactory);
+/// Factory for Anthropic Messages API–compatible endpoints (custom `apiBase`, same wire format as Anthropic).
+struct AnthropicCompatibleProviderFactory;
+
+impl ProviderFactory for AnthropicCompatibleProviderFactory {
+    fn build(
+        &self,
+        _provider_name: &str,
+        model_name: &str,
+        api_key: &str,
+        api_base: Option<&str>,
+    ) -> Result<Arc<dyn SynbotCompletionModel>> {
+        let base = api_base
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| s.trim().trim_end_matches('/').to_string())
+            .unwrap_or_else(|| DEFAULT_ANTHROPIC_API_BASE.to_string());
+        let http = crate::appcontainer_dns::build_reqwest_client();
+        type RC = reqwest::Client;
+        let client = rig::providers::anthropic::Client::<RC>::builder()
+            .api_key(api_key.to_string())
+            .http_client(http)
+            .base_url(&base)
+            .build()
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        let m = client.completion_model(model_name.to_string());
+        Ok(Arc::new(AnthropicModel(client, m)) as Arc<dyn SynbotCompletionModel>)
+    }
+}
+
+/// Register each `config.providers.extra` entry (non–built-in name) using its [`crate::config::ProviderEntry::api_style`].
+pub fn register_extra_providers_from_config(cfg: &crate::config::Config) {
+    let openai_factory: Arc<dyn ProviderFactory> = Arc::new(OpenAiCompatibleProviderFactory);
+    let anthropic_factory: Arc<dyn ProviderFactory> = Arc::new(AnthropicCompatibleProviderFactory);
     let mut reg = default_registry()
         .write()
         .expect("provider registry lock");
-    for name in cfg.providers.extra.keys() {
+    for (name, entry) in &cfg.providers.extra {
         let key = name.trim().to_lowercase();
         if BUILTIN_PROVIDER_NAMES.iter().any(|n| key == *n) {
             continue;
         }
-        reg.register(name, Arc::clone(&factory));
+        let factory = match entry.api_style {
+            crate::config::ProviderApiStyle::Anthropic => Arc::clone(&anthropic_factory),
+            crate::config::ProviderApiStyle::Openai => Arc::clone(&openai_factory),
+        };
+        reg.register(name, factory);
     }
+}
+
+/// Backward-compatible alias for [`register_extra_providers_from_config`].
+pub fn register_extra_openai_compatible_providers(cfg: &crate::config::Config) {
+    register_extra_providers_from_config(cfg);
 }
 
 /// Build an Arc<dyn SynbotCompletionModel> from provider name, model name, API key and optional base URL.
@@ -241,14 +279,13 @@ fn build_completion_model_builtin(
     // Turbofish `<reqwest::Client>` pins H so the compiler knows the initial http client type
     // before .http_client(mk_http()) swaps it in.
     type RC = reqwest::Client;
-    const ANTHROPIC_API_BASE: &str = "https://api.anthropic.com";
     const OPENAI_API_BASE: &str = "https://api.openai.com/v1";
     const GEMINI_API_BASE: &str = "https://generativelanguage.googleapis.com";
     let model = if lower.contains("anthropic") || lower.contains("claude") {
         let base = api_base
             .filter(|s| !s.trim().is_empty())
             .map(|s| s.trim().trim_end_matches('/').to_string())
-            .unwrap_or_else(|| ANTHROPIC_API_BASE.to_string());
+            .unwrap_or_else(|| DEFAULT_ANTHROPIC_API_BASE.to_string());
         let client = rig::providers::anthropic::Client::<RC>::builder()
             .api_key(api_key.to_string())
             .http_client(mk_http())

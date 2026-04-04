@@ -171,6 +171,8 @@ impl SubagentManager {
         workspace: PathBuf,
         tools: Arc<ToolRegistry>,
         agent_id: &str,
+        max_tokens: u32,
+        temperature: f32,
         on_complete: Option<Box<dyn FnOnce(String, Result<String>) + Send>>,
     ) -> Result<String> {
         let task_fn = Box::pin(run_subagent_task(
@@ -179,6 +181,8 @@ impl SubagentManager {
             tools,
             task,
             agent_id.to_string(),
+            max_tokens,
+            temperature,
         ));
         self.spawn_fn(label, task_fn, on_complete).await
     }
@@ -227,6 +231,8 @@ async fn run_subagent_task(
     tools: Arc<ToolRegistry>,
     task: String,
     agent_id: String,
+    max_tokens: u32,
+    temperature: f32,
 ) -> Result<String> {
     let tool_ctx = ToolContext {
         agent_id: agent_id.clone(),
@@ -276,8 +282,8 @@ async fn run_subagent_task(
                 chat_history,
                 tools: tool_defs.clone(),
                 documents: vec![],
-                temperature: None,
-                max_tokens: None,
+                temperature: Some(temperature as f64),
+                max_tokens: Some(max_tokens as u64),
                 tool_choice: None,
                 additional_params: None,
             };

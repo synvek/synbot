@@ -265,6 +265,7 @@ mod tests {
         let entry = ProviderEntry {
             api_key: "sk-1234567890".to_string(),
             api_base: Some("https://api.example.com".to_string()),
+            ..Default::default()
         };
 
         let sanitized = sanitize_provider_entry(&entry);
@@ -322,34 +323,42 @@ mod tests {
                 anthropic: ProviderEntry {
                     api_key: "anthropic_key".to_string(),
                     api_base: None,
+                    ..Default::default()
                 },
                 openai: ProviderEntry {
                     api_key: "openai_key".to_string(),
                     api_base: None,
+                    ..Default::default()
                 },
                 gemini: ProviderEntry {
                     api_key: "".to_string(),
                     api_base: None,
+                    ..Default::default()
                 },
                 openrouter: ProviderEntry {
                     api_key: "".to_string(),
                     api_base: None,
+                    ..Default::default()
                 },
                 deepseek: ProviderEntry {
                     api_key: "".to_string(),
                     api_base: None,
+                    ..Default::default()
                 },
                 moonshot: ProviderEntry {
                     api_key: "".to_string(),
                     api_base: None,
+                    ..Default::default()
                 },
                 kimi_code: ProviderEntry {
                     api_key: "".to_string(),
                     api_base: None,
+                    ..Default::default()
                 },
                 ollama: ProviderEntry {
                     api_key: "".to_string(),
                     api_base: Some("http://localhost:11434".to_string()),
+                    ..Default::default()
                 },
                 extra: std::collections::HashMap::new(),
             },

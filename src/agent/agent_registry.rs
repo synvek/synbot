@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use crate::config::{AgentConfig, MainAgent};
 use crate::agent::role_registry::RoleRegistry;
+use crate::config::{resolve_provider_max_tokens_cap, AgentConfig, MainAgent, ProvidersConfig};
 
 // ---------------------------------------------------------------------------
 // Resolved agent parameters
@@ -30,13 +30,20 @@ pub struct ResolvedAgentParams {
     pub max_chat_history_messages: u32,
 }
 
+fn apply_max_tokens_cap(requested: u32, cap: Option<u32>) -> u32 {
+    match cap {
+        Some(c) if c > 0 => requested.min(c),
+        _ => requested,
+    }
+}
+
 impl ResolvedAgentParams {
     /// Params for the implicit main agent (all from MainAgent).
-    pub fn from_main_defaults(main_agent: &MainAgent) -> Self {
+    pub fn from_main_defaults(main_agent: &MainAgent, max_tokens_cap: Option<u32>) -> Self {
         Self {
             provider: main_agent.provider.clone(),
             model: main_agent.model.clone(),
-            max_tokens: main_agent.max_tokens,
+            max_tokens: apply_max_tokens_cap(main_agent.max_tokens, max_tokens_cap),
             temperature: main_agent.temperature,
             max_iterations: main_agent.max_tool_iterations,
             max_consecutive_tool_errors: main_agent.max_consecutive_tool_errors,
@@ -44,7 +51,8 @@ impl ResolvedAgentParams {
         }
     }
 
-    pub fn from_config(agent: &AgentConfig, defaults: &MainAgent) -> Self {
+    pub fn from_config(agent: &AgentConfig, defaults: &MainAgent, max_tokens_cap: Option<u32>) -> Self {
+        let max_tokens = agent.max_tokens.unwrap_or(defaults.max_tokens);
         Self {
             provider: agent
                 .provider
@@ -54,7 +62,7 @@ impl ResolvedAgentParams {
                 .model
                 .clone()
                 .unwrap_or_else(|| defaults.model.clone()),
-            max_tokens: agent.max_tokens.unwrap_or(defaults.max_tokens),
+            max_tokens: apply_max_tokens_cap(max_tokens, max_tokens_cap),
             temperature: agent.temperature.unwrap_or(defaults.temperature),
             max_iterations: agent.max_iterations.unwrap_or(defaults.max_tool_iterations),
             max_consecutive_tool_errors: defaults.max_consecutive_tool_errors,
@@ -101,6 +109,7 @@ impl AgentRegistry {
     pub fn load_from_config(
         &mut self,
         main_agent: &MainAgent,
+        providers: &ProvidersConfig,
         role_registry: &RoleRegistry,
         workspace: &Path,
     ) -> Result<()> {
@@ -109,7 +118,8 @@ impl AgentRegistry {
             "main agent requires role 'main' (add ~/.synbot/roles/main/ with AGENTS.md, SOUL.md, TOOLS.md, USER.md, IDENTITY.md)"
         })?;
         let system_prompt = role_ctx.system_prompt.clone();
-        let params = ResolvedAgentParams::from_main_defaults(main_agent);
+        let cap_main = resolve_provider_max_tokens_cap(providers, &main_agent.provider);
+        let params = ResolvedAgentParams::from_main_defaults(main_agent, cap_main);
         let ctx = AgentContext {
             name: "main".to_string(),
             role_name: "main".to_string(),
@@ -130,7 +140,12 @@ impl AgentRegistry {
                 format!("agent '{}' references unknown role '{}' (add a subdir under ~/.synbot/roles/ for this role)", agent.name, agent.role)
             })?;
             let system_prompt = role_ctx.system_prompt.clone();
-            let params = ResolvedAgentParams::from_config(agent, main_agent);
+            let provider_for_cap = agent
+                .provider
+                .as_ref()
+                .unwrap_or(&main_agent.provider);
+            let cap = resolve_provider_max_tokens_cap(providers, provider_for_cap);
+            let params = ResolvedAgentParams::from_config(agent, main_agent, cap);
             let ctx = AgentContext {
                 name: agent.name.clone(),
                 role_name: agent.role.clone(),
@@ -164,6 +179,8 @@ impl AgentRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::ProviderEntry;
+    use std::collections::HashMap;
     use tempfile::TempDir;
 
     fn make_agent(name: &str, role: &str) -> AgentConfig {
@@ -211,7 +228,7 @@ mod tests {
         let main_agent = test_defaults();
         let mut agent_reg = AgentRegistry::new();
         agent_reg
-            .load_from_config(&main_agent, &role_reg, tmp.path())
+            .load_from_config(&main_agent, &ProvidersConfig::default(), &role_reg, tmp.path())
             .unwrap();
 
         let ctx = agent_reg.get("main").unwrap();
@@ -238,11 +255,49 @@ mod tests {
         main_agent.agents = vec![make_agent("dev", "dev")];
         let mut agent_reg = AgentRegistry::new();
         agent_reg
-            .load_from_config(&main_agent, &role_reg, tmp.path())
+            .load_from_config(&main_agent, &ProvidersConfig::default(), &role_reg, tmp.path())
             .unwrap();
 
         let ctx = agent_reg.get("dev").unwrap();
         // All agents share the same workspace root (no agents/dev, memory, or skills under workspace).
         assert_eq!(ctx.workspace_dir, tmp.path());
+    }
+
+    #[test]
+    fn max_tokens_respects_provider_cap_from_extra() {
+        let tmp = TempDir::new().unwrap();
+        let roles_dir = TempDir::new().unwrap();
+        std::fs::create_dir_all(roles_dir.path().join("main")).unwrap();
+        std::fs::write(roles_dir.path().join("main").join("AGENTS.md"), "# Main").unwrap();
+        std::fs::write(roles_dir.path().join("main").join("SOUL.md"), "").unwrap();
+        std::fs::write(roles_dir.path().join("main").join("TOOLS.md"), "").unwrap();
+
+        let mut role_reg = RoleRegistry::new();
+        role_reg.load_from_dirs(roles_dir.path()).unwrap();
+
+        let mut main_agent = test_defaults();
+        main_agent.provider = "minimax-claude".into();
+        main_agent.max_tokens = 500_000;
+
+        let mut extra = HashMap::new();
+        extra.insert(
+            "minimax-claude".to_string(),
+            ProviderEntry {
+                max_tokens_cap: Some(196608),
+                ..Default::default()
+            },
+        );
+        let providers = ProvidersConfig {
+            extra,
+            ..Default::default()
+        };
+
+        let mut agent_reg = AgentRegistry::new();
+        agent_reg
+            .load_from_config(&main_agent, &providers, &role_reg, tmp.path())
+            .unwrap();
+
+        let ctx = agent_reg.get("main").unwrap();
+        assert_eq!(ctx.params.max_tokens, 196608);
     }
 }

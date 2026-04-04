@@ -504,6 +504,18 @@ impl ChannelsConfig {
 // Provider configs
 // ---------------------------------------------------------------------------
 
+/// Which HTTP API an endpoint implements. Used for [`ProviderEntry::api_style`] (mainly `providers.extra`).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum ProviderApiStyle {
+    /// OpenAI Chat Completions–compatible (`/v1/chat/completions` style).
+    #[default]
+    Openai,
+    /// Anthropic Messages API–compatible (same paths/headers as api.anthropic.com).
+    Anthropic,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
@@ -511,6 +523,14 @@ pub struct ProviderEntry {
     #[serde(default)]
     pub api_key: String,
     pub api_base: Option<String>,
+    /// For `providers.extra` entries: choose OpenAI-compatible vs Anthropic-compatible HTTP API.
+    /// Ignored for built-in provider keys (`anthropic`, `openai`, etc.); those are fixed by name.
+    #[serde(default)]
+    pub api_style: ProviderApiStyle,
+    /// When set, caps per-request completion `max_tokens` for this provider (after `mainAgent.maxTokens` / agent override).
+    /// Use for Anthropic-compatible gateways that enforce a lower output limit (e.g. MiniMax ≤ 196608).
+    #[serde(default)]
+    pub max_tokens_cap: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -609,6 +629,41 @@ pub fn resolve_provider(cfg: &Config, provider_name: &str) -> (String, Option<St
         (String::new(), normalize_base(&None))
     };
     (key, base)
+}
+
+/// Optional per-provider ceiling for completion `max_tokens` (see [`ProviderEntry::max_tokens_cap`]).
+/// Aligns provider name resolution with [`resolve_provider`] (extra entry first, then built-in blocks).
+pub fn resolve_provider_max_tokens_cap(providers: &ProvidersConfig, provider_name: &str) -> Option<u32> {
+    let trimmed = provider_name.trim();
+    let lower = trimmed.to_lowercase();
+
+    if let Some(e) = providers
+        .extra
+        .get(trimmed)
+        .or_else(|| providers.extra.get(&lower))
+    {
+        return e.max_tokens_cap;
+    }
+
+    if lower.contains("openrouter") {
+        providers.openrouter.max_tokens_cap
+    } else if lower.contains("anthropic") || lower.contains("claude") {
+        providers.anthropic.max_tokens_cap
+    } else if lower.contains("openai") {
+        providers.openai.max_tokens_cap
+    } else if lower.contains("gemini") {
+        providers.gemini.max_tokens_cap
+    } else if lower.contains("deepseek") {
+        providers.deepseek.max_tokens_cap
+    } else if lower.contains("moonshot") {
+        providers.moonshot.max_tokens_cap
+    } else if lower.contains("kimi") {
+        providers.kimi_code.max_tokens_cap
+    } else if lower.contains("ollama") {
+        providers.ollama.max_tokens_cap
+    } else {
+        None
+    }
 }
 
 // ---------------------------------------------------------------------------

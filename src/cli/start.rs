@@ -234,6 +234,8 @@ pub async fn cmd_start() -> Result<()> {
             workspace: ws.clone(),
             tools: std::sync::Arc::clone(&tools),
             agent_id: "main".to_string(),
+            max_tokens: cfg.main_agent.max_tokens,
+            temperature: cfg.main_agent.temperature,
             outbound_tx: bus.outbound_tx_clone(),
         });
     }
@@ -248,6 +250,7 @@ pub async fn cmd_start() -> Result<()> {
     let mut agent_registry = crate::agent::agent_registry::AgentRegistry::new();
     if let Err(e) = agent_registry.load_from_config(
         &cfg.main_agent,
+        &cfg.providers,
         &role_registry,
         &ws,
     ) {

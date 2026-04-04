@@ -400,16 +400,20 @@ cargo run --example generate_config_schema --features schema -- -o templates/con
 }
 ```
 
-### 额外提供商（OpenAI 兼容）
+### 额外提供商
 
-可以**仅通过配置**、不改代码，添加任意 **OpenAI Chat Completions 兼容**的提供商（如 Minimax、本地代理、其他兼容 API）。
+可以**仅通过配置**、不改代码，添加 **OpenAI Chat Completions 兼容**或 **Anthropic Messages 兼容**的自定义端点（如 Minimax、代理、网关等）。
 
 1. 在 **`providers.extra`** 下增加一项，**键名**自定，并填写 `apiKey` 和 `apiBase`。
-2. 将 **`mainAgent.provider`**（或该 agent 的 `provider` 覆盖）设为该键名。
+2. 可选设置 **`apiStyle`**：`"openai"`（默认）或 `"anthropic"`，用于选择客户端与请求格式。
+3. 将 **`mainAgent.provider`**（或该 agent 的 `provider` 覆盖）设为该键名。
 
-`extra` 中的名称会按 OpenAI 兼容方式调用：使用给定的 `apiBase` 请求 `/chat/completions`。内置提供商名称（如 `openai`、`anthropic`、`openrouter`）不会被 `extra` 覆盖。
+- **`apiStyle` 为 `openai`（或省略）**：按 OpenAI 兼容方式调用 `apiBase`（如 `/v1/chat/completions` 风格）。
+- **`apiStyle` 为 `anthropic`**：按与 `api.anthropic.com` 相同的 Messages API 调用自定义 `apiBase`（适用于代理或兼容网关）。
 
-示例 — 添加 Minimax：
+内置提供商名称（如 `openai`、`anthropic`、`openrouter`）不会被 `extra` 覆盖。
+
+示例 — Minimax（OpenAI 兼容）：
 
 ```json
 {
@@ -428,8 +432,30 @@ cargo run --example generate_config_schema --features schema -- -o templates/con
 }
 ```
 
+示例 — Anthropic 兼容网关（自定义 `apiBase`）：
+
+```json
+{
+  "providers": {
+    "extra": {
+      "myClaudeProxy": {
+        "apiKey": "sk-ant-...",
+        "apiBase": "https://anthropic-proxy.example.com",
+        "apiStyle": "anthropic"
+      }
+    }
+  },
+  "mainAgent": {
+    "provider": "myClaudeProxy",
+    "model": "claude-3-5-sonnet-20241022"
+  }
+}
+```
+
 - **apiKey**：该服务的 API 密钥。
-- **apiBase**：API 基础 URL（如 `https://api.minimax.chat/v1`），需支持 OpenAI 风格的 `POST .../chat/completions`。不填时使用 `https://api.openai.com/v1`。
+- **apiBase**：API 根 URL。**`apiStyle` 为 `openai`** 时需支持 OpenAI 风格的 `POST .../chat/completions`，不填时默认 `https://api.openai.com/v1`。**`apiStyle` 为 `anthropic`** 时需为 Anthropic Messages API 兼容端点，不填时默认 `https://api.anthropic.com`。
+- **apiStyle**（可选）：`openai` 或 `anthropic`（默认 `openai`）。
+- **maxTokensCap**（可选）：按 provider 限制单次补全的 `max_tokens`（在 `mainAgent.maxTokens` / 各 agent 的 `maxTokens` 之后取最小值）。若网关允许的输出上限低于全局 `maxTokens`，请在此填写。例如 **MiniMax** 的 Anthropic 兼容接口对单次 `max_tokens` 有上限（如 MiniMax-M2.7 常见为 **196608**），可在对应 `extra` 项设 `"maxTokensCap": 196608`，或把 `mainAgent.maxTokens` 调到不超过该上限。
 
 ## 代理配置
 

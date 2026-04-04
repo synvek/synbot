@@ -24,6 +24,9 @@ pub struct SpawnContext {
     pub workspace: PathBuf,
     pub tools: Arc<ToolRegistry>,
     pub agent_id: String,
+    /// Same as `mainAgent.maxTokens` — required for Anthropic-family API completions.
+    pub max_tokens: u32,
+    pub temperature: f32,
     pub outbound_tx: broadcast::Sender<OutboundMessage>,
 }
 
@@ -93,6 +96,8 @@ impl DynTool for SpawnTool {
                 ctx.workspace.clone(),
                 ctx.tools.clone(),
                 &ctx.agent_id,
+                ctx.max_tokens,
+                ctx.temperature,
                 on_complete,
             )
             .await?

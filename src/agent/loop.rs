@@ -824,6 +824,8 @@ impl AgentLoop {
                 run_completion_loop(
                     &*self.model,
                     &system_prompt,
+                    agent_ctx.params.max_tokens,
+                    agent_ctx.params.temperature,
                     model_max_iterations,
                     agent_ctx.params.max_consecutive_tool_errors,
                     max_chat_history_messages,
@@ -1017,6 +1019,8 @@ impl AgentLoop {
             let tool_result_preview_chars = self.tool_result_preview_chars;
             let max_chat_history_messages = agent_ctx.params.max_chat_history_messages;
             let max_consecutive_tool_errors = agent_ctx.params.max_consecutive_tool_errors;
+            let max_tokens = agent_ctx.params.max_tokens;
+            let temperature = agent_ctx.params.temperature;
 
             let session_messages_clone = session_messages.clone();
             let memory_cfg_for_task = memory_cfg_arc.clone();
@@ -1035,6 +1039,8 @@ impl AgentLoop {
                     let it = run_completion_loop(
                         &*model,
                         &system_prompt,
+                        max_tokens,
+                        temperature,
                         model_max_iterations,
                         max_consecutive_tool_errors,
                         max_chat_history_messages,
@@ -1288,6 +1294,8 @@ pub(crate) fn fix_window_start_for_tool_results(history: &[Message], mut start: 
 async fn run_completion_loop(
     model: &dyn SynbotCompletionModel,
     system_prompt: &str,
+    max_tokens: u32,
+    temperature: f32,
     max_iterations: u32,
     max_consecutive_tool_errors: u32,
     max_chat_history_messages: u32,
@@ -1368,8 +1376,8 @@ async fn run_completion_loop(
             chat_history,
             tools: tool_defs.to_vec(),
             documents: vec![],
-            temperature: None,
-            max_tokens: None,
+            temperature: Some(temperature as f64),
+            max_tokens: Some(max_tokens as u64),
             tool_choice: None,
             additional_params: None,
         };
