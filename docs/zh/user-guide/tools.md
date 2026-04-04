@@ -26,6 +26,7 @@ Synbot 提供了一个强大的工具系统，允许 AI 助手与外部世界进
 5. **审批工具**：处理基于权限的审批
 6. **代码开发工具**：分析项目结构、展示代码差异
 7. **实用工具**：各种实用功能
+8. **浏览器工具**：无头浏览器自动化（导航、交互、快照、截图）
 
 ## 内置工具
 
@@ -168,6 +169,64 @@ fetch_url {
   "timeout": 30
 }
 ```
+
+### 浏览器工具
+
+#### browser
+
+通过 [agent-browser](https://github.com/vercel-labs/agent-browser) CLI 驱动**无头浏览器**。Synbot 代为执行 `agent-browser` 的子命令。在同一 Synbot 进程内，多次调用会复用同一会话（后台浏览器守护进程），因此在执行 `close` 之前，页面导航与状态会在连续调用之间保留。
+
+**环境准备（运行 Synbot 的机器上）**：
+
+```bash
+npm install -g agent-browser
+agent-browser install   # 下载 Chromium（底层基于 Playwright）
+```
+
+请确保 `agent-browser` 在 `PATH` 中，或在配置里将 `tools.browser.executable` 设为可执行文件的完整路径。
+
+**推荐流程**：先调用 `snapshot` 获取带稳定元素引用的无障碍树（例如 `@e2`），再对这些引用或 CSS 选择器执行 `click`、`fill` 等操作。
+
+**为什么看不到浏览器窗口？** 默认使用 **无头（headless）** Chromium：页面会在后台加载，但**不会**弹出桌面上的浏览器窗口。你看到的带 ✓ 的标题、URL 等是 agent-browser 在终端里打印的元数据，**不是**网页画面，属于正常现象，一般不代表打开失败。
+
+**想“看到”页面可以怎么做**：
+
+1. **截图** — 使用 `action: screenshot` 并指定工作区下的 `path`（例如 `bing.png`），再用图片查看器或编辑器打开该文件。
+2. **有界面模式（headed）** — [agent-browser](https://github.com/vercel-labs/agent-browser) 支持 `--headed` 或环境变量 `AGENT_BROWSER_HEADED=1`。在启动 Synbot **之前**导出该变量，让子进程继承，例如：
+   ```bash
+   export AGENT_BROWSER_HEADED=1
+   synbot start   # 或你平时启动 Synbot 的方式
+   ```
+   在带图形界面的 macOS 上，Agent 打开网址时一般会弹出 Chromium 窗口。若之前已在无头模式下跑过浏览器守护进程，需**重启 Synbot** 后再试，以便以有界面方式启动会话。
+
+**参数**：
+
+- `action`（字符串，必填）：取值为 `open`、`snapshot`、`screenshot`、`click`、`dblclick`、`fill`、`type`、`press`、`hover`、`scroll`、`select`、`check`、`uncheck`、`focus`、`drag`、`upload`、`get_text`、`get_html`、`get_value`、`get_attr`、`get_title`、`get_url`、`eval`、`close` 之一。
+- `url`（字符串）：`open` 时必填，要加载的页面地址。
+- `selector`（字符串）：`snapshot` 返回的元素引用（如 `@e2`），或 CSS 选择器（如 `#id`、`.class`），用于需要定位元素的操作。
+- `value`（字符串）：依操作而定 — `fill` / `type` / `select` 为文本；`press` 为按键名；`eval` 为 JavaScript；`upload` 为文件路径。
+- `target`（字符串）：`drag` 时目标元素（起点为 `selector`）。
+- `attribute`（字符串）：`get_attr` 时的属性名。
+- `direction`（字符串）：`scroll` 时使用，取值为 `up`、`down`、`left`、`right`。
+- `pixels`（整数）：`scroll` 时可选的滚动像素距离。
+- `path`（字符串）：`screenshot` 时输出文件路径。
+- `full_page`（布尔值）：`screenshot` 为 true 时整页截图（默认 false）。
+
+**示例**：
+
+```
+browser { "action": "open", "url": "https://example.com" }
+browser { "action": "snapshot" }
+browser { "action": "click", "selector": "@e2" }
+browser { "action": "fill", "selector": "#search", "value": "synbot" }
+browser { "action": "screenshot", "path": "capture.png", "full_page": true }
+browser { "action": "eval", "value": "document.title" }
+browser { "action": "close" }
+```
+
+**说明**：首次下载浏览器时，stderr 可能出现 Playwright 相关提示（例如建议在 workspace 中先执行 `npm install`）。若底层命令仍成功（退出码为 0），工具行为通常正常；若在相应目录先执行 `npm install` 再触发依赖 Playwright 的安装步骤，可减少此类提示。
+
+**守护进程与生命周期**：agent-browser 采用**后台守护进程**，首次使用时会拉起 Chromium，并在多次 `browser` 调用之间复用。Synbot 并不是每次请求都单独起完整浏览器，而是反复执行 CLI，由 CLI 与该守护进程通信。若你**手动结束** agent-browser 或 Chromium 进程，会话可能已失效，Playwright 会报错类似 `Target page, context or browser has been closed`。更稳妥的做法是用工具动作 `close`（或终端里执行 `agent-browser close`）结束会话，而不是在系统监视器里强杀进程。当前 Synbot 在识别到这类“会话已失效”的错误时，会**自动尝试一次恢复**：先执行 `agent-browser close --all`，再重试同一条命令；若仍失败，请重启 Synbot，或自行执行 `agent-browser close --all` 后再让 Agent 重新 `open` 网址。
 
 ### 消息工具
 
@@ -407,6 +466,24 @@ calculate {
   }
 }
 ```
+
+### 浏览器工具配置
+
+启用或调整浏览器工具（默认：开启、可执行文件名为 `agent-browser`、单次命令超时 30 秒）：
+
+```json
+{
+  "tools": {
+    "browser": {
+      "enabled": true,
+      "executable": "agent-browser",
+      "timeoutSecs": 30
+    }
+  }
+}
+```
+
+将 `enabled` 设为 `false` 可对模型隐藏 `browser` 工具。若 CLI 不在 `PATH` 或使用包装脚本，可设置 `executable`。页面很慢或整页截图较大时，可适当增大 `timeoutSecs`。
 
 ## 使用工具
 

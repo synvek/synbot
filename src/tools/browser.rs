@@ -5,7 +5,9 @@
 //! screenshot, eval JS, and more.
 //!
 //! The browser session is persistent across calls within the same process — agent-browser
-//! keeps a background browser daemon that subsequent commands reuse.
+//! keeps a background browser daemon that subsequent commands reuse. If that daemon or
+//! Chromium is killed externally, the next CLI call may fail until the session is reset;
+//! `BrowserTool::run` retries once after `close --all` when it detects a stale session.
 //!
 //! # Setup
 //! ```
@@ -24,7 +26,7 @@ use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::time::Duration;
 use tokio::process::Command;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::tools::DynTool;
 
@@ -62,7 +64,29 @@ impl BrowserTool {
     }
 
     /// Run an agent-browser sub-command and return its stdout.
+    ///
+    /// If the subprocess reports a dead Playwright/browser session (e.g. after the user
+    /// manually killed `agent-browser` or Chromium), runs `close --all` once and retries
+    /// the same command so a fresh daemon can be started on the next `open`.
     async fn run(&self, sub_args: &[&str]) -> Result<String> {
+        match self.run_once(sub_args).await {
+            Ok(s) => Ok(s),
+            Err(e) => {
+                let detail = e.to_string();
+                if !stale_agent_browser_session(&detail) {
+                    return Err(e);
+                }
+                warn!(
+                    error = %detail,
+                    "agent-browser session looks stale; running close --all and retrying once"
+                );
+                let _ = self.run_once(&["close", "--all"]).await;
+                self.run_once(sub_args).await
+            }
+        }
+    }
+
+    async fn run_once(&self, sub_args: &[&str]) -> Result<String> {
         debug!(cmd = %self.executable, args = ?sub_args, "browser tool call");
 
         let output = tokio::time::timeout(
@@ -85,6 +109,14 @@ impl BrowserTool {
 
         Ok(stdout)
     }
+}
+
+/// Playwright / agent-browser errors when the browser was closed but the CLI still had a session.
+fn stale_agent_browser_session(combined_error: &str) -> bool {
+    let lower = combined_error.to_ascii_lowercase();
+    lower.contains("has been closed")
+        || lower.contains("target page, context or browser")
+        || lower.contains("browsercontext.newpage")
 }
 
 // ---------------------------------------------------------------------------

@@ -30,6 +30,7 @@ Tools are functions that the AI assistant can call to perform actions. Each tool
 5. **Approval Tools**: Handle permission-based approvals
 6. **Code Development Tools**: Analyze project structure and show code diffs
 7. **Utility Tools**: Various utility functions
+8. **Browser Tools**: Headless browser automation (navigate, interact, snapshot, screenshot)
 
 ## Built-in Tools
 
@@ -172,6 +173,64 @@ fetch_url {
   "timeout": 30
 }
 ```
+
+### Browser Tools
+
+#### browser
+
+Drive a **headless** browser through the [agent-browser](https://github.com/vercel-labs/agent-browser) CLI. Synbot runs `agent-browser` subcommands for you. Within a single Synbot process, commands reuse one persistent session (a background browser daemon), so navigation and state carry across consecutive `browser` calls until you `close`.
+
+**Setup (on the host that runs Synbot)**:
+
+```bash
+npm install -g agent-browser
+agent-browser install   # downloads Chromium (Playwright-based)
+```
+
+Ensure `agent-browser` is on your `PATH`, or set `executable` under `tools.browser` to the full path.
+
+**Recommended workflow**: call `snapshot` first to get an accessibility tree with stable element references (for example `@e2`), then use `click`, `fill`, and other actions with those refs or with CSS selectors.
+
+**No visible window?** By default Chromium runs **headless**: the page loads in the background, but no GUI window opens. Tool output such as a checkmark, page title, and URL is terminal text from agent-browser (metadata), not a rendered page—**this is expected**, not a failed load.
+
+**Ways to “see” the page**:
+
+1. **Screenshot** — Use `action: screenshot` with a `path` under the workspace (for example `capture.png`), then open that file in an image viewer or your editor.
+2. **Headed mode (real browser window)** — [agent-browser](https://github.com/vercel-labs/agent-browser) supports a visible window via `--headed` or the environment variable `AGENT_BROWSER_HEADED=1`. Start Synbot with that variable exported so the child process inherits it, for example:
+   ```bash
+   export AGENT_BROWSER_HEADED=1
+   synbot start   # or however you launch Synbot
+   ```
+   On macOS with a normal graphical session you should see Chromium when the agent opens a URL. If a headless session was already running, restart Synbot after setting the variable so the browser daemon starts in headed mode.
+
+**Parameters**:
+
+- `action` (string, required): One of `open`, `snapshot`, `screenshot`, `click`, `dblclick`, `fill`, `type`, `press`, `hover`, `scroll`, `select`, `check`, `uncheck`, `focus`, `drag`, `upload`, `get_text`, `get_html`, `get_value`, `get_attr`, `get_title`, `get_url`, `eval`, `close`.
+- `url` (string): Required for `open` — page to load.
+- `selector` (string): Element ref from `snapshot` (e.g. `@e2`) or a selector (`#id`, `.class`, etc.) for actions that target an element.
+- `value` (string): Depends on action — text for `fill` / `type` / `select`; key name for `press`; JavaScript source for `eval`; file path(s) for `upload`.
+- `target` (string): Destination element for `drag` (source is `selector`).
+- `attribute` (string): Attribute name for `get_attr`.
+- `direction` (string): For `scroll` — `up`, `down`, `left`, or `right`.
+- `pixels` (integer): Optional scroll distance for `scroll`.
+- `path` (string): Output file path for `screenshot`.
+- `full_page` (boolean): If true, full-page capture for `screenshot` (default false).
+
+**Examples**:
+
+```
+browser { "action": "open", "url": "https://example.com" }
+browser { "action": "snapshot" }
+browser { "action": "click", "selector": "@e2" }
+browser { "action": "fill", "selector": "#search", "value": "synbot" }
+browser { "action": "screenshot", "path": "capture.png", "full_page": true }
+browser { "action": "eval", "value": "document.title" }
+browser { "action": "close" }
+```
+
+**Note**: First-time browser downloads may print Playwright hints on stderr (for example suggesting `npm install` in the workspace). If the underlying command still succeeds (exit code 0), the tool behaves normally; running `npm install` in the agent workspace before any Playwright-driven install can reduce those messages when they appear.
+
+**Daemon lifecycle**: agent-browser uses a **background daemon** that starts on first use and keeps Chromium alive between tool calls. Synbot does not spawn a full browser per request—it runs the CLI, which talks to that daemon. If you **manually kill** `agent-browser` or Chromium, the session can become invalid and Playwright may report errors such as `Target page, context or browser has been closed`. Prefer ending the session with the tool action `close` (or `agent-browser close` in a terminal) instead of killing processes. Current Synbot attempts **one automatic recovery**: if it detects that kind of stale-session error, it runs `agent-browser close --all` and retries the same command once; if problems persist, restart Synbot or run `agent-browser close --all` yourself, then open a URL again.
 
 ### Message Tools
 
@@ -411,6 +470,24 @@ With Firecrawl Search API:
   }
 }
 ```
+
+### Browser Tool Configuration
+
+Enable or tune the browser tool (defaults: enabled, executable `agent-browser`, 30 second timeout per command):
+
+```json
+{
+  "tools": {
+    "browser": {
+      "enabled": true,
+      "executable": "agent-browser",
+      "timeoutSecs": 30
+    }
+  }
+}
+```
+
+Set `enabled` to `false` to hide the `browser` tool from the model. Use `executable` if the CLI is not on `PATH` or you use a wrapper script. Increase `timeoutSecs` for slow pages or large full-page screenshots.
 
 ## Using Tools
 
