@@ -8,6 +8,7 @@ use rig::message::{AssistantContent, Message};
 use rig::OneOrMany;
 
 use crate::agent::memory_backend::{should_compress, FileSqliteMemoryBackend, MemoryBackend};
+use crate::agent::r#loop::fix_window_start_for_tool_results;
 use crate::config::Config;
 use crate::rig_provider::SynbotCompletionModel;
 
@@ -59,7 +60,13 @@ pub async fn maybe_compact_history(
         return Ok(());
     }
 
-    let remove_n = history.len() - keep;
+    let mut remove_n = history.len() - keep;
+    if remove_n == 0 {
+        return Ok(());
+    }
+    // Do not leave the kept segment starting with tool results while the issuing assistant was
+    // drained — DeepSeek rejects `role: tool` without a preceding assistant `tool_calls`.
+    remove_n = fix_window_start_for_tool_results(history, remove_n);
     if remove_n == 0 {
         return Ok(());
     }

@@ -514,6 +514,7 @@ impl DeepSeekDirectModel {
         }
 
         strip_leading_orphan_tool_messages(&mut messages);
+        strip_orphan_tool_messages(&mut messages);
 
         // Tools
         let tools: Vec<Value> = req
@@ -570,6 +571,44 @@ fn strip_leading_orphan_tool_messages(messages: &mut Vec<Value>) {
             continue;
         }
         break;
+    }
+}
+
+/// DeepSeek/OpenAI: each `role: tool` must belong to a preceding `assistant` with non-empty
+/// `tool_calls` (walk backward skipping other `tool` messages). Removes orphan tool messages
+/// anywhere in the array (e.g. compaction dropped the issuing assistant).
+fn tool_message_has_valid_issuer(messages: &[Value], tool_idx: usize) -> bool {
+    let mut k = tool_idx;
+    while k > 0 {
+        k -= 1;
+        let role = messages[k].get("role").and_then(|v| v.as_str());
+        match role {
+            Some("tool") => continue,
+            Some("assistant") => {
+                return messages[k]
+                    .get("tool_calls")
+                    .and_then(|v| v.as_array())
+                    .map(|a| !a.is_empty())
+                    .unwrap_or(false);
+            }
+            _ => return false,
+        }
+    }
+    false
+}
+
+fn strip_orphan_tool_messages(messages: &mut Vec<Value>) {
+    let mut i = 0;
+    while i < messages.len() {
+        if messages[i].get("role").and_then(|v| v.as_str()) != Some("tool") {
+            i += 1;
+            continue;
+        }
+        if tool_message_has_valid_issuer(messages, i) {
+            i += 1;
+        } else {
+            messages.remove(i);
+        }
     }
 }
 

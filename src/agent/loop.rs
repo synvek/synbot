@@ -1235,7 +1235,7 @@ fn truncate_debug(s: &str, max_len: usize) -> String {
 // ---------------------------------------------------------------------------
 
 /// True if this user message carries tool results (serialized as `role: tool` for DeepSeek/OpenAI).
-fn user_message_contains_tool_results(msg: &Message) -> bool {
+pub(crate) fn user_message_contains_tool_results(msg: &Message) -> bool {
     match msg {
         Message::User { content } => content
             .iter()
@@ -1244,7 +1244,7 @@ fn user_message_contains_tool_results(msg: &Message) -> bool {
     }
 }
 
-fn assistant_message_has_tool_calls(msg: &Message) -> bool {
+pub(crate) fn assistant_message_has_tool_calls(msg: &Message) -> bool {
     match msg {
         Message::Assistant { content, .. } => content
             .iter()
@@ -1258,7 +1258,7 @@ fn assistant_message_has_tool_calls(msg: &Message) -> bool {
 /// DeepSeek rejects `role: tool` without that assistant in the same request. Walk the window start
 /// backward until tool results are preceded by the issuing assistant inside the slice, or we hit the
 /// beginning of history.
-fn fix_window_start_for_tool_results(history: &[Message], mut start: usize) -> usize {
+pub(crate) fn fix_window_start_for_tool_results(history: &[Message], mut start: usize) -> usize {
     loop {
         if start >= history.len() {
             return start;
