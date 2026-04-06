@@ -24,6 +24,8 @@
 
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
+use std::ffi::OsString;
+use std::path::Path;
 use std::time::Duration;
 use tokio::process::Command;
 use tracing::{debug, warn};
@@ -89,11 +91,16 @@ impl BrowserTool {
     async fn run_once(&self, sub_args: &[&str]) -> Result<String> {
         debug!(cmd = %self.executable, args = ?sub_args, "browser tool call");
 
+        let mut cmd = browser_command(&self.executable, sub_args);
+
+        #[cfg(windows)]
+        if let Some(path) = windows_browser_path_env() {
+            cmd.env("PATH", path);
+        }
+
         let output = tokio::time::timeout(
             Duration::from_secs(self.timeout_secs),
-            Command::new(&self.executable)
-                .args(sub_args)
-                .output(),
+            cmd.output(),
         )
         .await
         .map_err(|_| anyhow::anyhow!("browser command timed out after {}s", self.timeout_secs))?
@@ -358,4 +365,53 @@ fn require_selector<'a>(args: &'a Value) -> Result<&'a str> {
         anyhow::bail!("`selector` is required for this browser action");
     }
     Ok(sel)
+}
+
+/// Build the subprocess for `agent-browser` in a way that works on Windows (npm `.cmd` shims,
+/// PATH missing `%APPDATA%\\npm` when Synbot is started from a GUI).
+fn browser_command(executable: &str, sub_args: &[&str]) -> Command {
+    #[cfg(windows)]
+    {
+        if windows_use_cmd_for_browser(executable) {
+            let mut cmd = Command::new("cmd.exe");
+            cmd.arg("/C").arg(executable);
+            cmd.args(sub_args);
+            return cmd;
+        }
+    }
+    let mut cmd = Command::new(executable);
+    cmd.args(sub_args);
+    cmd
+}
+
+#[cfg(windows)]
+fn windows_use_cmd_for_browser(executable: &str) -> bool {
+    let e = executable.trim();
+    // Only wrap unqualified names (default config). Paths must use `Command::new` directly.
+    if e.contains('\\') || e.contains('/') {
+        return false;
+    }
+    let name = e;
+    let base = name
+        .strip_suffix(".cmd")
+        .or_else(|| name.strip_suffix(".CMD"))
+        .unwrap_or(name);
+    base.eq_ignore_ascii_case("agent-browser")
+}
+
+/// Prepend the default npm global bin so `agent-browser` resolves when the parent process
+/// (e.g. IDE) did not inherit the same `PATH` as an interactive shell.
+#[cfg(windows)]
+fn windows_browser_path_env() -> Option<OsString> {
+    let appdata = std::env::var_os("APPDATA")?;
+    let npm_bin = Path::new(&appdata).join("npm");
+    if !npm_bin.is_dir() {
+        return None;
+    }
+    let mut out = npm_bin.into_os_string();
+    out.push(";");
+    if let Some(existing) = std::env::var_os("PATH") {
+        out.push(existing);
+    }
+    Some(out)
 }
