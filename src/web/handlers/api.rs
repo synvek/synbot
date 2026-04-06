@@ -1,7 +1,6 @@
 use actix_web::{error::ResponseError, http::StatusCode, web, HttpResponse, Result};
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use crate::agent::skills::SkillProvider;
 use crate::web::state::AppState;
 use chrono::{DateTime, Utc};
 
@@ -124,23 +123,22 @@ pub struct SystemStatus {
 
 /// GET /api/status - Returns system status
 pub async fn get_status(state: web::Data<AppState>) -> Result<HttpResponse> {
+    let cfg = state.config.read().await;
+
     // Count enabled channel connections
-    let channel_count = state
-        .config
+    let channel_count = cfg
         .channels
         .telegram
         .iter()
         .filter(|c| c.enabled)
         .count()
-        + state
-            .config
+        + cfg
             .channels
             .discord
             .iter()
             .filter(|c| c.enabled)
             .count()
-        + state
-            .config
+        + cfg
             .channels
             .feishu
             .iter()
@@ -160,7 +158,7 @@ pub async fn get_status(state: web::Data<AppState>) -> Result<HttpResponse> {
     };
 
     // Get agent count
-    let agent_count = 1 + state.config.main_agent.agents.len();
+    let agent_count = 1 + cfg.main_agent.agents.len();
 
     let status = SystemStatus {
         running: true,
@@ -404,8 +402,9 @@ pub enum ChannelStatus {
 
 /// GET /api/channels - Returns list of channel connections with status
 pub async fn get_channels(state: web::Data<AppState>) -> Result<HttpResponse> {
+    let cfg = state.config.read().await;
     let mut channels = Vec::new();
-    for c in &state.config.channels.telegram {
+    for c in &cfg.channels.telegram {
         channels.push(ChannelInfo {
             name: c.name.clone(),
             enabled: c.enabled,
@@ -416,7 +415,7 @@ pub async fn get_channels(state: web::Data<AppState>) -> Result<HttpResponse> {
             },
         });
     }
-    for c in &state.config.channels.discord {
+    for c in &cfg.channels.discord {
         channels.push(ChannelInfo {
             name: c.name.clone(),
             enabled: c.enabled,
@@ -427,7 +426,7 @@ pub async fn get_channels(state: web::Data<AppState>) -> Result<HttpResponse> {
             },
         });
     }
-    for c in &state.config.channels.feishu {
+    for c in &cfg.channels.feishu {
         channels.push(ChannelInfo {
             name: c.name.clone(),
             enabled: c.enabled,
@@ -438,7 +437,7 @@ pub async fn get_channels(state: web::Data<AppState>) -> Result<HttpResponse> {
             },
         });
     }
-    for c in &state.config.channels.slack {
+    for c in &cfg.channels.slack {
         channels.push(ChannelInfo {
             name: c.name.clone(),
             enabled: c.enabled,
@@ -449,7 +448,7 @@ pub async fn get_channels(state: web::Data<AppState>) -> Result<HttpResponse> {
             },
         });
     }
-    for c in &state.config.channels.email {
+    for c in &cfg.channels.email {
         channels.push(ChannelInfo {
             name: c.name.clone(),
             enabled: c.enabled,
@@ -460,7 +459,7 @@ pub async fn get_channels(state: web::Data<AppState>) -> Result<HttpResponse> {
             },
         });
     }
-    for c in &state.config.channels.matrix {
+    for c in &cfg.channels.matrix {
         channels.push(ChannelInfo {
             name: c.name.clone(),
             enabled: c.enabled,
@@ -471,7 +470,7 @@ pub async fn get_channels(state: web::Data<AppState>) -> Result<HttpResponse> {
             },
         });
     }
-    if let Some(list) = &state.config.channels.whatsapp {
+    if let Some(list) = &cfg.channels.whatsapp {
         for c in list {
             channels.push(ChannelInfo {
                 name: c.name.clone(),
@@ -723,13 +722,79 @@ pub async fn get_skill_by_name(
     Ok(HttpResponse::Ok().json(ApiResponse::success(detail)))
 }
 
-/// GET /api/config - Returns sanitized configuration
+/// Full config document for GET/PUT (camelCase JSON, secrets masked on GET).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigApiPayload {
+    pub config: serde_json::Value,
+    pub config_path: String,
+    pub restart_notice: &'static str,
+}
+
+/// Response after successful PUT.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PutConfigResponse {
+    pub config_path: String,
+    pub restart_notice: &'static str,
+}
+
+/// GET /api/config - Returns full configuration with secrets masked.
 pub async fn get_config(state: web::Data<AppState>) -> Result<HttpResponse> {
-    use crate::web::handlers::sanitize::sanitize_config;
-    
-    let sanitized = sanitize_config(&state.config);
-    
-    Ok(HttpResponse::Ok().json(ApiResponse::success(sanitized)))
+    use crate::web::handlers::config_redact::config_to_redacted_value;
+
+    let cfg = state.config.read().await;
+    let config = config_to_redacted_value(&cfg).map_err(|e| {
+        ApiError::InternalError(format!("Failed to serialize config: {}", e))
+    })?;
+
+    let payload = ConfigApiPayload {
+        config,
+        config_path: state.config_path.display().to_string(),
+        restart_notice: CONFIG_RESTART_NOTICE,
+    };
+
+    Ok(HttpResponse::Ok().json(ApiResponse::success(payload)))
+}
+
+const CONFIG_RESTART_NOTICE: &str = "Configuration was saved. Some changes (for example web bind address/port or channel connections) require restarting the synbot process to take full effect.";
+
+/// PUT /api/config - Replace configuration (masked secrets in the body are preserved from the current config).
+pub async fn put_config(
+    state: web::Data<AppState>,
+    body: web::Json<serde_json::Value>,
+) -> Result<HttpResponse> {
+    use crate::config::{save_config, validate_config};
+    use crate::web::handlers::config_redact::merge_incoming_preserving_secrets;
+
+    let old = state.config.read().await.clone();
+    let merged = merge_incoming_preserving_secrets(&old, body.into_inner()).map_err(|e| {
+        ApiError::BadRequest(format!("Invalid config JSON: {}", e))
+    })?;
+
+    if let Err(errors) = validate_config(&merged) {
+        return Ok(
+            HttpResponse::BadRequest().json(serde_json::json!({
+                "success": false,
+                "error": "Config validation failed",
+                "data": { "validationErrors": errors }
+            })),
+        );
+    }
+
+    save_config(&merged, Some(state.config_path.as_path())).map_err(|e| {
+        ApiError::InternalError(format!("Failed to write config file: {}", e))
+    })?;
+
+    {
+        let mut w = state.config.write().await;
+        *w = merged;
+    }
+
+    Ok(HttpResponse::Ok().json(ApiResponse::success(PutConfigResponse {
+        config_path: state.config_path.display().to_string(),
+        restart_notice: CONFIG_RESTART_NOTICE,
+    })))
 }
 
 /// Query parameters for log filtering

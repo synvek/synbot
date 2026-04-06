@@ -378,7 +378,7 @@ impl Handler<OutboundMessageWrapper> for WsSession {
                 status,
                 result_preview,
             } => {
-                if self.state.config.show_tool_calls && self.state.config.web.show_tool_calls {
+                if self.state.show_tool_progress_for_ws() {
                     Some(WsServerMessage::ToolProgress {
                         tool_name,
                         status,

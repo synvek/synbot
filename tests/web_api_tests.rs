@@ -113,6 +113,63 @@ async fn test_get_config_returns_200() {
 
     let body: serde_json::Value = test::read_body_json(resp).await;
     assert_eq!(body["success"], true);
+    assert!(body["data"]["config"].is_object());
+    assert!(body["data"]["configPath"].is_string());
+}
+
+#[actix_web::test]
+async fn test_put_config_validation_failure_returns_400() {
+    let state = create_test_state().await;
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(state))
+            .route("/api/config", web::put().to(api::put_config)),
+    )
+    .await;
+
+    let mut cfg = synbot::config::Config::default();
+    cfg.main_agent.max_tokens = 0;
+    let v = serde_json::to_value(&cfg).unwrap();
+
+    let req = test::TestRequest::put()
+        .uri("/api/config")
+        .set_json(&v)
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 400);
+
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["success"], false);
+    let errs = body["data"]["validationErrors"].as_array().unwrap();
+    assert!(!errs.is_empty());
+}
+
+#[actix_web::test]
+async fn test_put_config_roundtrip_masked_secrets() {
+    let state = create_test_state().await;
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(state))
+            .route("/api/config", web::get().to(api::get_config))
+            .route("/api/config", web::put().to(api::put_config)),
+    )
+    .await;
+
+    let req = test::TestRequest::get().uri("/api/config").to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    let config = body["data"]["config"].clone();
+
+    let req = test::TestRequest::put()
+        .uri("/api/config")
+        .set_json(&config)
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let out: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(out["success"], true);
+    assert!(out["data"]["configPath"].is_string());
 }
 
 #[actix_web::test]

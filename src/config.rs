@@ -2139,7 +2139,7 @@ pub fn build_tool_sandbox_config(
 
 /// A structured validation error identifying the field, its invalid value,
 /// and the constraint that was violated.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct ValidationError {
     pub field: String,
     pub value: String,

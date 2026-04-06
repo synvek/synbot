@@ -36,6 +36,7 @@ pub async fn start_web_server(config: WebConfig, state: AppState) -> Result<()> 
                     .route("/skills", web::get().to(api::get_skills))
                     .route("/skills/{name}", web::get().to(api::get_skill_by_name))
                     .route("/config", web::get().to(api::get_config))
+                    .route("/config", web::put().to(api::put_config))
                     .route("/logs", web::get().to(api::get_logs))
                     .route("/approvals/history", web::get().to(api::get_approval_history))
                     .route("/approvals/pending", web::get().to(api::get_pending_approvals))

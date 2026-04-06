@@ -79,8 +79,16 @@ pub async fn create_test_app_state_with_approval(
     use std::sync::Arc;
     use tokio::sync::RwLock;
     use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
-    let config = Arc::new(Config::default());
+    let config_path = std::env::temp_dir().join(format!(
+        "synbot_web_test_config_{}.json",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    let config = Arc::new(RwLock::new(Config::default()));
     let session_manager = Arc::new(RwLock::new(SessionManager::new()));
     let cron_service = Arc::new(RwLock::new(CronService::new(PathBuf::from("test_cron.json"))));
     let agent_registry = Arc::new(AgentRegistry::new());
@@ -89,6 +97,7 @@ pub async fn create_test_app_state_with_approval(
 
     synbot::web::state::AppState::new(
         config,
+        config_path,
         session_manager,
         cron_service,
         agent_registry,

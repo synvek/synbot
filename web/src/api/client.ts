@@ -8,7 +8,8 @@ import type {
   AgentInfo,
   SkillInfo,
   SkillDetail,
-  SanitizedConfig,
+  ConfigApiPayload,
+  PutConfigResponse,
   LogEntry,
   LogQueryParams,
   PaginatedResponse,
@@ -147,9 +148,17 @@ export class ApiClient {
   }
 
   // Config
-  async getConfig(): Promise<SanitizedConfig> {
-    const response = await this.client.get<ApiResponse<SanitizedConfig>>('/api/config');
+  async getConfig(): Promise<ConfigApiPayload> {
+    const response = await this.client.get<ApiResponse<ConfigApiPayload>>('/api/config');
     return response.data.data!;
+  }
+
+  async updateConfig(config: unknown): Promise<PutConfigResponse> {
+    const response = await this.client.put<ApiResponse<PutConfigResponse>>('/api/config', config);
+    if (!response.data.success || !response.data.data) {
+      throw new Error(response.data.error ?? 'Save failed');
+    }
+    return response.data.data;
   }
 
   // Logs

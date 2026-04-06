@@ -107,14 +107,22 @@ export interface SkillDetail {
   assigned_agents: string[];
 }
 
-// Config Types
-export interface SanitizedConfig {
-  channels: Record<string, unknown>;
-  providers: Record<string, unknown>;
-  agent: Record<string, unknown>;
-  tools: Record<string, unknown>;
-  web?: Record<string, unknown>;
-  log?: Record<string, unknown>;
+// Config Types (GET /api/config)
+export interface ConfigApiPayload {
+  config: Record<string, unknown>;
+  configPath: string;
+  restartNotice: string;
+}
+
+export interface PutConfigResponse {
+  configPath: string;
+  restartNotice: string;
+}
+
+export interface ValidationErrorItem {
+  field: string;
+  value: string;
+  constraint: string;
 }
 
 // Log Types

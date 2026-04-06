@@ -5,13 +5,16 @@ use crate::bus::{InboundMessage, OutboundMessage};
 use crate::config::Config;
 use crate::cron::service::CronService;
 use crate::web::log_buffer::SharedLogBuffer;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, RwLock};
 
 /// Shared application state for the web server
 #[derive(Clone)]
 pub struct AppState {
-    pub config: Arc<Config>,
+    pub config: Arc<RwLock<Config>>,
+    /// Path used for `save_config` from the web UI (same file as the running daemon).
+    pub config_path: PathBuf,
     pub session_manager: Arc<RwLock<SessionManager>>,
     pub cron_service: Arc<RwLock<CronService>>,
     pub agent_registry: Arc<AgentRegistry>,
@@ -25,7 +28,8 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(
-        config: Arc<Config>,
+        config: Arc<RwLock<Config>>,
+        config_path: PathBuf,
         session_manager: Arc<RwLock<SessionManager>>,
         cron_service: Arc<RwLock<CronService>>,
         agent_registry: Arc<AgentRegistry>,
@@ -38,6 +42,7 @@ impl AppState {
     ) -> Self {
         Self {
             config,
+            config_path,
             session_manager,
             cron_service,
             agent_registry,
@@ -47,6 +52,17 @@ impl AppState {
             log_buffer,
             approval_manager,
             permission_policy,
+        }
+    }
+
+    /// Read `show_toolCalls` flags synchronously (e.g. actix WebSocket actor).
+    pub fn show_tool_progress_for_ws(&self) -> bool {
+        match tokio::runtime::Handle::try_current() {
+            Ok(h) => h.block_on(async {
+                let c = self.config.read().await;
+                c.show_tool_calls && c.web.show_tool_calls
+            }),
+            Err(_) => true,
         }
     }
 }
@@ -62,7 +78,8 @@ mod tests {
         let (inbound_tx, _) = mpsc::channel(10);
         let (outbound_tx, _) = broadcast::channel(10);
         let state = AppState::new(
-            Arc::new(Config::default()),
+            Arc::new(RwLock::new(Config::default())),
+            PathBuf::from("/tmp/synbot_app_state_test_config.json"),
             Arc::new(RwLock::new(SessionManager::new())),
             Arc::new(RwLock::new(crate::cron::service::CronService::new(
                 PathBuf::from("test_cron.json"),

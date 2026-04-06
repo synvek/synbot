@@ -4,7 +4,10 @@ use crate::config::{
 };
 use serde::Serialize;
 
-const MASK: &str = "********";
+/// Masked placeholder for secrets in API responses; must match web UI and merge logic.
+pub const CONFIG_SECRET_MASK: &str = "********";
+
+const MASK: &str = CONFIG_SECRET_MASK;
 
 /// Sanitized configuration that masks sensitive fields
 #[derive(Serialize)]

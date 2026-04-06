@@ -372,7 +372,8 @@ pub async fn cmd_start() -> Result<()> {
             info!("AppContainer: web server binding overridden to 0.0.0.0:{}", web_config.port);
         }
         let web_state = crate::web::AppState::new(
-            std::sync::Arc::new(cfg.clone()),
+            std::sync::Arc::clone(&shared_config),
+            config::config_path(),
             shared_session_state.session_manager.clone(),
             cron_service,
             agent_registry,
