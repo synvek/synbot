@@ -266,7 +266,7 @@ Get user IDs by enabling Developer Mode in Discord settings.
 3. **Error Handling**: Implement reconnection logic for WebSocket connections
 4. **Logging**: Enable detailed logging for debugging connection issues
 
-## Feishu (椋炰功)
+## Feishu (飞书)
 
 ### Getting Started with Feishu
 
