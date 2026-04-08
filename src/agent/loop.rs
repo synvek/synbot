@@ -5,9 +5,11 @@ use rig::completion::CompletionRequest;
 use rig::message::{AssistantContent, Message, ToolResultContent, UserContent};
 use rig::OneOrMany;
 use crate::rig_provider::SynbotCompletionModel;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, Mutex, RwLock};
+use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn, Instrument};
 
@@ -110,45 +112,92 @@ impl AgentLoop {
         mut inbound_rx: mpsc::Receiver<InboundMessage>,
     ) -> Result<()> {
         info!("Agent loop started");
-        type TaskHandle = (tokio::task::JoinHandle<()>, CancellationToken, String);
-        let mut current_task: Option<TaskHandle> = None;
+        let mut join_set: JoinSet<String> = JoinSet::new();
+        let mut cancel_by_session: HashMap<String, CancellationToken> = HashMap::new();
 
         loop {
-            if let Some((mut handle, token, running_session_key)) = current_task.take() {
-                // Something is running: wait for either a new message or task completion.
-                tokio::select! {
-                    msg_opt = inbound_rx.recv() => {
-                        let msg = match msg_opt {
-                            None => { current_task = Some((handle, token, running_session_key)); break; }
-                            Some(m) => m,
-                        };
-                        if let Some(cmd) = parse_control_command(&msg.content) {
-                            match cmd {
-                                ControlCommand::Stop => {
+            tokio::select! {
+                Some(join_result) = join_set.join_next(), if !join_set.is_empty() => {
+                    match join_result {
+                        Ok(session_key) => {
+                            cancel_by_session.remove(&session_key);
+                        }
+                        Err(e) => {
+                            warn!(error = %e, "Agent background task ended with error");
+                        }
+                    }
+                }
+                msg_opt = inbound_rx.recv() => {
+                    let msg = match msg_opt {
+                        None => break,
+                        Some(m) => m,
+                    };
+                    let sk = msg.session_key();
+
+                    if let Some(cmd) = parse_control_command(&msg.content) {
+                        match cmd {
+                            ControlCommand::Stop => {
+                                let guard = loop_ref.lock().await;
+                                if let Some(token) = cancel_by_session.remove(&sk) {
                                     token.cancel();
-                                    let _ = handle.await;
-                                    let _ = loop_ref.lock().await.outbound_tx.send(OutboundMessage::chat(
+                                    let _ = guard.outbound_tx.send(OutboundMessage::chat(
                                         msg.channel.clone(),
                                         msg.chat_id.clone(),
                                         "[Control] Stopped.".to_string(),
                                         vec![],
                                         None,
                                     ));
-                                    continue;
+                                } else {
+                                    let _ = guard.outbound_tx.send(OutboundMessage::chat(
+                                        msg.channel.clone(),
+                                        msg.chat_id.clone(),
+                                        "[Control] Nothing is currently running. Use /status to check.".to_string(),
+                                        vec![],
+                                        None,
+                                    ));
                                 }
-                                ControlCommand::Status => {
-                                    loop_ref.lock().await.handle_status(&msg).await.ok();
-                                }
-                                ControlCommand::Clear => {
-                                    loop_ref.lock().await.handle_clear(&msg).await.ok();
-                                }
-                                ControlCommand::Resume => {
+                                continue;
+                            }
+                            ControlCommand::Status => {
+                                loop_ref.lock().await.handle_status(&msg).await.ok();
+                                continue;
+                            }
+                            ControlCommand::Clear => {
+                                loop_ref.lock().await.handle_clear(&msg).await.ok();
+                                continue;
+                            }
+                            ControlCommand::Commands => {
+                                let _ = loop_ref.lock().await.outbound_tx.send(OutboundMessage::chat(
+                                    msg.channel.clone(),
+                                    msg.chat_id.clone(),
+                                    format!("[Commands]\n{}", slash_commands_help_text()),
+                                    vec![],
+                                    None,
+                                ));
+                                continue;
+                            }
+                            ControlCommand::Resume => {
+                                let wf_result = {
                                     let loop_guard = loop_ref.lock().await;
                                     if let Some(ref k) = loop_guard.resolve_history_session_key(&msg).await {
-                                        let _ = loop_guard.session_state.append_user_message_and_save(k, &msg.content).await;
+                                        let _ = loop_guard
+                                            .session_state
+                                            .append_user_message_and_save(k, &msg.content)
+                                            .await;
                                     }
-                                    if let Err(e) = loop_guard.handle_workflow_continue(&msg, &msg.session_key()).await {
-                                        let _ = loop_guard.outbound_tx.send(OutboundMessage::chat(
+                                    loop_guard.handle_workflow_continue(&msg, &sk).await
+                                };
+                                match wf_result {
+                                    Ok(Some((handle, token, run_sk))) => {
+                                        cancel_by_session.insert(run_sk.clone(), token);
+                                        join_set.spawn(async move {
+                                            let _ = handle.await;
+                                            run_sk
+                                        });
+                                    }
+                                    Ok(None) => {}
+                                    Err(e) => {
+                                        let _ = loop_ref.lock().await.outbound_tx.send(OutboundMessage::chat(
                                             msg.channel.clone(),
                                             msg.chat_id.clone(),
                                             format!("[Workflow] Resume failed: {}", e),
@@ -157,52 +206,37 @@ impl AgentLoop {
                                         ));
                                     }
                                 }
-                                ControlCommand::Commands => {
-                                    let _ = loop_ref.lock().await.outbound_tx.send(OutboundMessage::chat(
-                                        msg.channel.clone(),
-                                        msg.chat_id.clone(),
-                                        format!("[Commands]\n{}", slash_commands_help_text()),
-                                        vec![],
-                                        None,
-                                    ));
-                                }
+                                continue;
                             }
-                        } else if msg.session_key() == running_session_key {
-                            let _ = loop_ref.lock().await.outbound_tx.send(OutboundMessage::chat(
-                                msg.channel.clone(),
-                                msg.chat_id.clone(),
-                                format!("[Control] Busy. {}", busy_hint_commands()),
-                                vec![],
-                                None,
-                            ));
-                        } else {
-                            let _ = loop_ref.lock().await.outbound_tx.send(OutboundMessage::chat(
-                                msg.channel.clone(),
-                                msg.chat_id.clone(),
-                                "Agent is busy with another conversation. Use /status to see state.".to_string(),
-                                vec![],
-                                None,
-                            ));
                         }
-                        current_task = Some((handle, token, running_session_key));
                     }
-                    _ = &mut handle => {
-                        // Task finished
+
+                    if cancel_by_session.contains_key(&sk) {
+                        let _ = loop_ref.lock().await.outbound_tx.send(OutboundMessage::chat(
+                            msg.channel.clone(),
+                            msg.chat_id.clone(),
+                            format!("[Control] Busy. {}", busy_hint_commands()),
+                            vec![],
+                            None,
+                        ));
+                        continue;
                     }
-                }
-            } else {
-                let msg = match inbound_rx.recv().await {
-                    None => break,
-                    Some(m) => m,
-                };
-                let result = {
-                    let mut guard = loop_ref.lock().await;
-                    guard.handle_message(msg, loop_ref.clone()).await
-                };
-                match result {
-                    Err(e) => error!("Error handling message: {e:#}"),
-                    Ok(Some(task_triple)) => current_task = Some(task_triple),
-                    Ok(None) => {}
+
+                    let result = {
+                        let mut guard = loop_ref.lock().await;
+                        guard.handle_message(msg, loop_ref.clone()).await
+                    };
+                    match result {
+                        Err(e) => error!("Error handling message: {e:#}"),
+                        Ok(Some((handle, token, run_sk))) => {
+                            cancel_by_session.insert(run_sk.clone(), token);
+                            join_set.spawn(async move {
+                                let _ = handle.await;
+                                run_sk
+                            });
+                        }
+                        Ok(None) => {}
+                    }
                 }
             }
         }

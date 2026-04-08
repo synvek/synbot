@@ -146,6 +146,34 @@ fn feishu_mention_is_bot(m: &FeishuMention, bot_open_id: Option<&str>, expect_na
     m.name.as_deref() == Some(expect_name)
 }
 
+/// When Feishu includes structured mentions with `open_id`, only bots that appear there should reply.
+/// Prevents every app in the same group from answering when the user @-mentions only one bot.
+fn feishu_group_other_bot_mentioned_exclusively(
+    mentions: Option<&[FeishuMention]>,
+    bot_open_id: Option<&str>,
+) -> bool {
+    let Some(mentions) = mentions.filter(|m| !m.is_empty()) else {
+        return false;
+    };
+    let Some(bot_id) = bot_open_id else {
+        return false;
+    };
+    let mut saw_open_id = false;
+    for m in mentions {
+        let oid = m
+            .open_id
+            .as_deref()
+            .or_else(|| m.id.as_ref().and_then(feishu_mention_id_open_id));
+        if let Some(o) = oid {
+            saw_open_id = true;
+            if o == bot_id {
+                return false;
+            }
+        }
+    }
+    saw_open_id
+}
+
 fn strip_leading_feishu_user_placeholder(s: &str) -> Option<String> {
     let s = s.trim_start();
     let prefix = "@_user_";
@@ -843,6 +871,29 @@ async fn process_im_message_receive(
         .mentions
         .as_deref()
         .or(event.mentions.as_deref());
+    if is_group && feishu_group_other_bot_mentioned_exclusively(mentions_slice, bot_open_id) {
+        debug!(
+            chat_id = %chat_id,
+            "Feishu group: skipped — message @-mentions another bot (structured open_id), not this app"
+        );
+        let _ = inbound_tx.try_send(InboundMessage {
+            channel: channel_name.to_string(),
+            sender_id: sender_open_id.clone(),
+            chat_id: chat_id.clone(),
+            content: text.clone(),
+            timestamp: chrono::Utc::now(),
+            media: vec![],
+            metadata: serde_json::json!({
+                "message_id": message_id,
+                "message_type": message_type,
+                "chat_type": chat_type,
+                "trigger_agent": false,
+                "group": true,
+                "default_agent": config.default_agent,
+            }),
+        });
+        return;
+    }
     let (_trigger_agent, content, is_group_meta) = if !enable_allowlist {
         if is_group {
             if let Some(ref my_name) = group_my_name {
