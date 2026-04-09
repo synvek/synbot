@@ -44,6 +44,42 @@ pub struct SessionMessage {
     pub timestamp: DateTime<Utc>,
 }
 
+/// Drop persisted **list_cron_tasks** / **list_heartbeat_tasks** turns from session history.
+///
+/// After a process restart, those tool outputs reflect an old config snapshot; keeping them causes
+/// the model to answer from stale chat instead of calling the tools again (users often `/clear` to
+/// fix this). We strip the tool result and the preceding assistant/tool_call line that invoked it.
+pub(crate) fn strip_stale_config_list_tool_results(msgs: &mut Vec<SessionMessage>) {
+    let mut to_remove: Vec<usize> = Vec::new();
+    for i in 0..msgs.len() {
+        if msgs[i].role != "tool_result" {
+            continue;
+        }
+        let content = msgs[i].content.trim();
+        let is_cron_list = content.starts_with("Cron tasks:");
+        let is_hb_list = content.starts_with("Heartbeat tasks:");
+        if !is_cron_list && !is_hb_list {
+            continue;
+        }
+        to_remove.push(i);
+        if i > 0 {
+            let prev = &msgs[i - 1].content;
+            let prev_matches = prev.contains("[Tool: list_cron_tasks]")
+                || prev.contains("[Tool: list_heartbeat_tasks]");
+            if prev_matches {
+                to_remove.push(i - 1);
+            }
+        }
+    }
+    to_remove.sort_unstable();
+    to_remove.dedup();
+    for idx in to_remove.into_iter().rev() {
+        if idx < msgs.len() {
+            msgs.remove(idx);
+        }
+    }
+}
+
 impl SessionMessage {
     /// Convert a `rig::message::Message` into a `SessionMessage`.
     /// Tool calls and tool results are persisted as short descriptive text so the session
@@ -646,6 +682,48 @@ mod tests {
         let (_dir, store) = temp_store();
         let all = store.load_all_sessions().await.unwrap();
         assert!(all.is_empty());
+    }
+
+    #[test]
+    fn strip_stale_config_list_tool_results_removes_cron_list_exchange() {
+        let mut msgs = vec![
+            SessionMessage {
+                role: "user".into(),
+                content: "list cron".into(),
+                timestamp: Utc::now(),
+            },
+            SessionMessage {
+                role: "tool_call".into(),
+                content: "[Tool: list_cron_tasks] {}".into(),
+                timestamp: Utc::now(),
+            },
+            SessionMessage {
+                role: "tool_result".into(),
+                content: "Cron tasks: 0. Use add_cron_task to add.".into(),
+                timestamp: Utc::now(),
+            },
+        ];
+        strip_stale_config_list_tool_results(&mut msgs);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].content, "list cron");
+    }
+
+    #[test]
+    fn strip_stale_config_list_tool_results_keeps_unrelated_tool_result() {
+        let mut msgs = vec![
+            SessionMessage {
+                role: "tool_call".into(),
+                content: "[Tool: exec] {\"cmd\":\"ls\"}".into(),
+                timestamp: Utc::now(),
+            },
+            SessionMessage {
+                role: "tool_result".into(),
+                content: "total 42".into(),
+                timestamp: Utc::now(),
+            },
+        ];
+        strip_stale_config_list_tool_results(&mut msgs);
+        assert_eq!(msgs.len(), 2);
     }
 
     #[tokio::test]

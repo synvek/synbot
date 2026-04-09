@@ -5,12 +5,37 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tracing::warn;
 
 use crate::config::{save_config, Config, CronTaskConfig, HeartbeatTask};
 use crate::tools::DynTool;
 
 fn get_config_and_path(t: &HeartbeatCronTools) -> (Arc<RwLock<Config>>, Option<PathBuf>) {
     (Arc::clone(&t.config), t.config_path.clone())
+}
+
+/// Refresh `cron` and `heartbeat` from the config file into the shared in-memory config.
+///
+/// The daemon keeps a snapshot loaded at startup; manual edits to `config.json` without restarting
+/// otherwise leave list/add/delete tools out of sync with disk.
+async fn sync_scheduled_sections_from_disk(t: &HeartbeatCronTools) {
+    let Some(ref p) = t.config_path else {
+        return;
+    };
+    match crate::config::load_config(Some(p.as_path())) {
+        Ok(disk) => {
+            let mut w = t.config.write().await;
+            w.cron = disk.cron;
+            w.heartbeat = disk.heartbeat;
+        }
+        Err(e) => {
+            warn!(
+                error = %e,
+                path = %p.display(),
+                "Could not reload config from disk; using in-memory cron/heartbeat"
+            );
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -33,7 +58,7 @@ impl DynTool for ListHeartbeatTasksTool {
         "list_heartbeat_tasks"
     }
     fn description(&self) -> &str {
-        "List all configured heartbeat tasks (periodic tasks that run at a fixed interval). Use when the user wants to see, list, or check heartbeat/periodic tasks."
+        "List all configured heartbeat tasks (periodic tasks that run at a fixed interval). Use when the user wants to see, list, or check heartbeat/periodic tasks. Always call this tool for a fresh list—do not rely on earlier chat turns alone (config may change or the process may have restarted)."
     }
     fn parameters_schema(&self) -> Value {
         json!({
@@ -43,6 +68,7 @@ impl DynTool for ListHeartbeatTasksTool {
         })
     }
     async fn call(&self, _args: Value) -> Result<String> {
+        sync_scheduled_sections_from_disk(&self.inner).await;
         let (config, _) = get_config_and_path(&self.inner);
         let cfg = config.read().await;
         let hb = &cfg.heartbeat;
@@ -119,6 +145,7 @@ impl DynTool for AddHeartbeatTaskTool {
         if channel.is_empty() || chat_id.is_empty() || user_id.is_empty() {
             return Ok("Error: channel/chat_id/user_id must be set (caller should inject from current message).".to_string());
         }
+        sync_scheduled_sections_from_disk(&self.inner).await;
         let (config, config_path) = get_config_and_path(&self.inner);
         let task = HeartbeatTask {
             channel,
@@ -166,6 +193,7 @@ impl DynTool for DeleteHeartbeatTaskTool {
     }
     async fn call(&self, args: Value) -> Result<String> {
         let index: usize = args.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        sync_scheduled_sections_from_disk(&self.inner).await;
         let (config, config_path) = get_config_and_path(&self.inner);
         let mut cfg = config.write().await;
         let tasks = &mut cfg.heartbeat.tasks;
@@ -197,7 +225,7 @@ impl DynTool for ListCronTasksTool {
         "list_cron_tasks"
     }
     fn description(&self) -> &str {
-        "List all configured cron (scheduled) tasks. Use when the user wants to see, list, or check cron/scheduled/periodic tasks."
+        "List all configured cron (scheduled) tasks. Use when the user wants to see, list, or check cron/scheduled/periodic tasks. Always call this tool for a fresh list—do not rely on earlier chat turns alone (config may change or the process may have restarted)."
     }
     fn parameters_schema(&self) -> Value {
         json!({
@@ -207,6 +235,7 @@ impl DynTool for ListCronTasksTool {
         })
     }
     async fn call(&self, _args: Value) -> Result<String> {
+        sync_scheduled_sections_from_disk(&self.inner).await;
         let (config, _) = get_config_and_path(&self.inner);
         let cfg = config.read().await;
         let lines: Vec<String> = cfg
@@ -301,6 +330,7 @@ impl DynTool for AddCronTaskTool {
             return Ok("Error: channel/user_id must be set (caller should inject from current message).".to_string());
         }
         let chat_id = if chat_id.is_empty() { user_id.clone() } else { chat_id };
+        sync_scheduled_sections_from_disk(&self.inner).await;
         let (config, config_path) = get_config_and_path(&self.inner);
         let task = CronTaskConfig {
             schedule: schedule.clone(),
@@ -351,6 +381,7 @@ impl DynTool for DeleteCronTaskTool {
     }
     async fn call(&self, args: Value) -> Result<String> {
         let index: usize = args.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        sync_scheduled_sections_from_disk(&self.inner).await;
         let (config, config_path) = get_config_and_path(&self.inner);
         let mut cfg = config.write().await;
         let tasks = &mut cfg.cron.tasks;

@@ -1423,7 +1423,12 @@ async fn run_completion_loop(
             .await
             .map_err(|e| anyhow::anyhow!("completion failed (agent_id={}): {}", agent_id, e))?;
 
-        for (i, c) in response.choice.iter().enumerate() {
+        let normalized_choice: Vec<AssistantContent> =
+            crate::agent::embedded_tool_calls::normalize_embedded_tool_calls(
+                response.choice.clone().into_iter().collect(),
+            );
+
+        for (i, c) in normalized_choice.iter().enumerate() {
             match c {
                 AssistantContent::Text(t) => {
                     let preview = truncate_debug(&t.text, 800);
@@ -1455,8 +1460,7 @@ async fn run_completion_loop(
                 }
             }
         }
-        let text_preview: String = response
-            .choice
+        let text_preview: String = normalized_choice
             .iter()
             .filter_map(|c| match c {
                 AssistantContent::Text(t) => Some(t.text.as_str()),
@@ -1483,7 +1487,7 @@ async fn run_completion_loop(
         let mut assistant_contents = Vec::new();
         let mut tool_results = Vec::new();
 
-        for content in response.choice.clone().into_iter() {
+        for content in normalized_choice.into_iter() {
             match &content {
                 AssistantContent::Text(t) => {
                     text_parts.push(t.text.clone());

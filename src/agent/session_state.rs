@@ -11,7 +11,7 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, info, warn};
 
-use crate::agent::session::{SessionMessage, SessionStore};
+use crate::agent::session::{strip_stale_config_list_tool_results, SessionMessage, SessionStore};
 use crate::agent::session_id::SessionId;
 use crate::agent::session_manager::{SessionManager, SessionMeta};
 
@@ -84,7 +84,8 @@ impl SharedSessionState {
         info!(count = session_data.len(), "Restored persisted sessions");
         let mut sessions_guard = self.sessions.write().await;
         let mut sm = self.session_manager.write().await;
-        for (key, data) in session_data {
+        for (key, mut data) in session_data {
+            strip_stale_config_list_tool_results(&mut data.messages);
             let messages: Vec<Message> = data.messages.iter().map(SessionMessage::to_message).collect();
             sessions_guard
                 .entry(key.clone())

@@ -2,6 +2,7 @@ pub mod agent_registry;
 pub mod control_commands;
 pub mod context;
 pub mod directive;
+pub mod embedded_tool_calls;
 pub mod memory;
 pub mod embeddings;
 #[cfg(feature = "memory-index")]

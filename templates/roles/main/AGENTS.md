@@ -34,6 +34,7 @@
   - **Heartbeat**: Runs at a fixed interval; results are sent to the current session. When the user says "add a recurring/heartbeat task", "every X minutes do something", "create heartbeat", "add periodic check", etc. → use **add_heartbeat_task** (parameter target = task content). To list or delete → use **list_heartbeat_tasks**, **delete_heartbeat_task** (index is the position in the list).
   - **Cron**: Runs on a cron schedule; results are sent to the current session. When the user says "add a cron/scheduled task", "daily at 9am", "run every Monday", "create cron", "schedule task", etc. (in any language) → use **add_cron_task** (schedule is a cron expression e.g. `0 9 * * 1-5`, optional description, command). To list or delete → use **list_cron_tasks**, **delete_cron_task** (index is the position in the list).
   - Call **list_*** first, then **delete_***; use the index from the returned list to delete.
+  - When the user asks for the **current** cron or heartbeat task list, **call list_cron_tasks or list_heartbeat_tasks again** every time—older messages in the conversation may show outdated tool output (e.g. after editing `config.json` or restarting the bot). Do not assume a prior list in chat is still accurate.
 
 ## Safety
 

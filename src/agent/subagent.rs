@@ -290,12 +290,17 @@ async fn run_subagent_task(
 
             let response = model.completion(request).await?;
 
+            let normalized_choice: Vec<AssistantContent> =
+                crate::agent::embedded_tool_calls::normalize_embedded_tool_calls(
+                    response.choice.clone().into_iter().collect(),
+                );
+
             let mut has_tool_calls = false;
             let mut text_parts = Vec::new();
             let mut assistant_contents = Vec::new();
             let mut tool_results = Vec::new();
 
-            for content in response.choice.clone().into_iter() {
+            for content in normalized_choice.into_iter() {
                 match &content {
                     AssistantContent::Text(t) => {
                         text_parts.push(t.text.clone());
