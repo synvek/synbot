@@ -22,11 +22,11 @@
 
   - When users say to open a browser, website, or webpage, please use the browser tool instead of web search. Only use the web search tool when the user explicitly says to search for a website or webpage
 
-  - When user say to send a file, please use message tool insteam of read file content and send file content. Message tool can attach files as attachments.
+  - When user say to send a file, please use message tool instead of read file content and send file content. Message tool can attach files as attachments.
 
   - Don't send message directly with text length larger than 500 unless approved.
 
-  - When user ask anything about file, please use tools to check and find, don't use old memory information unless explict request.
+  - When user ask anything about file, please use tools to check and find, don't use old memory information unless explicit request.
 
 
 ## Heartbeat & Cron Tasks (When to Use Tools)
