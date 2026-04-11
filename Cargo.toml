@@ -1,9 +1,11 @@
 [package]
 name = "synbot"
-version = "0.11.1"
+version = "0.11.2"
 edition = "2021"
 description = "Personal AI assistant"
 license = "MIT"
+repository = "https://github.com/synvek/synbot"
+homepage = "https://github.com/synvek/synbot"
 
 [features]
 default = ["memory-index", "mcp"]
@@ -199,3 +201,31 @@ path = "examples/advanced_configuration.rs"
 name = "generate_config_schema"
 path = "examples/generate_config_schema.rs"
 required-features = ["schema"]
+
+# dist (https://axodotdev.github.io/cargo-dist/) — see .github/workflows/v-release.yml
+[profile.dist]
+inherits = "release"
+lto = "thin"
+
+[workspace]
+resolver = "2"
+
+[workspace.metadata.dist]
+cargo-dist-version = "0.31.0"
+ci = ["github"]
+# Workflow filename v-release.yml; only tags matching this prefix trigger dist (manual release.yml unchanged).
+tag-namespace = "v"
+allow-dirty = ["ci"]
+rust-toolchain-version = "1.93.1"
+installers = ["shell", "powershell", "npm", "homebrew"]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+]
+tap = "synvek/homebrew-tap"
+publish-jobs = ["homebrew", "npm"]
+github-attestations = false
