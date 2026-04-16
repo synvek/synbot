@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use rig::completion::CompletionRequest;
+use rig::completion::request::CompletionError;
 use rig::message::{AssistantContent, Message, ToolResultContent, UserContent};
 use rig::OneOrMany;
 use crate::rig_provider::SynbotCompletionModel;
@@ -1270,6 +1271,56 @@ fn truncate_debug(s: &str, max_len: usize) -> String {
     }
 }
 
+fn parse_provider_error_message(raw: &str) -> String {
+    // The provider error often looks like:
+    //   "... with message: {\"error\":{\"message\":\"Invalid max_tokens ...\" ...}}"
+    // We try to extract `error.message` from the trailing JSON if present, otherwise fallback to the raw text.
+    let suffix = raw
+        .splitn(2, "with message:")
+        .nth(1)
+        .map(str::trim)
+        .unwrap_or(raw)
+        .trim();
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(suffix) {
+        if let Some(msg) = v
+            .get("error")
+            .and_then(|e| e.get("message"))
+            .and_then(|m| m.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            return msg.to_string();
+        }
+    }
+    suffix.to_string()
+}
+
+fn user_facing_completion_error(agent_id: &str, err: &CompletionError, requested_max_tokens: u32) -> Option<String> {
+    match err {
+        CompletionError::ProviderError(raw) => {
+            let msg = parse_provider_error_message(raw);
+            // Special-case the most common "config typo" class so users know what to change.
+            if msg.to_lowercase().contains("max_tokens") {
+                return Some(format!(
+                    "[Agent '{}'] The LLM request was rejected by the provider: {}\n\nLikely cause: `max_tokens` is invalid or exceeds the model/provider limit.\nHow to fix: adjust `mainAgent.max_tokens` or `mainAgent.agents[].max_tokens` to a valid range and retry. (requested max_tokens={})",
+                    agent_id, msg, requested_max_tokens
+                ));
+            }
+            Some(format!(
+                "[Agent '{}'] LLM provider request failed: {}\n\nHow to fix: verify provider/model/API key/API base and related request parameters, then retry.",
+                agent_id, msg
+            ))
+        }
+        // Other completion errors are often transient or internal; keep them terse but visible.
+        CompletionError::ResponseError(raw) => Some(format!(
+            "[Agent '{}'] Failed to parse the LLM response: {}\n\nHow to fix: retry later; if it persists, check provider compatibility/version.",
+            agent_id,
+            raw.trim()
+        )),
+        _ => None,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Chat history window helpers
 // ---------------------------------------------------------------------------
@@ -1418,10 +1469,32 @@ async fn run_completion_loop(
 
         tracing::debug!("Request prompt: {:?}", request);
 
-        let response = model
-            .completion(request)
-            .await
-            .map_err(|e| anyhow::anyhow!("completion failed (agent_id={}): {}", agent_id, e))?;
+        let response = match model.completion(request).await {
+            Ok(r) => r,
+            Err(e) => {
+                if let Some(text) = user_facing_completion_error(agent_id, &e, max_tokens) {
+                    // Make the error user-visible (channels otherwise look like "no reply").
+                    history.push(Message::assistant(&text));
+                    let out_msg = OutboundMessage::chat(
+                        channel.to_string(),
+                        chat_id.to_string(),
+                        text,
+                        vec![],
+                        None,
+                    );
+                    if let Some(ref h) = hooks {
+                        h.dispatch(HookEvent::MessageSent(out_msg.clone())).await;
+                    }
+                    let _ = outbound_tx.send(out_msg);
+                    break;
+                }
+                return Err(anyhow::anyhow!(
+                    "completion failed (agent_id={}): {}",
+                    agent_id,
+                    e
+                ));
+            }
+        };
 
         let normalized_choice: Vec<AssistantContent> =
             crate::agent::embedded_tool_calls::normalize_embedded_tool_calls(
@@ -1697,6 +1770,21 @@ mod history_window_tests {
         let history = vec![Message::user("hello"), assistant_with_tools(), user_tool("x", "y")];
         let start = fix_window_start_for_tool_results(&history, 1);
         assert_eq!(start, 1);
+    }
+}
+
+#[cfg(test)]
+mod provider_error_parse_tests {
+    use super::*;
+
+    #[test]
+    fn parse_provider_error_extracts_nested_error_message() {
+        let raw = r#"Invalid status code 400 Bad Request (url=https://api.deepseek.com/chat/completions, model=deepseek-reasoner) with message: {"error":{"message":"Invalid max_tokens value, the valid range of max_tokens is [1, 65536]","type":"invalid_request_error","param":null,"code":"invalid_request_error"}}"#;
+        let msg = parse_provider_error_message(raw);
+        assert_eq!(
+            msg,
+            "Invalid max_tokens value, the valid range of max_tokens is [1, 65536]"
+        );
     }
 }
 
