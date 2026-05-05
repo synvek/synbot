@@ -1,0 +1,4 @@
+# Minimal MCP-over-SSE test server for Synbot (transport: sse).
+# Use a modest lower bound so mirrors / older pip resolve reliably once PyPI is reachable.
+starlette>=0.27.0
+uvicorn[standard]>=0.23.0
