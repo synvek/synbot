@@ -21,7 +21,7 @@ impl DynTool for ListCommandsTool {
     }
 
     fn description(&self) -> &str {
-        "List user-facing slash commands (e.g. /workflow, /stop, /status, /clear, /resume, /commands). Use when the user asks what chat commands are available."
+        "List user-facing slash commands (e.g. /workflow, /stop, /status, /clear, /resume, /commands, /skills, /tools). Use when the user asks what chat commands are available."
     }
 
     fn parameters_schema(&self) -> Value {

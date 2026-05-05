@@ -19,6 +19,8 @@ Synbot supports **slash commands** in chat: type a command (e.g. `/clear`) to co
 | `/status` | Show current session info and workflow state (if any). |
 | `/clear` | Clear the current session (conversation history and workflow state). |
 | `/commands` (or `/help`) | List available slash commands. |
+| `/skills` | List available skills: each subdirectory with `SKILL.md` under the skills directory, plus skills registered by loaded plugins. |
+| `/tools` | List available tools (name and short description), same formatting and set as the `list_tools` tool. |
 
 ---
 
@@ -46,7 +48,7 @@ You can provide a workflow definition in JSON (in a fenced code block or `{ ... 
 
 ## Control commands
 
-These commands work **anytime**; when a workflow or agent task is **running**, they are the only way to control the session without starting a new task. If you send a normal message while something is running, you get a short hint listing: `/stop`, `/status`, `/clear`, `/resume`.
+These commands work **anytime**; when a workflow or agent task is **running**, they are the only way to control the session without starting a new task. If you send a normal message while something is running, you get a short hint listing: `/commands`, `/skills`, `/tools`, `/stop`, `/status`, `/clear`, `/resume`.
 
 ### `/stop` or `/cancel`
 
@@ -77,7 +79,11 @@ Clear the current session: conversation history and workflow state for this chat
 
 ### `/skills`
 
-`/skills` is **not** a control command. The message is passed to the model, which can answer using the **Skills** section in the system prompt (e.g. list or describe available skills). It does not stop or change workflow/session state.
+Lists the merged skill inventory for this running instance: each subdirectory under the configured skills directory that contains `SKILL.md`, plus any skills registered by loaded plugins (same merge as the skills API). Entries use names and descriptions from each skill’s frontmatter when present. Safe while a workflow or agent task is running; it does not stop work or clear the session.
+
+### `/tools`
+
+Lists tools currently registered for the agent (tool name and the first line of each tool’s description). This is the same inventory the `list_tools` tool returns. Safe to use while a workflow or agent task is running.
 
 ### `/commands` (or `/help`)
 
@@ -95,5 +101,7 @@ List available slash commands and their short descriptions. This is safe to use 
 | Stop current run | `/stop` or `/cancel` |
 | Show session and workflow state | `/status` |
 | Clear session and workflow | `/clear` |
+| List skills | `/skills` |
+| List tools | `/tools` |
 
 All commands are matched by exact prefix with optional trailing spaces only. For more on workflows, see [Workflow Guide](./workflow.md).

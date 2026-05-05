@@ -108,6 +108,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
     }
 
     let tools = std::sync::Arc::new(tool_reg);
+    let skills_loader = std::sync::Arc::new(skills_composite);
 
     // Wire spawn tool to run real subagents (model + tools) and to send completion to user
     {
@@ -149,6 +150,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
     let agent_loop = crate::agent::r#loop::AgentLoop::new(
         completion_model,
         ws,
+        skills_loader,
         tools,
         cfg.main_agent.max_tool_iterations,
         bus.outbound_tx_clone(),

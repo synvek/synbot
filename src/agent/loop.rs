@@ -17,6 +17,7 @@ use tracing::{error, info, warn, Instrument};
 use crate::agent::agent_registry::AgentRegistry;
 use crate::agent::context::ContextBuilder;
 use crate::agent::directive::DirectiveParser;
+use crate::agent::skills::{CompositeSkillProvider, SkillProvider};
 use crate::agent::session_state::SharedSessionState;
 use crate::agent::subagent::{SubagentManager, SubagentStatus};
 use crate::bus::{InboundMessage, OutboundMessage};
@@ -47,6 +48,8 @@ fn apply_sender_display_prefix(content: &str, metadata: &serde_json::Value) -> S
 pub struct AgentLoop {
     model: Arc<dyn SynbotCompletionModel>,
     workspace: PathBuf,
+    /// Skills from the skills directory plus any plugin-registered providers (same merge as the web API and startup).
+    skills: Arc<CompositeSkillProvider>,
     tools: Arc<ToolRegistry>,
     max_iterations: u32,
     outbound_tx: broadcast::Sender<OutboundMessage>,
@@ -68,6 +71,7 @@ impl AgentLoop {
     pub async fn new(
         model: Arc<dyn SynbotCompletionModel>,
         workspace: PathBuf,
+        skills: Arc<CompositeSkillProvider>,
         tools: Arc<ToolRegistry>,
         max_iterations: u32,
         outbound_tx: broadcast::Sender<OutboundMessage>,
@@ -88,6 +92,7 @@ impl AgentLoop {
         Self {
             workspace,
             model,
+            skills,
             tools,
             max_iterations,
             outbound_tx,
@@ -102,6 +107,16 @@ impl AgentLoop {
             pending_workflow_confirm: PendingConfirmStore::new(),
             workflow_user_input_timeout_secs,
             shared_config,
+        }
+    }
+
+    fn skills_list_body(skills: &CompositeSkillProvider) -> String {
+        let summary = skills.build_skills_summary();
+        if summary.is_empty() {
+            "No skills are currently loaded. Skills are subdirectories containing SKILL.md under the config skills directory."
+                .to_string()
+        } else {
+            summary
         }
     }
 
@@ -172,6 +187,32 @@ impl AgentLoop {
                                     msg.channel.clone(),
                                     msg.chat_id.clone(),
                                     format!("[Commands]\n{}", slash_commands_help_text()),
+                                    vec![],
+                                    None,
+                                ));
+                                continue;
+                            }
+                            ControlCommand::Skills => {
+                                let guard = loop_ref.lock().await;
+                                let body = Self::skills_list_body(&guard.skills);
+                                let _ = guard.outbound_tx.send(OutboundMessage::chat(
+                                    msg.channel.clone(),
+                                    msg.chat_id.clone(),
+                                    format!("[Skills]\n{}", body),
+                                    vec![],
+                                    None,
+                                ));
+                                continue;
+                            }
+                            ControlCommand::Tools => {
+                                let guard = loop_ref.lock().await;
+                                let body = crate::tools::list_tools::format_tool_list_markdown(
+                                    guard.tools.list_tools(),
+                                );
+                                let _ = guard.outbound_tx.send(OutboundMessage::chat(
+                                    msg.channel.clone(),
+                                    msg.chat_id.clone(),
+                                    format!("[Tools]\n{}", body),
                                     vec![],
                                     None,
                                 ));
@@ -304,6 +345,28 @@ impl AgentLoop {
                             msg.channel.clone(),
                             msg.chat_id.clone(),
                             format!("[Commands]\n{}", slash_commands_help_text()),
+                            vec![],
+                            None,
+                        ));
+                        return Ok(None);
+                    }
+                    ControlCommand::Skills => {
+                        let body = Self::skills_list_body(&self.skills);
+                        let _ = self.outbound_tx.send(OutboundMessage::chat(
+                            msg.channel.clone(),
+                            msg.chat_id.clone(),
+                            format!("[Skills]\n{}", body),
+                            vec![],
+                            None,
+                        ));
+                        return Ok(None);
+                    }
+                    ControlCommand::Tools => {
+                        let body = crate::tools::list_tools::format_tool_list_markdown(self.tools.list_tools());
+                        let _ = self.outbound_tx.send(OutboundMessage::chat(
+                            msg.channel.clone(),
+                            msg.chat_id.clone(),
+                            format!("[Tools]\n{}", body),
                             vec![],
                             None,
                         ));

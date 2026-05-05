@@ -1,5 +1,4 @@
-//! Control commands: /stop, /resume, /status, /clear, /commands (case-insensitive prefix).
-//! /skills is not a control command; the user message is passed to the model, which answers from the # Skills section in the system prompt.
+//! Control commands: /stop, /resume, /status, /clear, /commands, /skills, /tools (case-insensitive prefix).
 
 /// Control command parsed from user message (trimmed content).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,6 +13,10 @@ pub enum ControlCommand {
     Clear,
     /// List available slash commands (help).
     Commands,
+    /// List skills available to this instance (filesystem + plugins), same source as the system prompt # Skills section.
+    Skills,
+    /// List tools currently registered for the agent (name + short description).
+    Tools,
 }
 
 const PREFIX_STOP: &str = "/stop";
@@ -23,6 +26,8 @@ const PREFIX_STATUS: &str = "/status";
 const PREFIX_CLEAR: &str = "/clear";
 const PREFIX_COMMANDS: &str = "/commands";
 const PREFIX_HELP: &str = "/help";
+const PREFIX_SKILLS: &str = "/skills";
+const PREFIX_TOOLS: &str = "/tools";
 
 /// Returns true if content is exactly the command or command followed by optional whitespace only.
 /// Uses get() for slicing so we never split in the middle of a multi-byte UTF-8 character.
@@ -58,12 +63,18 @@ pub fn parse_control_command(content: &str) -> Option<ControlCommand> {
     if match_prefix(c, PREFIX_COMMANDS) || match_prefix(c, PREFIX_HELP) {
         return Some(ControlCommand::Commands);
     }
+    if match_prefix(c, PREFIX_SKILLS) {
+        return Some(ControlCommand::Skills);
+    }
+    if match_prefix(c, PREFIX_TOOLS) {
+        return Some(ControlCommand::Tools);
+    }
     None
 }
 
 /// Hint text shown when agent/workflow is busy: list available control commands.
 pub fn busy_hint_commands() -> &'static str {
-    "Available commands: /commands (list commands), /stop or /cancel (stop current work), /status (show session and workflow state), /clear (clear session), /resume (resume workflow)."
+    "Available commands: /commands (list commands), /skills (list skills), /tools (list tools), /stop or /cancel (stop current work), /status (show session and workflow state), /clear (clear session), /resume (resume workflow)."
 }
 
 /// User-facing help text for slash commands.
@@ -77,7 +88,9 @@ pub fn slash_commands_help_text() -> &'static str {
 - /stop or /cancel: stop the current running workflow/agent task\n\
 - /status: show current session info and workflow state\n\
 - /clear: clear the current session (history + workflow state)\n\
-- /commands (or /help): show this list"
+- /commands (or /help): show this list\n\
+- /skills: list available skills (SKILL.md under the skills directory + plugin skills)\n\
+- /tools: list available tools (name and short description)"
 }
 
 #[cfg(test)]
@@ -119,11 +132,20 @@ mod tests {
     }
 
     #[test]
+    fn skills_and_tools() {
+        assert_eq!(parse_control_command("/skills"), Some(ControlCommand::Skills));
+        assert_eq!(parse_control_command("  /skills  "), Some(ControlCommand::Skills));
+        assert_eq!(parse_control_command("/SKILLS"), Some(ControlCommand::Skills));
+        assert_eq!(parse_control_command("/skills extra"), None);
+        assert_eq!(parse_control_command("/tools"), Some(ControlCommand::Tools));
+        assert_eq!(parse_control_command("/TOOLS "), Some(ControlCommand::Tools));
+        assert_eq!(parse_control_command("/tools x"), None);
+    }
+
+    #[test]
     fn non_control() {
         assert_eq!(parse_control_command("hello"), None);
         assert_eq!(parse_control_command("/workflow foo"), None);
-        // /skills is not a control command; it goes to the model as a normal message
-        assert_eq!(parse_control_command("/skills"), None);
     }
 
     #[test]

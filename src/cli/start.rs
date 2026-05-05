@@ -278,6 +278,7 @@ pub async fn cmd_start() -> Result<()> {
     let agent_loop = crate::agent::r#loop::AgentLoop::new(
         std::sync::Arc::clone(&completion_model),
         ws.clone(),
+        std::sync::Arc::clone(&skills_loader),
         tools,
         cfg.main_agent.max_tool_iterations,
         bus.outbound_tx_clone(),

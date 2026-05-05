@@ -13,6 +13,7 @@ use tokio::sync::{broadcast, mpsc, Mutex, RwLock};
 use synbot::agent::agent_registry::AgentRegistry;
 use synbot::agent::r#loop::AgentLoop;
 use synbot::agent::role_registry::RoleRegistry;
+use synbot::agent::skills::CompositeSkillProvider;
 use synbot::agent::session::SessionStore;
 use synbot::agent::session_state::SharedSessionState;
 use synbot::bus::{InboundMessage, OutboundMessage, OutboundMessageType};
@@ -69,6 +70,9 @@ async fn build_agent_loop(
     let session_store = SessionStore::new(workspace.as_path() as &std::path::Path);
     let session_state = SharedSessionState::new(session_store);
     let tools = Arc::new(ToolRegistry::new());
+    let skills_dir = workspace.join("skills");
+    std::fs::create_dir_all(&skills_dir).expect("create skills dir");
+    let skills = Arc::new(CompositeSkillProvider::default_with_fs(&skills_dir));
 
     // Build a minimal agent registry with a "main" agent
     let mut agent_registry = AgentRegistry::new();
@@ -101,6 +105,7 @@ async fn build_agent_loop(
     let agent_loop = AgentLoop::new(
         mock_model,
         workspace,
+        skills,
         tools,
         3, // max_iterations
         outbound_tx,

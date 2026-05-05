@@ -8,6 +8,17 @@ use serde_json::{json, Value};
 
 use crate::tools::{DynTool, ToolInfo};
 
+/// Markdown bullet list: tool name and first line of description, sorted by name.
+pub fn format_tool_list_markdown(mut tools: Vec<ToolInfo>) -> String {
+    tools.sort_by(|a, b| a.name.cmp(&b.name));
+    let mut lines: Vec<String> = Vec::with_capacity(tools.len());
+    for t in &tools {
+        let desc = t.description.lines().next().unwrap_or(&t.description).trim();
+        lines.push(format!("- **{}**: {}", t.name, desc));
+    }
+    lines.join("\n")
+}
+
 /// Tool that returns a formatted list of all registered tools (name and description).
 /// Use when the user asks what tools are available, to list tools, or to list/enumerate available tools.
 pub struct ListToolsTool {
@@ -48,11 +59,6 @@ impl DynTool for ListToolsTool {
     }
 
     async fn call(&self, _args: Value) -> Result<String> {
-        let mut lines: Vec<String> = Vec::with_capacity(self.tools.len());
-        for t in &self.tools {
-            let desc = t.description.lines().next().unwrap_or(&t.description).trim();
-            lines.push(format!("- **{}**: {}", t.name, desc));
-        }
-        Ok(lines.join("\n"))
+        Ok(format_tool_list_markdown(self.tools.clone()))
     }
 }
