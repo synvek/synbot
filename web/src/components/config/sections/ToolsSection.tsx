@@ -11,6 +11,50 @@ import {
 } from '../FormPrimitives'
 import { asArray, asRecord } from '../immutable'
 
+function parseEnvLines(text: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    const eq = trimmed.indexOf('=')
+    if (eq <= 0) continue
+    const key = trimmed.slice(0, eq).trim()
+    const val = trimmed.slice(eq + 1).trim()
+    if (key.length > 0) out[key] = val
+  }
+  return out
+}
+
+function parseHeaderLines(text: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    const colon = trimmed.indexOf(':')
+    if (colon <= 0) continue
+    const name = trimmed.slice(0, colon).trim()
+    const val = trimmed.slice(colon + 1).trim()
+    if (name.length > 0) out[name] = val
+  }
+  return out
+}
+
+function recordToEnvLines(obj: unknown): string {
+  if (obj == null || typeof obj !== 'object' || Array.isArray(obj)) return ''
+  return Object.entries(obj as Record<string, unknown>)
+    .filter(([k]) => typeof k === 'string' && k.length > 0)
+    .map(([k, v]) => `${k}=${v == null ? '' : String(v)}`)
+    .join('\n')
+}
+
+function recordToHeaderLines(obj: unknown): string {
+  if (obj == null || typeof obj !== 'object' || Array.isArray(obj)) return ''
+  return Object.entries(obj as Record<string, unknown>)
+    .filter(([k]) => typeof k === 'string' && k.length > 0)
+    .map(([k, v]) => `${k}: ${v == null ? '' : String(v)}`)
+    .join('\n')
+}
+
 export const ToolsSection: React.FC<SectionProps> = ({ draft, setDraft, t }) => {
   const tools = asRecord(draft.tools)
 
@@ -527,6 +571,65 @@ export const ToolsSection: React.FC<SectionProps> = ({ draft, setDraft, t }) => 
                   patchTools({ mcp: { servers: next } })
                 }}
               />
+              <div>
+                <label className="block text-sm font-medium text-text mb-1" htmlFor={`mcp-env-${idx}`}>
+                  {t('config.sections.tools.mcpEnv')}
+                </label>
+                <p className="text-xs text-text-muted mb-1">{t('config.sections.tools.mcpEnvHint')}</p>
+                <textarea
+                  id={`mcp-env-${idx}`}
+                  className="w-full min-h-[72px] font-mono text-sm px-3 py-2 rounded-lg bg-surface border border-border"
+                  value={recordToEnvLines(srv.env)}
+                  onChange={(e) => {
+                    const next = [...servers]
+                    next[idx] = {
+                      ...asRecord(next[idx]),
+                      env: parseEnvLines(e.target.value),
+                    }
+                    patchTools({ mcp: { servers: next } })
+                  }}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-text mb-1" htmlFor={`mcp-hdr-${idx}`}>
+                  {t('config.sections.tools.mcpHeaders')}
+                </label>
+                <p className="text-xs text-text-muted mb-1">{t('config.sections.tools.mcpHeadersHint')}</p>
+                <textarea
+                  id={`mcp-hdr-${idx}`}
+                  className="w-full min-h-[72px] font-mono text-sm px-3 py-2 rounded-lg bg-surface border border-border"
+                  value={recordToHeaderLines(srv.headers)}
+                  onChange={(e) => {
+                    const next = [...servers]
+                    next[idx] = {
+                      ...asRecord(next[idx]),
+                      headers: parseHeaderLines(e.target.value),
+                    }
+                    patchTools({ mcp: { servers: next } })
+                  }}
+                />
+              </div>
+              <TextField
+                id={`mcp-timeout-${idx}`}
+                label={t('config.sections.tools.mcpTimeoutSecs')}
+                placeholder={t('config.sections.tools.mcpTimeoutPlaceholder')}
+                value={
+                  typeof srv.timeoutSecs === 'number' && Number.isFinite(srv.timeoutSecs)
+                    ? String(srv.timeoutSecs)
+                    : ''
+                }
+                onChange={(v) => {
+                  const next = [...servers]
+                  const t = v.trim()
+                  let timeoutSecs: number | null = null
+                  if (t !== '') {
+                    const n = Number(t)
+                    if (Number.isFinite(n) && n > 0) timeoutSecs = Math.floor(n)
+                  }
+                  next[idx] = { ...asRecord(next[idx]), timeoutSecs }
+                  patchTools({ mcp: { servers: next } })
+                }}
+              />
               <TextField
                 id={`mcp-pfx-${idx}`}
                 label={t('config.sections.tools.mcpToolPrefix')}
@@ -558,6 +661,9 @@ export const ToolsSection: React.FC<SectionProps> = ({ draft, setDraft, t }) => 
                     command: '',
                     args: [],
                     url: '',
+                    env: {},
+                    headers: {},
+                    timeoutSecs: null,
                     toolNamePrefix: null,
                   },
                 ],

@@ -166,36 +166,52 @@
       "default": {
         "anthropic": {
           "apiBase": null,
-          "apiKey": ""
+          "apiKey": "",
+          "apiStyle": "openai",
+          "maxTokensCap": null
         },
         "deepseek": {
           "apiBase": null,
-          "apiKey": ""
+          "apiKey": "",
+          "apiStyle": "openai",
+          "maxTokensCap": null
         },
         "extra": {},
         "gemini": {
           "apiBase": null,
-          "apiKey": ""
+          "apiKey": "",
+          "apiStyle": "openai",
+          "maxTokensCap": null
         },
         "kimiCode": {
           "apiBase": null,
-          "apiKey": ""
+          "apiKey": "",
+          "apiStyle": "openai",
+          "maxTokensCap": null
         },
         "moonshot": {
           "apiBase": null,
-          "apiKey": ""
+          "apiKey": "",
+          "apiStyle": "openai",
+          "maxTokensCap": null
         },
         "ollama": {
           "apiBase": null,
-          "apiKey": ""
+          "apiKey": "",
+          "apiStyle": "openai",
+          "maxTokensCap": null
         },
         "openai": {
           "apiBase": null,
-          "apiKey": ""
+          "apiKey": "",
+          "apiStyle": "openai",
+          "maxTokensCap": null
         },
         "openrouter": {
           "apiBase": null,
-          "apiKey": ""
+          "apiKey": "",
+          "apiStyle": "openai",
+          "maxTokensCap": null
         }
       },
       "allOf": [
@@ -1461,9 +1477,35 @@
           "default": "",
           "type": "string"
         },
+        "env": {
+          "description": "For stdio: extra environment variables for the subprocess.",
+          "default": {},
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "headers": {
+          "description": "For SSE: extra HTTP request headers (e.g. Authorization).",
+          "default": {},
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
         "id": {
           "description": "Unique id for this server (used in logs and optional tool name prefix).",
           "type": "string"
+        },
+        "timeoutSecs": {
+          "description": "Per-server timeout in seconds for MCP operations (initialize, list_tools, call_tool). Default 30.",
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
         },
         "toolNamePrefix": {
           "description": "Optional prefix for registered tool names to avoid collisions (e.g. \"mcp_fs_\").",
@@ -1682,6 +1724,25 @@
         }
       }
     },
+    "ProviderApiStyle": {
+      "description": "Which HTTP API an endpoint implements. Used for [`ProviderEntry::api_style`] (mainly `providers.extra`).",
+      "oneOf": [
+        {
+          "description": "OpenAI Chat Completions–compatible (`/v1/chat/completions` style).",
+          "type": "string",
+          "enum": [
+            "openai"
+          ]
+        },
+        {
+          "description": "Anthropic Messages API–compatible (same paths/headers as api.anthropic.com).",
+          "type": "string",
+          "enum": [
+            "anthropic"
+          ]
+        }
+      ]
+    },
     "ProviderEntry": {
       "type": "object",
       "properties": {
@@ -1694,6 +1755,25 @@
         "apiKey": {
           "default": "",
           "type": "string"
+        },
+        "apiStyle": {
+          "description": "For `providers.extra` entries: choose OpenAI-compatible vs Anthropic-compatible HTTP API. Ignored for built-in provider keys (`anthropic`, `openai`, etc.); those are fixed by name.",
+          "default": "openai",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProviderApiStyle"
+            }
+          ]
+        },
+        "maxTokensCap": {
+          "description": "When set, caps per-request completion `max_tokens` for this provider (after `mainAgent.maxTokens` / agent override). Use for Anthropic-compatible gateways that enforce a lower output limit (e.g. MiniMax ≤ 196608).",
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
         }
       }
     },
@@ -1703,7 +1783,9 @@
         "anthropic": {
           "default": {
             "apiBase": null,
-            "apiKey": ""
+            "apiKey": "",
+            "apiStyle": "openai",
+            "maxTokensCap": null
           },
           "allOf": [
             {
@@ -1714,7 +1796,9 @@
         "deepseek": {
           "default": {
             "apiBase": null,
-            "apiKey": ""
+            "apiKey": "",
+            "apiStyle": "openai",
+            "maxTokensCap": null
           },
           "allOf": [
             {
@@ -1733,7 +1817,9 @@
         "gemini": {
           "default": {
             "apiBase": null,
-            "apiKey": ""
+            "apiKey": "",
+            "apiStyle": "openai",
+            "maxTokensCap": null
           },
           "allOf": [
             {
@@ -1745,7 +1831,9 @@
           "description": "Kimi Code (Moonshot coding API). Uses OpenAI-compatible chat completions; set api_base if using a custom endpoint.",
           "default": {
             "apiBase": null,
-            "apiKey": ""
+            "apiKey": "",
+            "apiStyle": "openai",
+            "maxTokensCap": null
           },
           "allOf": [
             {
@@ -1756,7 +1844,9 @@
         "moonshot": {
           "default": {
             "apiBase": null,
-            "apiKey": ""
+            "apiKey": "",
+            "apiStyle": "openai",
+            "maxTokensCap": null
           },
           "allOf": [
             {
@@ -1767,7 +1857,9 @@
         "ollama": {
           "default": {
             "apiBase": null,
-            "apiKey": ""
+            "apiKey": "",
+            "apiStyle": "openai",
+            "maxTokensCap": null
           },
           "allOf": [
             {
@@ -1778,7 +1870,9 @@
         "openai": {
           "default": {
             "apiBase": null,
-            "apiKey": ""
+            "apiKey": "",
+            "apiStyle": "openai",
+            "maxTokensCap": null
           },
           "allOf": [
             {
@@ -1789,7 +1883,9 @@
         "openrouter": {
           "default": {
             "apiBase": null,
-            "apiKey": ""
+            "apiKey": "",
+            "apiStyle": "openai",
+            "maxTokensCap": null
           },
           "allOf": [
             {

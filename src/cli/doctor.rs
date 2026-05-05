@@ -429,7 +429,6 @@ impl DoctorCheck for McpServerCheck {
 
 /// Attempt a lightweight connection to an MCP server to verify it is reachable.
 async fn try_connect_mcp_server(server: &crate::config::McpServerConfig) -> Result<()> {
-    use std::collections::HashMap;
     use std::time::Duration;
     use mcp_client::client::{ClientCapabilities, ClientInfo, McpClient, McpClientTrait};
     use mcp_client::service::McpService;
@@ -437,7 +436,10 @@ async fn try_connect_mcp_server(server: &crate::config::McpServerConfig) -> Resu
     use crate::config::McpTransport;
     use std::sync::Arc;
 
-    let timeout = Duration::from_secs(10);
+    let timeout_secs = server
+        .timeout_secs
+        .unwrap_or(crate::config::MCP_DEFAULT_TIMEOUT_SECS);
+    let timeout = Duration::from_secs(timeout_secs);
 
     match server.transport {
         McpTransport::Stdio => {
@@ -447,7 +449,7 @@ async fn try_connect_mcp_server(server: &crate::config::McpServerConfig) -> Resu
             let transport = StdioTransport::new(
                 server.command.clone(),
                 server.args.clone(),
-                HashMap::new(),
+                server.env.clone(),
             );
             let handle = transport.start().await
                 .map_err(|e| anyhow::anyhow!("transport start failed: {}", e))?;
@@ -467,7 +469,7 @@ async fn try_connect_mcp_server(server: &crate::config::McpServerConfig) -> Resu
             if server.url.is_empty() {
                 anyhow::bail!("url is required for SSE transport");
             }
-            let transport = SseTransport::new(server.url.clone(), HashMap::new());
+            let transport = SseTransport::new(server.url.clone(), server.headers.clone());
             let handle = transport.start().await
                 .map_err(|e| anyhow::anyhow!("transport start failed: {}", e))?;
             let service = McpService::with_timeout(handle, timeout);

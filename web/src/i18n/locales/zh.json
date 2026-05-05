@@ -298,6 +298,12 @@
         "mcpArgs": "参数（每行一个）",
         "mcpUrl": "SSE 地址",
         "mcpToolPrefix": "工具名前缀",
+        "mcpEnv": "环境变量（stdio）",
+        "mcpEnvHint": "子进程环境，每行 KEY=value",
+        "mcpHeaders": "HTTP 请求头（SSE）",
+        "mcpHeadersHint": "每行 Name: value",
+        "mcpTimeoutSecs": "超时（秒）",
+        "mcpTimeoutPlaceholder": "留空则默认 30",
         "addMcpServer": "添加 MCP 服务"
       },
       "heartbeat": {

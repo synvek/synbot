@@ -298,6 +298,12 @@
         "mcpArgs": "Arguments (one per line)",
         "mcpUrl": "SSE URL",
         "mcpToolPrefix": "Tool name prefix",
+        "mcpEnv": "Environment (stdio)",
+        "mcpEnvHint": "One KEY=value per line for the subprocess",
+        "mcpHeaders": "HTTP headers (SSE)",
+        "mcpHeadersHint": "One Name: value per line",
+        "mcpTimeoutSecs": "Timeout (seconds)",
+        "mcpTimeoutPlaceholder": "Default 30 if empty",
         "addMcpServer": "Add MCP server"
       },
       "heartbeat": {

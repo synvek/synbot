@@ -115,7 +115,7 @@ For more options see the [documentation](https://github.com/synvek/synbot/tree/m
 - stdio (subprocess): `"tools": { "mcp": { "servers": [{ "id": "fs", "transport": "stdio", "command": "npx", "args": ["-y", "mcp-server-filesystem", "/tmp"] }] } }`
 - SSE (HTTP): `"tools": { "mcp": { "servers": [{ "id": "echo", "transport": "sse", "url": "http://localhost:8000/sse" }] } }`
 
-Optional field `toolNamePrefix` (e.g. `"mcp_fs_"`) prefixes tool names to avoid clashes with built-in tools.
+Optional field `toolNamePrefix` (e.g. `"mcp_fs_"`) prefixes tool names to avoid clashes with built-in tools. Per-server `env` (stdio), `headers` (SSE), and `timeoutSecs` (default 30) are supported; see the [tools guide](docs/user-guide/tools.md#mcp-model-context-protocol).
 
 ### Basic Startup (no sandbox)
 

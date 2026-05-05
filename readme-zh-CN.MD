@@ -113,7 +113,7 @@ synbot --root-dir /path/to/workspace onboard
 - stdio（子进程）：`"tools": { "mcp": { "servers": [{ "id": "fs", "transport": "stdio", "command": "npx", "args": ["-y", "mcp-server-filesystem", "/tmp"] }] } }`
 - SSE（HTTP）：`"tools": { "mcp": { "servers": [{ "id": "echo", "transport": "sse", "url": "http://localhost:8000/sse" }] } }`
 
-可选字段 `toolNamePrefix`（如 `"mcp_fs_"`）用于为工具名加前缀，避免与内置工具重名。
+可选字段 `toolNamePrefix`（如 `"mcp_fs_"`）用于为工具名加前缀，避免与内置工具重名。每个服务还可配置 `env`（stdio）、`headers`（SSE）与 `timeoutSecs`（默认 30 秒）；详见 [工具指南](docs/zh/user-guide/tools.md) 中的 MCP 一节。
 
 ### 基本启动（不使用沙箱）
 

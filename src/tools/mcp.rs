@@ -1,6 +1,5 @@
 //! MCP (Model Context Protocol) tools: connect to MCP servers and expose their tools as [DynTool].
 
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,13 +12,14 @@ use mcp_client::service::McpService;
 use mcp_client::transport::{Transport, SseTransport, StdioTransport};
 use mcp_spec::content::Content;
 use serde_json::Value;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
-use crate::config::{McpConfig, McpServerConfig, McpTransport};
+use crate::config::{McpConfig, McpServerConfig, McpTransport, MCP_DEFAULT_TIMEOUT_SECS};
 use crate::tools::{DynTool, ToolRegistry};
 
-/// Default timeout for MCP client operations (initialize, list_tools, call_tool).
-const MCP_TIMEOUT_SECS: u64 = 30;
+fn mcp_timeout_secs(server: &McpServerConfig) -> u64 {
+    server.timeout_secs.unwrap_or(MCP_DEFAULT_TIMEOUT_SECS)
+}
 
 /// Load MCP servers from config and register their tools into the registry.
 /// On per-server failure (connect/init/list), log and skip that server; do not fail startup.
@@ -39,7 +39,7 @@ pub async fn load_mcp_tools(cfg: &McpConfig, tools: &mut ToolRegistry) {
 }
 
 async fn load_one_mcp_server(server: &McpServerConfig, tools: &mut ToolRegistry) -> Result<()> {
-    let timeout = Duration::from_secs(MCP_TIMEOUT_SECS);
+    let timeout = Duration::from_secs(mcp_timeout_secs(server));
     match server.transport {
         McpTransport::Stdio => {
             if server.command.is_empty() {
@@ -48,7 +48,7 @@ async fn load_one_mcp_server(server: &McpServerConfig, tools: &mut ToolRegistry)
             let transport = StdioTransport::new(
                 server.command.clone(),
                 server.args.clone(),
-                HashMap::new(),
+                server.env.clone(),
             );
             let handle = transport.start().await.map_err(|e| {
                 anyhow::anyhow!("MCP stdio transport start failed for '{}': {}", server.id, e)
@@ -69,6 +69,14 @@ async fn load_one_mcp_server(server: &McpServerConfig, tools: &mut ToolRegistry)
                 .list_tools(None)
                 .await
                 .map_err(|e| anyhow::anyhow!("MCP list_tools failed for '{}': {}", server.id, e))?;
+            let tool_count = list.tools.len();
+            info!(
+                server_id = %server.id,
+                transport = "stdio",
+                timeout_secs = mcp_timeout_secs(server),
+                tool_count,
+                "MCP server initialized"
+            );
             let client: Arc<dyn McpClientTrait + Send + Sync> = Arc::new(client);
             register_mcp_tools(tools, server, list.tools, client);
         }
@@ -76,7 +84,7 @@ async fn load_one_mcp_server(server: &McpServerConfig, tools: &mut ToolRegistry)
             if server.url.is_empty() {
                 anyhow::bail!("MCP SSE server '{}': url is required", server.id);
             }
-            let transport = SseTransport::new(server.url.clone(), HashMap::new());
+            let transport = SseTransport::new(server.url.clone(), server.headers.clone());
             let handle = transport.start().await.map_err(|e| {
                 anyhow::anyhow!("MCP SSE transport start failed for '{}': {}", server.id, e)
             })?;
@@ -96,6 +104,14 @@ async fn load_one_mcp_server(server: &McpServerConfig, tools: &mut ToolRegistry)
                 .list_tools(None)
                 .await
                 .map_err(|e| anyhow::anyhow!("MCP list_tools failed for '{}': {}", server.id, e))?;
+            let tool_count = list.tools.len();
+            info!(
+                server_id = %server.id,
+                transport = "sse",
+                timeout_secs = mcp_timeout_secs(server),
+                tool_count,
+                "MCP server initialized"
+            );
             let client: Arc<dyn McpClientTrait + Send + Sync> = Arc::new(client);
             register_mcp_tools(tools, server, list.tools, client);
         }
@@ -189,10 +205,33 @@ impl DynTool for McpToolAdapter {
 }
 
 fn content_to_string(content: &[Content]) -> String {
-    content
-        .iter()
-        .filter_map(Content::as_text)
-        .collect::<Vec<_>>()
-        .join("\n")
+    let mut parts = Vec::new();
+    for c in content {
+        match c {
+            Content::Text(t) => parts.push(t.text.clone()),
+            Content::Image(img) => {
+                debug!(
+                    mime_type = %img.mime_type,
+                    data_len = img.data.len(),
+                    "MCP tool result block: image (not plain text)"
+                );
+                parts.push(format!(
+                    "[non-text content omitted: image/{}; {} bytes]",
+                    img.mime_type,
+                    img.data.len()
+                ));
+            }
+            Content::Resource(r) => {
+                let text = r.get_text();
+                if !text.is_empty() {
+                    parts.push(text);
+                } else {
+                    debug!("MCP tool result block: embedded resource without text");
+                    parts.push("[non-text content omitted: embedded resource]".into());
+                }
+            }
+        }
+    }
+    parts.join("\n")
 }
 

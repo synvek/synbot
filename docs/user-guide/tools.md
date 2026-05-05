@@ -32,6 +32,73 @@ Tools are functions that the AI assistant can call to perform actions. Each tool
 7. **Utility Tools**: Various utility functions
 8. **Browser Tools**: Headless browser automation (navigate, interact, snapshot, screenshot)
 
+## MCP (Model Context Protocol)
+
+Synbot can act as an **MCP client**: at startup it connects to configured MCP servers, lists their tools, and registers each tool like a built-in tool so the agent can call it.
+
+### Configuration
+
+Under `tools.mcp`, set `servers` to an array. Each server needs a unique `id`, a `transport` (`stdio` or `sse`), and the fields for that transport:
+
+- **stdio**: `command` and `args` (subprocess). Optional `env` is a string-to-string map of extra environment variables for the child process.
+- **sse**: `url` (SSE endpoint). Optional `headers` is a map of extra HTTP headers (for example `Authorization`).
+
+Optional for each server:
+
+- `toolNamePrefix`: Prefix registered tool names to avoid clashes with built-in tools (e.g. `mcp_fs_`).
+- `timeoutSecs`: Timeout in seconds for initialize, list_tools, and call_tool. If omitted, the default is **30** seconds.
+
+**Security:** Prefer environment variables or a secrets manager for tokens; anything in `env`, `headers`, or the config file may be logged or exposed in the admin UI.
+
+### Examples
+
+**stdio** (e.g. filesystem server via npx):
+
+```json
+"tools": {
+  "mcp": {
+    "servers": [
+      {
+        "id": "fs",
+        "transport": "stdio",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+        "env": { "FOO": "bar" }
+      }
+    ]
+  }
+}
+```
+
+**sse**:
+
+```json
+"tools": {
+  "mcp": {
+    "servers": [
+      {
+        "id": "remote",
+        "transport": "sse",
+        "url": "http://localhost:8000/sse",
+        "headers": { "Authorization": "Bearer YOUR_TOKEN" },
+        "timeoutSecs": 60
+      }
+    ]
+  }
+}
+```
+
+### Diagnostics and troubleshooting
+
+- Run `synbot doctor`: the **MCP servers** check attempts to connect and initialize each configured server (using the same env, headers, and timeout as at runtime).
+- If a server fails at startup, Synbot logs a warning and **skips** that server; other tools still load.
+- Validation rejects duplicate `id` values, empty `env` / `headers` keys, and `timeoutSecs: 0`.
+- Tool results are passed back as text when the MCP response uses text content; non-text blocks (e.g. images) appear as short placeholders in the returned string, with details at debug log level.
+
+### Future directions
+
+MCP **resources**, **prompts**, and **sampling** are not wired into Synbot today. The Rust stack uses the `mcp-client` / `mcp-spec` crates (stdio and SSE); newer transports (e.g. streamable HTTP) depend on upstream SDK support.
+
 ## Built-in Tools
 
 ### Filesystem Tools

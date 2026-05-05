@@ -1375,6 +1375,9 @@ pub struct GenerationConfig {
 // Tools config
 // ---------------------------------------------------------------------------
 
+/// Default MCP client timeout in seconds when `tools.mcp.servers[].timeoutSecs` is unset.
+pub const MCP_DEFAULT_TIMEOUT_SECS: u64 = 30;
+
 /// MCP server transport: stdio (subprocess) or SSE (HTTP).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -1404,6 +1407,15 @@ pub struct McpServerConfig {
     /// For SSE: server URL (e.g. "http://localhost:8000/sse").
     #[serde(default)]
     pub url: String,
+    /// For stdio: extra environment variables for the subprocess.
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+    /// For SSE: extra HTTP request headers (e.g. Authorization).
+    #[serde(default)]
+    pub headers: HashMap<String, String>,
+    /// Per-server timeout in seconds for MCP operations (initialize, list_tools, call_tool). Default 30.
+    #[serde(default)]
+    pub timeout_secs: Option<u64>,
     /// Optional prefix for registered tool names to avoid collisions (e.g. "mcp_fs_").
     #[serde(default)]
     pub tool_name_prefix: Option<String>,
@@ -2290,6 +2302,7 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
 
     // --- MCP servers validation ---
     if let Some(ref mcp) = config.tools.mcp {
+        let mut mcp_seen_ids = std::collections::HashSet::new();
         for (i, server) in mcp.servers.iter().enumerate() {
             let prefix = format!("tools.mcp.servers[{}]", i);
             if server.id.trim().is_empty() {
@@ -2298,6 +2311,39 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
                     value: server.id.clone(),
                     constraint: "must be non-empty".into(),
                 });
+            } else if !mcp_seen_ids.insert(server.id.clone()) {
+                errors.push(ValidationError {
+                    field: format!("{}.id", prefix),
+                    value: server.id.clone(),
+                    constraint: "must be unique among tools.mcp.servers".into(),
+                });
+            }
+            if let Some(secs) = server.timeout_secs {
+                if secs == 0 {
+                    errors.push(ValidationError {
+                        field: format!("{}.timeoutSecs", prefix),
+                        value: secs.to_string(),
+                        constraint: "must be greater than 0 when set".into(),
+                    });
+                }
+            }
+            for key in server.env.keys() {
+                if key.trim().is_empty() {
+                    errors.push(ValidationError {
+                        field: format!("{}.env", prefix),
+                        value: key.clone(),
+                        constraint: "env keys must be non-empty".into(),
+                    });
+                }
+            }
+            for key in server.headers.keys() {
+                if key.trim().is_empty() {
+                    errors.push(ValidationError {
+                        field: format!("{}.headers", prefix),
+                        value: key.clone(),
+                        constraint: "header names must be non-empty".into(),
+                    });
+                }
             }
             match server.transport {
                 McpTransport::Stdio => {
@@ -3589,6 +3635,81 @@ mod tests {
     fn default_config_passes_validation() {
         let cfg = valid_config();
         assert!(validate_config(&cfg).is_ok());
+    }
+
+    #[test]
+    fn mcp_duplicate_server_id_is_rejected() {
+        let mut cfg = valid_config();
+        cfg.tools.mcp = Some(McpConfig {
+            servers: vec![
+                McpServerConfig {
+                    id: "dup".into(),
+                    transport: McpTransport::Stdio,
+                    command: "npx".into(),
+                    args: vec![],
+                    url: String::new(),
+                    env: std::collections::HashMap::new(),
+                    headers: std::collections::HashMap::new(),
+                    timeout_secs: None,
+                    tool_name_prefix: None,
+                },
+                McpServerConfig {
+                    id: "dup".into(),
+                    transport: McpTransport::Sse,
+                    command: String::new(),
+                    args: vec![],
+                    url: "http://localhost:9/sse".into(),
+                    env: std::collections::HashMap::new(),
+                    headers: std::collections::HashMap::new(),
+                    timeout_secs: None,
+                    tool_name_prefix: None,
+                },
+            ],
+        });
+        let errors = validate_config(&cfg).unwrap_err();
+        assert!(errors.iter().any(|e| e.constraint.contains("unique among tools.mcp.servers")));
+    }
+
+    #[test]
+    fn mcp_timeout_zero_is_rejected() {
+        let mut cfg = valid_config();
+        cfg.tools.mcp = Some(McpConfig {
+            servers: vec![McpServerConfig {
+                id: "a".into(),
+                transport: McpTransport::Stdio,
+                command: "true".into(),
+                args: vec![],
+                url: String::new(),
+                env: std::collections::HashMap::new(),
+                headers: std::collections::HashMap::new(),
+                timeout_secs: Some(0),
+                tool_name_prefix: None,
+            }],
+        });
+        let errors = validate_config(&cfg).unwrap_err();
+        assert!(find_error(&errors, "tools.mcp.servers[0].timeoutSecs").is_some());
+    }
+
+    #[test]
+    fn mcp_empty_env_key_is_rejected() {
+        let mut cfg = valid_config();
+        let mut env = std::collections::HashMap::new();
+        env.insert(String::new(), "x".into());
+        cfg.tools.mcp = Some(McpConfig {
+            servers: vec![McpServerConfig {
+                id: "a".into(),
+                transport: McpTransport::Stdio,
+                command: "true".into(),
+                args: vec![],
+                url: String::new(),
+                env,
+                headers: std::collections::HashMap::new(),
+                timeout_secs: None,
+                tool_name_prefix: None,
+            }],
+        });
+        let errors = validate_config(&cfg).unwrap_err();
+        assert!(errors.iter().any(|e| e.field == "tools.mcp.servers[0].env"));
     }
 
     // --- agent.max_tokens ---

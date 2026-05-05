@@ -28,6 +28,73 @@ Synbot 提供了一个强大的工具系统，允许 AI 助手与外部世界进
 7. **实用工具**：各种实用功能
 8. **浏览器工具**：无头浏览器自动化（导航、交互、快照、截图）
 
+## MCP（Model Context Protocol）
+
+Synbot 可作为 **MCP 客户端**：启动时连接配置的 MCP 服务器，拉取 `tools/list`，把每个远端工具注册为与内置工具相同的调用方式，供 Agent 使用。
+
+### 配置说明
+
+在 `tools.mcp` 下配置 `servers` 数组。每个服务需要唯一的 `id`、传输方式 `transport`（`stdio` 或 `sse`），以及对应字段：
+
+- **stdio**：`command` 与 `args`（子进程）。可选 `env` 为字符串键值表，会作为**额外环境变量**传给子进程。
+- **sse**：`url`（SSE 地址）。可选 `headers` 为额外 HTTP 请求头（例如 `Authorization`）。
+
+可选字段：
+
+- `toolNamePrefix`：为注册后的工具名加前缀，避免与内置工具重名（如 `mcp_fs_`）。
+- `timeoutSecs`：initialize / list_tools / call_tool 的超时（秒）。省略时默认为 **30** 秒。
+
+**安全提示**：令牌、密钥尽量用环境变量或独立密钥管理；写入 `env`、`headers` 或配置文件的敏感内容可能在日志或管理后台中暴露。
+
+### 示例
+
+**stdio**（例如通过 npx 启动 filesystem 服务）：
+
+```json
+"tools": {
+  "mcp": {
+    "servers": [
+      {
+        "id": "fs",
+        "transport": "stdio",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+        "env": { "FOO": "bar" }
+      }
+    ]
+  }
+}
+```
+
+**sse**：
+
+```json
+"tools": {
+  "mcp": {
+    "servers": [
+      {
+        "id": "remote",
+        "transport": "sse",
+        "url": "http://localhost:8000/sse",
+        "headers": { "Authorization": "Bearer YOUR_TOKEN" },
+        "timeoutSecs": 60
+      }
+    ]
+  }
+}
+```
+
+### 诊断与排错
+
+- 运行 `synbot doctor`，**MCP 服务** 检查会尝试连接并初始化每个已配置服务（与正式运行使用相同的 env、headers 与超时）。
+- 若某个服务在启动时失败，Synbot 会打警告并**跳过**该服务，其余工具仍会加载。
+- 配置校验会拒绝：重复的 `id`、空的 `env` / `headers` 键名、以及 `timeoutSecs: 0`。
+- 工具返回内容以文本为主会原样拼接到结果中；图片等非文本块会在返回字符串中用简短占位说明，详细信息见调试级别日志。
+
+### 后续可能方向
+
+当前未接入 MCP 的 **resources**、**prompts**、**sampling**。传输层依赖 `mcp-client` / `mcp-spec`（stdio 与 SSE）；若需新版传输（如 streamable HTTP），需视上游 Rust SDK 支持情况而定。
+
 ## 内置工具
 
 ### 文件系统工具
