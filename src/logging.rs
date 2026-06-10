@@ -194,6 +194,64 @@ pub fn init_logging(cfg: &Config, buffer_tx: LogBufferTx) -> Result<()> {
     Ok(())
 }
 
+/// Initialize logging to a daily-rotated file plus stderr (never stdout).
+/// Used by `synbot acp`, where stdout carries the JSON-RPC protocol stream and
+/// must stay clean of any non-protocol bytes.
+pub fn init_stderr_logging(cfg: &Config) -> Result<()> {
+    let masker = Arc::new(SecretMaskerLayer::new());
+    masker.load_config_secrets(cfg);
+
+    let level = parse_log_level(&cfg.log.level)?;
+    let log_dir = log_dir_path(cfg);
+    std::fs::create_dir_all(&log_dir)?;
+
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        let mut filter_str = format!("synbot={},open_lark={}", level, level);
+        for (module, module_level) in &cfg.log.module_levels {
+            if let Ok(parsed_level) = parse_log_level(module_level) {
+                filter_str.push_str(&format!(",{}={}", module, parsed_level));
+            }
+        }
+        EnvFilter::new(filter_str)
+    });
+
+    let file_appender = tracing_appender::rolling::RollingFileAppender::builder()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .filename_prefix("synbot")
+        .filename_suffix("log")
+        .build(&log_dir)
+        .map_err(|e| anyhow::anyhow!("Failed to create rolling file appender: {}", e))?;
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+
+    let file_masker = masker.clone();
+    let file_layer = fmt::layer()
+        .compact()
+        .with_ansi(false)
+        .with_writer(move || MaskingWriter::new(non_blocking.clone(), file_masker.clone()))
+        .with_timer(ChronoLocal::new("%Y-%m-%d %H:%M:%S%.3f".to_string()))
+        .with_level(cfg.log.show_level)
+        .with_target(cfg.log.show_target);
+
+    let stderr_layer = fmt::layer()
+        .compact()
+        .with_ansi(false)
+        .with_writer(move || MaskingWriter::new(io::stderr(), masker.clone()))
+        .with_timer(ChronoLocal::new("%Y-%m-%d %H:%M:%S%.3f".to_string()))
+        .with_level(cfg.log.show_level)
+        .with_target(cfg.log.show_target);
+
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(file_layer)
+        .with(stderr_layer)
+        .init();
+
+    // Keep the non-blocking writer alive for the program's lifetime.
+    std::mem::forget(guard);
+
+    Ok(())
+}
+
 fn create_timer(timestamp_format: &str, custom_format: &Option<String>) -> Result<Box<dyn FormatTime + Send + Sync>> {
     match timestamp_format {
         "rfc3339" => Ok(Box::new(ChronoUtc::rfc_3339())),

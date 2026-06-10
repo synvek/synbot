@@ -2,6 +2,8 @@
 
 mod onboard;
 mod agent;
+#[cfg(feature = "acp")]
+mod acp;
 mod start;
 mod cron;
 mod sandbox_cmd;
@@ -18,6 +20,8 @@ use clap::{CommandFactory, Parser, Subcommand};
 
 pub use onboard::cmd_onboard;
 pub use agent::cmd_agent;
+#[cfg(feature = "acp")]
+pub use acp::cmd_acp;
 pub use start::cmd_start;
 pub use cron::{cmd_cron, CronAction};
 pub use sandbox_cmd::cmd_sandbox;
@@ -55,6 +59,18 @@ enum Commands {
         #[arg(short, long)]
         message: Option<String>,
 
+        /// Provider override (e.g. "anthropic").
+        #[arg(short, long)]
+        provider: Option<String>,
+
+        /// Model override (e.g. "claude-sonnet-4-5").
+        #[arg(long)]
+        model: Option<String>,
+    },
+
+    /// Serve the Agent Client Protocol (JSON-RPC over stdio) for editors like Zed.
+    #[cfg(feature = "acp")]
+    Acp {
         /// Provider override (e.g. "anthropic").
         #[arg(short, long)]
         provider: Option<String>,
@@ -135,6 +151,8 @@ pub async fn run() -> Result<()> {
     match command {
         Commands::Onboard => cmd_onboard().await,
         Commands::Agent { message, provider, model } => cmd_agent(message, provider, model).await,
+        #[cfg(feature = "acp")]
+        Commands::Acp { provider, model } => cmd_acp(provider, model).await,
         Commands::Start => cmd_start().await,
         Commands::Sandbox { child_args } => cmd_sandbox(child_args).await,
         Commands::Cron { action } => cmd_cron(action).await,

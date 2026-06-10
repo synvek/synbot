@@ -49,6 +49,22 @@ synbot agent --message "列出当前目录文件" --provider openai --model gpt-
 synbot agent   # 交互模式（不加 -m）
 ```
 
+### `synbot acp` [选项]
+
+通过 stdio 提供 [Agent Client Protocol (ACP)](https://agentclientprotocol.com/) 服务，供 Zed 等编辑器将 synbot 用作编程代理。stdout 承载 JSON-RPC 协议流；日志写入 stderr 与日志文件。详见 [ACP 指南](/zh/user-guide/acp)。
+
+| 选项 | 说明 |
+|------|------|
+| `-p`, `--provider <名称>` | 覆盖 LLM 提供商（如 `anthropic`、`openai`）。 |
+| `--model <名称>` | 覆盖模型（如 `claude-sonnet-4-5`、`gpt-4`）。 |
+
+示例：
+
+```bash
+synbot acp                       # 通常由编辑器启动，一般不手动运行
+synbot --root-dir /path/to/workspace acp --provider anthropic
+```
+
 ### `synbot start` [选项]
 
 启动完整守护进程：渠道（Telegram、Discord、Slack、飞书、Email、Matrix、钉钉、IRC）、心跳、定时任务及可选 Web 控制台。从默认根目录 `~/.synbot` 或通过 `--root-dir` 指定的目录加载配置。

@@ -32,6 +32,8 @@
 
 - MCP (Model Context Protocol) tools: configure MCP servers (stdio or SSE) and expose their tools to the agent
 
+- ACP (Agent Client Protocol) agent: run `synbot acp` from editors like Zed to use synbot as a coding agent (see `docs/user-guide/acp.md`)
+
 - Memory: Daily memory & Long term memory & Sqlite vec & FTS5 & Auto compression 
 
 - Sandbox support 

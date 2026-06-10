@@ -49,6 +49,22 @@ synbot agent --message "List files in current directory" --provider openai --mod
 synbot agent   # interactive (no -m)
 ```
 
+### `synbot acp` [options]
+
+Serve the [Agent Client Protocol (ACP)](https://agentclientprotocol.com/) over stdio so editors like Zed can use synbot as a coding agent. stdout carries the JSON-RPC protocol stream; logs go to stderr and the log file. See the [ACP guide](../user-guide/acp.md).
+
+| Option | Description |
+|--------|-------------|
+| `-p`, `--provider <NAME>` | Override LLM provider (e.g. `anthropic`, `openai`). |
+| `--model <NAME>` | Override model (e.g. `claude-sonnet-4-5`, `gpt-4`). |
+
+Examples:
+
+```bash
+synbot acp                       # spawned by the editor, not usually run by hand
+synbot --root-dir /path/to/workspace acp --provider anthropic
+```
+
 ### `synbot start` [options]
 
 Start the full daemon: channels (Telegram, Discord, Slack, Feishu, Email, Matrix, DingTalk, IRC), heartbeat, cron, and optional web dashboard. Loads config from the default root (`~/.synbot`) or from the directory given by `--root-dir`.

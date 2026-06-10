@@ -43,6 +43,9 @@ pub enum HookEvent {
     AgentRunStart {
         agent_id: String,
         directive_preview: String,
+        /// Session key ("{channel}:{chat_id}") of the run, when known.
+        #[serde(default)]
+        session_key: String,
     },
 
     /// Agent run finished.
@@ -50,6 +53,9 @@ pub enum HookEvent {
         agent_id: String,
         iteration_count: u32,
         duration_ms: u64,
+        /// Session key ("{channel}:{chat_id}") of the run, when known.
+        #[serde(default)]
+        session_key: String,
     },
 
     /// Approval requested (e.g. from exec tool).

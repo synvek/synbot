@@ -4,6 +4,8 @@
 
 use anyhow::Result;
 
+#[cfg(feature = "acp")]
+mod acp;
 mod agent;
 mod appcontainer_dns;
 mod background;

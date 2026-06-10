@@ -43,6 +43,7 @@ export default defineConfig({
             collapsed: false,
             items: [
               { text: 'Channels', link: '/user-guide/channels' },
+              { text: 'ACP (Editor Integration)', link: '/user-guide/acp' },
               { text: 'Tools', link: '/user-guide/tools' },
               { text: 'Workflow', link: '/user-guide/workflow' },
               { text: 'Slash Commands', link: '/user-guide/slash-commands' },
@@ -93,6 +94,7 @@ export default defineConfig({
           collapsed: false,
           items: [
             { text: '渠道', link: '/zh/user-guide/channels' },
+            { text: 'ACP（编辑器集成）', link: '/zh/user-guide/acp' },
             { text: '工具', link: '/zh/user-guide/tools' },
             { text: '工作流', link: '/zh/user-guide/workflow' },
             { text: '快捷命令', link: '/zh/user-guide/slash-commands' },

@@ -914,6 +914,7 @@ impl AgentLoop {
                 h.dispatch(HookEvent::AgentRunStart {
                     agent_id: agent_id.clone(),
                     directive_preview,
+                    session_key: msg.session_key(),
                 })
                 .await;
             }
@@ -950,6 +951,7 @@ impl AgentLoop {
                     agent_id: agent_id.clone(),
                     iteration_count: iterations,
                     duration_ms: start.elapsed().as_millis() as u64,
+                    session_key: msg.session_key(),
                 })
                 .await;
             }

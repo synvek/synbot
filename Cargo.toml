@@ -8,10 +8,12 @@ repository = "https://github.com/synvek/synbot"
 homepage = "https://github.com/synvek/synbot"
 
 [features]
-default = ["memory-index", "mcp"]
+default = ["memory-index", "mcp", "acp"]
 memory-index = ["dep:rusqlite", "dep:sqlite-vec"]
 # MCP (Model Context Protocol) servers as tools
 mcp = ["dep:mcp-client", "dep:mcp-spec"]
+# ACP (Agent Client Protocol): expose synbot as an ACP agent over stdio (`synbot acp`)
+acp = ["dep:agent-client-protocol"]
 # Generate config JSON schema (e.g. cargo run --example generate_config_schema --features schema)
 schema = ["dep:schemars"]
 
@@ -28,7 +30,8 @@ rig-core = { version = "0.30", features = ["all"] }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
-tokio-util = "0.7"
+# "compat" bridges tokio AsyncRead/Write to futures-io (used by the ACP stdio transport)
+tokio-util = { version = "0.7", features = ["compat"] }
 
 # CLI
 clap = { version = "4", features = ["derive"] }
@@ -133,6 +136,10 @@ extism = "1.13"
 mcp-client = { version = "0.1", optional = true }
 mcp-spec = { version = "0.1", optional = true }
 
+# ACP (Agent Client Protocol): expose synbot as an ACP agent over stdio.
+# Pinned to 0.11.x — the classic Agent trait + AgentSideConnection API used by Zed.
+agent-client-protocol = { version = "=0.11.1", optional = true }
+
 # Sandbox dependencies
 num_cpus = "1"
 bollard = "0.18"
@@ -162,6 +169,8 @@ windows = { version = "0.58", features = [
 ] }
 
 [dev-dependencies]
+# ACP protocol integration tests (tests/acp_protocol.rs)
+agent-client-protocol = "=0.11.1"
 # Property-based testing
 proptest = "1"
 # Async test support
