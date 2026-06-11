@@ -7,6 +7,12 @@ description: 如何启动、停止和管理 Synbot
 
 本指南涵盖如何在不同环境中启动、停止和管理 Synbot。
 
+## 桌面应用
+
+若希望使用**原生桌面窗口**（Tauri + 自动 `synbot start`），无需分别启动 CLI 与浏览器，请参阅 [桌面应用](/zh/getting-started/desktop-app)。
+
+开发 Dashboard 前端时，可在两个终端分别运行：`SYNBOT_DESKTOP=1 synbot start` 与 `cd desktop && npm run dev`。
+
 ## 启动 Synbot
 
 ### 基本启动
@@ -577,7 +583,8 @@ nginx -c load-balancer.conf
 
 ## 相关文档
 
-- [安装指南](/docs/zh/getting-started/installation/)
-- [配置指南](/docs/zh/getting-started/configuration/)
-- [渠道指南](/docs/zh/user-guide/channels/)
-- [工具指南](/docs/zh/user-guide/tools/)
+- [安装指南](/zh/getting-started/installation)
+- [配置指南](/zh/getting-started/configuration)
+- [桌面应用](/zh/getting-started/desktop-app)
+- [渠道指南](/zh/user-guide/channels)
+- [工具指南](/zh/user-guide/tools)

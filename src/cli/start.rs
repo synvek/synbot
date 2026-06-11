@@ -33,7 +33,7 @@ pub async fn cmd_start() -> Result<()> {
         crate::sandbox::windows_appcontainer::log_process_token_appcontainer_diagnostic();
     }
 
-    let cfg = config::load_config(None)?;
+    let mut cfg = config::load_config(None)?;
     let _pid_guard = write_pid_file()?;
     let shared_config = std::sync::Arc::new(tokio::sync::RwLock::new(cfg.clone()));
 
@@ -362,6 +362,9 @@ pub async fn cmd_start() -> Result<()> {
     }
 
     // Start web server if enabled
+    if std::env::var_os("SYNBOT_DESKTOP").is_some() {
+        cfg.web.enabled = true;
+    }
     if cfg.web.enabled {
         let mut web_config = cfg.web.clone();
         // Inside AppContainer the process is network-isolated; bind to 0.0.0.0 so

@@ -1,0 +1,17 @@
+{
+  "name": "synbot-desktop",
+  "private": true,
+  "version": "0.11.3",
+  "type": "module",
+  "scripts": {
+    "prepare:sidecar": "node scripts/copy-sidecar.mjs --debug --skip-build",
+    "prepare:sidecar:release": "node scripts/copy-sidecar.mjs",
+    "build:sidecar": "node scripts/copy-sidecar.mjs --skip-build",
+    "dev": "npm run prepare:sidecar && tauri dev",
+    "build": "tauri build",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11"
+  }
+}

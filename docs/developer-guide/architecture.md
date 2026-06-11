@@ -148,6 +148,10 @@ The web dashboard provides a management interface.
 - **`web/state.rs`**: Application state
 - **`web/log_buffer.rs`**: Log streaming
 
+#### Desktop app (`desktop/`)
+
+The [Tauri 2](https://v2.tauri.app/) desktop shell lives in `desktop/src-tauri/`. It does not duplicate the React UI; production builds load the dashboard from the sidecar at `http://127.0.0.1:18888` after spawning `synbot start` with `SYNBOT_DESKTOP=1`. Development uses the Vite dev server in `web/` (`devUrl` in `tauri.conf.json`). See [Desktop App](/getting-started/desktop-app).
+
 ### 6. Cron System
 
 The cron system handles scheduled tasks.
@@ -540,6 +544,7 @@ src/
 鈹溾攢鈹€ channels/        # Messaging channels
 鈹溾攢鈹€ tools/          # Tool implementations
 鈹溾攢鈹€ web/            # Web dashboard
+鈹溾攢鈹€ desktop/        # Tauri desktop app (sidecar + WebView)
 鈹溾攢鈹€ cron/           # Scheduled tasks
 鈹溾攢鈹€ cli/            # Command-line interface
 鈹溾攢鈹€ config.rs       # Configuration

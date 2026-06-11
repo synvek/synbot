@@ -11,6 +11,12 @@ title: running
 
 This guide covers how to start, stop, and manage Synbot in different environments.
 
+## Desktop App
+
+For a **native desktop experience** (Tauri window + automatic `synbot start`), use the desktop app instead of running the CLI and browser separately. See [Desktop App](/getting-started/desktop-app) for build and dev instructions.
+
+When developing the dashboard UI, run `SYNBOT_DESKTOP=1 synbot start` in one terminal and `cd desktop && npm run dev` in another.
+
 ## Starting Synbot
 
 ### Basic Startup
@@ -581,8 +587,9 @@ Move to external database:
 
 ## Related Documentation
 
-- [Installation Guide](/docs/en/getting-started/installation/)
-- [Configuration Guide](/docs/en/getting-started/configuration/)
-- [Channels Guide](/docs/en/user-guide/channels/)
-- [Tools Guide](/docs/en/user-guide/tools/)
+- [Installation Guide](/getting-started/installation)
+- [Configuration Guide](/getting-started/configuration)
+- [Desktop App](/getting-started/desktop-app)
+- [Channels Guide](/user-guide/channels)
+- [Tools Guide](/user-guide/tools)
 

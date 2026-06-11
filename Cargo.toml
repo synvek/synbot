@@ -1,6 +1,6 @@
 [package]
 name = "synbot"
-version = "0.11.3"
+version = "0.12.0"
 edition = "2021"
 description = "Personal AI assistant"
 license = "MIT"
@@ -217,6 +217,7 @@ inherits = "release"
 lto = "thin"
 
 [workspace]
+members = ["desktop/src-tauri"]
 resolver = "2"
 
 [workspace.metadata.dist]

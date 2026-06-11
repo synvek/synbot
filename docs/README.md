@@ -14,7 +14,7 @@ docs/
 │   │   ├── components/     # Vue components
 │   │   └── scripts/       # JavaScript files
 │   └── dist/               # Built site (generated)
-├── getting-started/        # English: installation, configuration, etc.
+├── getting-started/        # English: installation, configuration, desktop app, etc.
 ├── user-guide/             # English: user guides
 ├── developer-guide/        # English: developer documentation
 ├── examples/                # English: examples

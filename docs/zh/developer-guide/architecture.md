@@ -144,6 +144,10 @@ Web 仪表板提供管理界面。
 - **`web/state.rs`**：应用程序状态
 - **`web/log_buffer.rs`**：日志流
 
+#### 桌面应用（`desktop/`）
+
+[Tauri 2](https://v2.tauri.app/) 桌面壳位于 `desktop/src-tauri/`。它不重复实现 React UI：生产环境在 sidecar 启动 `synbot start`（`SYNBOT_DESKTOP=1`）后，WebView 加载 `http://127.0.0.1:18888`；开发环境使用 `web/` 的 Vite 开发服务器（见 `tauri.conf.json` 的 `devUrl`）。详见 [桌面应用](/zh/getting-started/desktop-app)。
+
 ### 6. Cron 系统
 
 Cron 系统处理计划任务。
@@ -536,6 +540,7 @@ src/
 ├── channels/        # 消息渠道
 ├── tools/          # 工具实现
 ├── web/            # Web 仪表板
+├── desktop/        # Tauri 桌面应用（sidecar + WebView）
 ├── cron/           # 计划任务
 ├── cli/            # 命令行界面
 ├── config.rs       # 配置

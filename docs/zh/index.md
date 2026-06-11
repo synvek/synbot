@@ -14,12 +14,15 @@ Synbot 是一个用 Rust 编写的个人 AI 助手，灵感来源于 [nanobot](h
 1. **安装**: [安装指南](/zh/getting-started/installation)
 2. **配置**: [配置指南](/zh/getting-started/configuration)
 3. **运行**: [运行 Synbot](/zh/getting-started/running)
+4. **桌面应用**: [桌面应用](/zh/getting-started/desktop-app)
 
 ## 文档章节
 
 ### 入门指南
 - [安装指南](/zh/getting-started/installation)
 - [配置指南](/zh/getting-started/configuration)（含根级 **pairings** 与 `synbot pairing`）
+- [运行 Synbot](/zh/getting-started/running)
+- [桌面应用](/zh/getting-started/desktop-app)
 
 ### 用户指南
 - [消息渠道](/zh/user-guide/channels)
@@ -74,6 +77,12 @@ Synbot 是一个用 Rust 编写的个人 AI 助手，灵感来源于 [nanobot](h
 - **日志查看器**: 浏览和搜索日志
 - **配置管理**: 通过 Web 界面编辑配置
 - **审批管理**: 处理待审批请求
+
+### 桌面应用
+- **原生窗口**: 基于 Tauri 2，无需单独打开浏览器
+- **自动启动**: 打包 synbot 为 sidecar，启动时运行 `synbot start`
+- **首次引导**: 无配置时自动 `onboard`
+- 详见 [桌面应用](/zh/getting-started/desktop-app)
 
 ### 多代理支持
 - **基于角色的代理**: 不同的系统提示和能力

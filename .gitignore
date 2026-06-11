@@ -10,5 +10,8 @@
 /docs/node_modules
 /plugins/base_tools_plugin/target
 .DS_Store
+/desktop/node_modules
+/desktop/src-tauri/target
+/desktop/src-tauri/binaries/synbot-*
 
 

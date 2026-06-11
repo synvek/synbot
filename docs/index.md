@@ -29,6 +29,9 @@ features:
   - title: Web Dashboard
     details: Built-in web interface for monitoring, management, and configuration.
     icon: 📊
+  - title: Desktop App
+    details: Native Tauri desktop app bundles synbot and the Admin Dashboard for one-click use.
+    icon: 🖥️
   - title: Multi-agent Support
     details: Role-based agents with different system prompts and capabilities.
     icon: 🤖
@@ -159,6 +162,11 @@ Synbot is currently in research & experiment stage. Please:
     <p>Persistent, resumable multi-step workflows</p>
   </a>
   
+  <a class="quick-link-card" href="/getting-started/desktop-app">
+    <h3>🖥️ Desktop App</h3>
+    <p>Native app with bundled synbot and dashboard</p>
+  </a>
+  
   <a class="quick-link-card" href="/developer-guide/architecture">
     <h3>🏗️ Architecture</h3>
     <p>Understand how Synbot works</p>
@@ -187,6 +195,7 @@ Synbot is a personal AI assistant written in Rust, originally inspired by [nanob
 - **Memory**: Daily memory, long-term memory, SQLite vec + FTS5, auto compression
 - **Permission Control**: Fine-grained permission system with approval workflows
 - **Web Dashboard**: Built-in web interface for monitoring and management
+- **Desktop App**: Tauri native app with automatic sidecar daemon (see [Desktop App](/getting-started/desktop-app))
 - **Multi-agent Support**: Role-based agents with different capabilities
 - **Workflows**: Persistent, resumable multi-step workflows (TurboWorkflow)
 - **Cron Jobs**: Scheduled task execution

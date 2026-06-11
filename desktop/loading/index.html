@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Synbot</title>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        background: #0f172a;
+        color: #e2e8f0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .container {
+        text-align: center;
+        max-width: 28rem;
+        padding: 2rem;
+      }
+      h1 {
+        font-size: 1.5rem;
+        font-weight: 600;
+        margin-bottom: 0.75rem;
+      }
+      #status {
+        color: #94a3b8;
+        font-size: 0.95rem;
+        line-height: 1.5;
+      }
+      .spinner {
+        width: 2rem;
+        height: 2rem;
+        border: 3px solid #334155;
+        border-top-color: #38bdf8;
+        border-radius: 50%;
+        margin: 0 auto 1.25rem;
+        animation: spin 0.8s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .error {
+        color: #f87171;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="spinner" id="spinner"></div>
+      <h1>Synbot</h1>
+      <p id="status">Starting synbot…</p>
+    </div>
+  </body>
+</html>

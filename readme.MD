@@ -34,6 +34,8 @@
 
 - ACP (Agent Client Protocol) agent: run `synbot acp` from editors like Zed to use synbot as a coding agent (see `docs/user-guide/acp.md`)
 
+- **Desktop app**: Native Tauri application bundles synbot and the Admin Dashboard — see [Desktop App](docs/getting-started/desktop-app.md)
+
 - Memory: Daily memory & Long term memory & Sqlite vec & FTS5 & Auto compression 
 
 - Sandbox support 
@@ -68,6 +70,19 @@
 ### Method 2: Pre-built Binaries
 
 Check the [Releases page](https://github.com/synvek/synbot/releases) for pre-built binaries for your platform.
+
+### Method 3: Desktop App
+
+Build the native desktop app from source (requires Rust and Node.js):
+
+```bash
+cd desktop
+npm install
+npm run prepare:sidecar:release
+npm run build
+```
+
+See [docs/getting-started/desktop-app.md](docs/getting-started/desktop-app.md) for details.
 
 
 ## Quick Start

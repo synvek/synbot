@@ -47,6 +47,17 @@ cargo install synbot
 
 查看 [发布页面](https://github.com/synvek/synbot/releases) 获取适合您平台的预编译二进制文件。
 
+### 方法 4: 桌面应用（Tauri）
+
+Synbot 可打包为**原生桌面应用**，内嵌 CLI 与 Admin Dashboard。前置要求、构建命令与开发流程见 [桌面应用](/zh/getting-started/desktop-app)。
+
+```bash
+cd desktop
+npm install
+npm run prepare:sidecar:release   # 构建 release synbot 并复制 sidecar
+npm run build                     # 产物在 target/release/bundle/
+```
+
 ## 平台特定说明
 
 ### Linux
@@ -319,6 +330,6 @@ sudo apt remove synbot
 
 ## 相关文档
 
-- [配置指南](/zh/getting-started/configuration/)
-- [运行 Synbot](/zh/getting-started/running/)
-- [故障排除指南](/zh/user-guide/troubleshooting/)
+- [配置指南](/zh/getting-started/configuration)
+- [运行 Synbot](/zh/getting-started/running)
+- [桌面应用](/zh/getting-started/desktop-app)

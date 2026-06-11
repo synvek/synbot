@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Default capabilities for Synbot desktop","local":true,"windows":["main"],"permissions":["core:default",{"identifier":"shell:allow-spawn","allow":[{"args":true,"name":"binaries/synbot","sidecar":true}]},{"identifier":"shell:allow-kill","allow":[{"name":"binaries/synbot","sidecar":true}]}]}}

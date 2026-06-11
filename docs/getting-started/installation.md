@@ -47,6 +47,17 @@ cargo install synbot
 
 Check the [Releases page](https://github.com/synvek/synbot/releases) for pre-built binaries for your platform.
 
+### Method 4: Desktop App (Tauri)
+
+Synbot can be packaged as a **native desktop application** that bundles the CLI and Admin Dashboard. See the [Desktop App guide](/getting-started/desktop-app) for prerequisites (Rust, Node.js, platform build tools), build commands, and development workflow.
+
+```bash
+cd desktop
+npm install
+npm run prepare:sidecar:release   # build release synbot + copy sidecar
+npm run build                     # .app / .dmg / .msi under target/release/bundle/
+```
+
 ## Platform-Specific Instructions
 
 ### Linux
@@ -321,4 +332,5 @@ If you encounter issues during installation:
 
 - [Configuration Guide](/getting-started/configuration)
 - [Running Synbot](/getting-started/running)
+- [Desktop App](/getting-started/desktop-app)
 - [Sandbox](/getting-started/sandbox)

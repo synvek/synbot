@@ -32,6 +32,8 @@
 
 - MCP（Model Context Protocol）工具：可配置多个 MCP 服务器（stdio 或 SSE），将其暴露的工具注册为 Agent 可用工具
 
+- **桌面应用**：基于 Tauri 的原生应用，内嵌 synbot 与 Admin Dashboard — 见 [桌面应用](docs/zh/getting-started/desktop-app.md)
+
 - 记忆：每日记忆 & 长期记忆 & 向量 Sqlite vec & 关键词 FTS5 & 记忆自动压缩
 
 - 沙箱支持
@@ -65,6 +67,20 @@
 ### 方式二：预编译二进制
 
 请到 [Releases 页面](https://github.com/synvek/synbot/releases) 下载适合您平台的预编译包。
+
+### 方式三：桌面应用
+
+从源码构建原生桌面应用（需要 Rust 与 Node.js）：
+
+```bash
+cd desktop
+npm install
+npm run prepare:sidecar:release
+npm run build
+```
+
+详见 [docs/zh/getting-started/desktop-app.md](docs/zh/getting-started/desktop-app.md)。
+
 
 ## 快速开始
 
