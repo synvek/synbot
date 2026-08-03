@@ -28,7 +28,7 @@ fn create_test_channel(
     };
     
     let mut channel =
-        TelegramChannel::new(config, inbound_tx, outbound_rx, true, 2048, None);
+        TelegramChannel::new(config, inbound_tx, outbound_rx, true, 2048, None, synbot::channels::ChannelStatusHandle::detached());
     if let Some(manager) = approval_manager {
         channel = channel.with_approval_manager(manager);
     }

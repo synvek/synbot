@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -24,7 +24,7 @@ use tracing::{error, info, warn};
 
 use crate::bus::{InboundMessage, OutboundMessage};
 use crate::channels::file_handler;
-use crate::channels::{approval_formatter, Channel, RetryPolicy, RetryState};
+use crate::channels::{approval_formatter, Channel, ChannelStatusHandle, RetryPolicy, RetryState};
 use crate::config::{
     pairing_allows, pairing_message, pairings_from_config_file_cached, AllowlistEntry, DiscordConfig,
 };
@@ -265,6 +265,7 @@ pub struct DiscordChannel {
     /// Workspace directory for saving incoming files; when set, attachments are downloaded and paths added to InboundMessage.media.
     workspace_dir: Option<PathBuf>,
     config_path: Option<PathBuf>,
+    runtime_status: ChannelStatusHandle,
 }
 
 impl DiscordChannel {
@@ -276,6 +277,7 @@ impl DiscordChannel {
         tool_result_preview_chars: usize,
         workspace_dir: Option<PathBuf>,
         config_path: Option<PathBuf>,
+        runtime_status: ChannelStatusHandle,
     ) -> Self {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))
@@ -293,6 +295,7 @@ impl DiscordChannel {
             pending_approvals: Arc::new(RwLock::new(HashMap::new())),
             workspace_dir,
             config_path,
+            runtime_status,
         }
     }
 
@@ -438,6 +441,7 @@ impl DiscordChannel {
     async fn run_gateway_session(
         token: &str,
         inbound_tx: &mpsc::Sender<InboundMessage>,
+        runtime_status: &ChannelStatusHandle,
         allowlist: &[AllowlistEntry],
         channel_name: &str,
         channel_provider: &'static str,
@@ -609,6 +613,7 @@ impl DiscordChannel {
 
                             match event_name {
                                 "READY" => {
+                                    runtime_status.mark_connected();
                                     if let Some(d) = payload.get("d") {
                                         resume.session_id = d
                                             .get("session_id")
@@ -625,6 +630,7 @@ impl DiscordChannel {
                                     }
                                 }
                                 "RESUMED" => {
+                                    runtime_status.mark_connected();
                                     info!("Discord Gateway session resumed");
                                 }
                                 "MESSAGE_CREATE" => {
@@ -854,7 +860,10 @@ impl DiscordChannel {
                                                 }
                                             };
                                             if skip_send {
-                                                let _ = inbound_tx.send(inbound).await;
+                                                match inbound_tx.send(inbound).await {
+                                                    Ok(()) => runtime_status.record_received(),
+                                                    Err(e) => error!("Failed to forward Discord session message: {e}"),
+                                                }
                                                 continue;
                                             }
                                             // If user has pending approval, forward to agent with metadata for LLM to interpret
@@ -874,6 +883,8 @@ impl DiscordChannel {
                                                 };
                                                 if let Err(e) = inbound_tx.send(inbound_with_meta).await {
                                                     error!("Failed to forward approval response to agent: {e}");
+                                                } else {
+                                                    runtime_status.record_received();
                                                 }
                                                 continue;
                                             }
@@ -891,6 +902,8 @@ impl DiscordChannel {
                                                 error!(
                                                     "Failed to forward Discord message: {e}"
                                                 );
+                                            } else {
+                                                runtime_status.record_received();
                                             }
                                         }
                                     }
@@ -946,6 +959,7 @@ impl Channel for DiscordChannel {
     }
 
     async fn start(&mut self) -> Result<()> {
+        self.runtime_status.mark_starting();
         info!("Discord channel starting (WebSocket Gateway)");
         self.running = true;
 
@@ -958,6 +972,7 @@ impl Channel for DiscordChannel {
         let show_tool_calls = self.show_tool_calls;
         let tool_result_preview_chars = self.tool_result_preview_chars;
         let workspace_dir = self.workspace_dir.clone();
+        let runtime_status = self.runtime_status.clone();
         tokio::spawn(async move {
             while let Ok(msg) = outbound_rx.recv().await {
                 if msg.channel != outbound_channel_name {
@@ -1034,18 +1049,26 @@ impl Channel for DiscordChannel {
                             let part = multipart::Part::bytes(bytes).file_name(name);
                             form = form.part(format!("files[{}]", idx), part);
                         }
+                        let started = Instant::now();
                         let resp = outbound_client
                             .post(&url)
                             .header("Authorization", format!("Bot {}", outbound_token))
                             .multipart(form)
                             .send()
                             .await;
-                        if let Err(e) = resp {
-                            error!("Discord outbound send (with files) error: {e:#}");
-                        } else if let Ok(r) = resp {
-                            if !r.status().is_success() {
+                        match resp {
+                            Err(e) => {
+                                runtime_status.record_error(format!("Discord outbound send failed: {e:#}"));
+                                error!("Discord outbound send (with files) error: {e:#}");
+                            }
+                            Ok(r) if r.status().is_success() => {
+                                runtime_status.record_sent();
+                                runtime_status.record_latency(started.elapsed().as_millis() as u64);
+                            }
+                            Ok(r) => {
                                 let status = r.status();
                                 let body = r.text().await.unwrap_or_default();
+                                runtime_status.record_error(format!("Discord outbound send failed: {status} {body}"));
                                 error!("Discord outbound send (with files) failed: {} {}", status, body);
                             }
                         }
@@ -1055,6 +1078,7 @@ impl Channel for DiscordChannel {
                 }
                 let chunks = split_message(&content, DISCORD_MAX_MESSAGE_LEN);
                 for chunk in &chunks {
+                    let started = Instant::now();
                     let resp = outbound_client
                         .post(&url)
                         .header(
@@ -1064,12 +1088,19 @@ impl Channel for DiscordChannel {
                         .json(&serde_json::json!({ "content": chunk }))
                         .send()
                         .await;
-                    if let Err(e) = resp {
-                        error!("Discord outbound send error: {e:#}");
-                    } else if let Ok(r) = resp {
-                        if !r.status().is_success() {
+                    match resp {
+                        Err(e) => {
+                            runtime_status.record_error(format!("Discord outbound send failed: {e:#}"));
+                            error!("Discord outbound send error: {e:#}");
+                        }
+                        Ok(r) if r.status().is_success() => {
+                            runtime_status.record_sent();
+                            runtime_status.record_latency(started.elapsed().as_millis() as u64);
+                        }
+                        Ok(r) => {
                             let status = r.status();
                             let body = r.text().await.unwrap_or_default();
+                            runtime_status.record_error(format!("Discord outbound send failed: {status} {body}"));
                             error!("Discord outbound send failed: {} {}", status, body);
                         }
                     }
@@ -1086,6 +1117,7 @@ impl Channel for DiscordChannel {
             let result = Self::run_gateway_session(
                 &self.config.token,
                 &self.inbound_tx,
+                &self.runtime_status,
                 &self.config.allowlist,
                 &self.config.name,
                 "discord",
@@ -1103,6 +1135,7 @@ impl Channel for DiscordChannel {
 
             match result {
                 Ok(()) => {
+                    self.runtime_status.mark_connected();
                     // Should not normally return Ok — the loop runs until error.
                     if retry_state.attempts > 0 {
                         retry_state.reset();
@@ -1128,6 +1161,7 @@ impl Channel for DiscordChannel {
                     tokio::time::sleep(Duration::from_secs(1)).await;
                 }
                 Err(DiscordGatewayError::Unrecoverable(msg)) => {
+                    self.runtime_status.mark_failed(msg.clone());
                     error!(
                         error = %msg,
                         "Discord encountered unrecoverable error, stopping"
@@ -1139,6 +1173,7 @@ impl Channel for DiscordChannel {
                     ));
                 }
                 Err(DiscordGatewayError::Transient(msg)) => {
+                    self.runtime_status.mark_reconnecting(Some(&msg));
                     let should_retry =
                         retry_state.record_failure(&retry_policy, msg.clone());
 
@@ -1175,6 +1210,7 @@ impl Channel for DiscordChannel {
     }
 
     async fn stop(&mut self) -> Result<()> {
+        self.runtime_status.mark_stopped();
         info!("Discord channel stopping");
         self.running = false;
         Ok(())

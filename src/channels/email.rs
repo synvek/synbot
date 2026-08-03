@@ -26,7 +26,7 @@ use tokio_native_tls::TlsStream;
 use tracing::{debug, error, info, warn};
 
 use crate::bus::{InboundMessage, OutboundMessage, OutboundMessageType};
-use crate::channels::Channel;
+use crate::channels::{Channel, ChannelStatusHandle};
 use crate::config::EmailConfig;
 
 /// Chat id format: "from_addr:uid" so we can reply and mark the right message read.
@@ -87,6 +87,7 @@ pub struct EmailChannel {
     outbound_rx: Option<broadcast::Receiver<OutboundMessage>>,
     /// chat_id -> (from_addr, uid, reply_tx). When we get the outbound reply we send email, mark read, then signal.
     pending: Arc<RwLock<HashMap<String, (String, u32, oneshot::Sender<()>)>>>,
+    runtime_status: ChannelStatusHandle,
 }
 
 impl EmailChannel {
@@ -96,6 +97,7 @@ impl EmailChannel {
         outbound_rx: broadcast::Receiver<OutboundMessage>,
         show_tool_calls: bool,
         tool_result_preview_chars: usize,
+        runtime_status: ChannelStatusHandle,
     ) -> Self {
         Self {
             config,
@@ -104,6 +106,7 @@ impl EmailChannel {
             inbound_tx,
             outbound_rx: Some(outbound_rx),
             pending: Arc::new(RwLock::new(HashMap::new())),
+            runtime_status,
         }
     }
 
@@ -374,6 +377,7 @@ impl EmailChannel {
         config: EmailConfig,
         show_tool_calls: bool,
         tool_result_preview_chars: usize,
+        runtime_status: ChannelStatusHandle,
     ) {
         while let Ok(msg) = outbound_rx.recv().await {
             if msg.channel != channel_name {
@@ -399,10 +403,15 @@ impl EmailChannel {
             if is_chat {
                 let entry = pending.write().await.remove(&chat_id);
                 if let Some((from_addr, _uid, reply_tx)) = entry {
+                    let started = std::time::Instant::now();
                     if let Err(e) =
                         Self::send_reply_static(&config, &from_addr, "Reply", &content, None).await
                     {
+                        runtime_status.record_error(format!("Email SMTP send failed: {e:#}"));
                         error!(error = %e, "Email channel: send reply failed");
+                    } else {
+                        runtime_status.record_sent();
+                        runtime_status.record_latency(started.elapsed().as_millis() as u64);
                     }
                     let _ = reply_tx.send(());
                 }
@@ -452,8 +461,18 @@ impl EmailChannel {
         let config = self.config.clone();
         let show_tool_calls = self.show_tool_calls;
         let tool_result_preview_chars = self.tool_result_preview_chars;
+        let runtime_status = self.runtime_status.clone();
         tokio::spawn(async move {
-            Self::run_outbound_listener(channel_name, outbound_rx, pending, config, show_tool_calls, tool_result_preview_chars).await;
+            Self::run_outbound_listener(
+                channel_name,
+                outbound_rx,
+                pending,
+                config,
+                show_tool_calls,
+                tool_result_preview_chars,
+                runtime_status,
+            )
+            .await;
         });
 
         let poll_interval = std::time::Duration::from_secs(self.config.poll_interval_secs);
@@ -479,6 +498,7 @@ impl EmailChannel {
 
     async fn poll_and_process(&self) -> Result<()> {
         let mut session = self.connect_imap().await?;
+        self.runtime_status.mark_connected();
         debug!(channel = %self.config.name, "Email channel IMAP connected");
         let list = self.fetch_unread(&mut session).await?;
         if list.is_empty() {
@@ -504,7 +524,7 @@ impl EmailChannel {
                 chat_id = %chat_id,
                 "Email channel: sending to agent"
             );
-            let _ = self
+            if let Ok(()) = self
                 .inbound_tx
                 .send(InboundMessage {
                     channel: self.config.name.clone(),
@@ -517,7 +537,10 @@ impl EmailChannel {
                         "default_agent": self.config.default_agent,
                     }),
                 })
-                .await;
+                .await
+            {
+                self.runtime_status.record_received();
+            }
             match tokio::time::timeout(std::time::Duration::from_secs(600), rx).await {
                 Ok(Ok(())) => {}
                 Ok(Err(_)) => {
@@ -542,14 +565,25 @@ impl Channel for EmailChannel {
     }
 
     async fn start(&mut self) -> Result<()> {
+        self.runtime_status.mark_starting();
         let channel_name = self.config.name.clone();
         let outbound_rx = self.outbound_rx.take().expect("start once");
         let pending = Arc::clone(&self.pending);
         let config = self.config.clone();
         let show_tool_calls = self.show_tool_calls;
         let tool_result_preview_chars = self.tool_result_preview_chars;
+        let runtime_status = self.runtime_status.clone();
         tokio::spawn(async move {
-            Self::run_outbound_listener(channel_name, outbound_rx, pending, config, show_tool_calls, tool_result_preview_chars).await;
+            Self::run_outbound_listener(
+                channel_name,
+                outbound_rx,
+                pending,
+                config,
+                show_tool_calls,
+                tool_result_preview_chars,
+                runtime_status,
+            )
+            .await;
         });
 
         let poll_interval = std::time::Duration::from_secs(self.config.poll_interval_secs);
@@ -574,6 +608,7 @@ impl Channel for EmailChannel {
     }
 
     async fn stop(&mut self) -> Result<()> {
+        self.runtime_status.mark_stopped();
         Ok(())
     }
 

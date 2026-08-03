@@ -11,11 +11,12 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::{broadcast, mpsc, RwLock};
 use tracing::{error, info, warn};
 
 use crate::bus::{InboundMessage, OutboundMessage};
-use crate::channels::{approval_formatter, Channel, RetryPolicy, RetryState};
+use crate::channels::{approval_formatter, Channel, ChannelStatusHandle, RetryPolicy, RetryState};
 use crate::config::{
     pairing_allows, pairing_message, pairings_from_config_file_cached, TelegramConfig,
 };
@@ -36,6 +37,7 @@ pub struct TelegramChannel {
     /// Map of user's pending approval requests: user_id -> (request_id, chat_id)
     pending_approvals: Arc<RwLock<HashMap<String, (String, String)>>>,
     config_path: Option<PathBuf>,
+    runtime_status: ChannelStatusHandle,
 }
 
 #[derive(Debug, Deserialize)]
@@ -87,6 +89,7 @@ impl TelegramChannel {
         show_tool_calls: bool,
         tool_result_preview_chars: usize,
         config_path: Option<PathBuf>,
+        runtime_status: ChannelStatusHandle,
     ) -> Self {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(60))
@@ -103,6 +106,7 @@ impl TelegramChannel {
             approval_manager: None,
             pending_approvals: Arc::new(RwLock::new(HashMap::new())),
             config_path,
+            runtime_status,
         }
     }
 
@@ -249,6 +253,7 @@ impl Channel for TelegramChannel {
     }
 
     async fn start(&mut self) -> Result<()> {
+        self.runtime_status.mark_starting();
         info!("Telegram channel starting (long-polling)");
         self.running = true;
         let mut offset: i64 = 0;
@@ -264,6 +269,7 @@ impl Channel for TelegramChannel {
         let pending_approvals = self.pending_approvals.clone();
         let show_tool_calls = self.show_tool_calls;
         let tool_result_preview_chars = self.tool_result_preview_chars;
+        let runtime_status = self.runtime_status.clone();
         tokio::spawn(async move {
             while let Ok(msg) = outbound_rx.recv().await {
                 if msg.channel != channel_name {
@@ -313,7 +319,8 @@ impl Channel for TelegramChannel {
                     };
                     for chunk in content.as_bytes().chunks(4000) {
                         let chunk_str = String::from_utf8_lossy(chunk);
-                        let _ = client
+                        let started = Instant::now();
+                        let result = client
                             .post(&url)
                             .json(&serde_json::json!({
                                 "chat_id": chat_id,
@@ -322,6 +329,21 @@ impl Channel for TelegramChannel {
                             }))
                             .send()
                             .await;
+                        match result {
+                            Ok(response) if response.status().is_success() => {
+                                runtime_status.record_sent();
+                                runtime_status.record_latency(started.elapsed().as_millis() as u64);
+                            }
+                            Ok(response) => {
+                                let status = response.status();
+                                runtime_status.record_error(format!("Telegram send failed: {status}"));
+                                error!("Telegram outbound send failed: {status}");
+                            }
+                            Err(e) => {
+                                runtime_status.record_error(format!("Telegram send failed: {e:#}"));
+                                error!("Telegram outbound send error: {e:#}");
+                            }
+                        }
                     }
                 }
             }
@@ -331,6 +353,7 @@ impl Channel for TelegramChannel {
         while self.running {
             match self.poll_updates(offset).await {
                 Ok(updates) => {
+                    self.runtime_status.mark_connected();
                     // Successful poll — reset retry state if we were recovering
                     if retry_state.attempts > 0 {
                         info!(
@@ -346,6 +369,7 @@ impl Channel for TelegramChannel {
                             let sender =
                                 m.from.map(|u| u.id.to_string()).unwrap_or_default();
                             if let Some(text) = m.text {
+                                self.runtime_status.record_received();
                                 let chat_id_str = m.chat.id.to_string();
                                 let is_group = m
                                     .chat
@@ -575,6 +599,7 @@ impl Channel for TelegramChannel {
                     }
                 }
                 Err(TelegramPollError::Unrecoverable(msg)) => {
+                    self.runtime_status.mark_failed(msg.clone());
                     error!(
                         error = %msg,
                         "Telegram encountered unrecoverable error, stopping channel"
@@ -586,6 +611,7 @@ impl Channel for TelegramChannel {
                     ));
                 }
                 Err(TelegramPollError::Transient(msg)) => {
+                    self.runtime_status.mark_reconnecting(Some(&msg));
                     let should_retry =
                         retry_state.record_failure(&retry_policy, msg.clone());
 
@@ -626,6 +652,7 @@ impl Channel for TelegramChannel {
     }
 
     async fn stop(&mut self) -> Result<()> {
+        self.runtime_status.mark_stopped();
         self.running = false;
         Ok(())
     }

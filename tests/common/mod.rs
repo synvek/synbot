@@ -107,6 +107,7 @@ pub async fn create_test_app_state_with_approval(
         log_buffer,
         approval_manager,
         None,
+        Arc::new(synbot::channels::ChannelStatusRegistry::new()),
     )
 }
 

@@ -14,7 +14,7 @@ use tokio::sync::{broadcast, mpsc};
 use tracing::{error, info, warn};
 
 use crate::bus::{InboundMessage, OutboundMessage};
-use crate::channels::{Channel, RetryPolicy, RetryState};
+use crate::channels::{Channel, ChannelStatusHandle, RetryPolicy, RetryState};
 use crate::config::{
     pairing_allows, pairing_message, pairings_from_config_file_cached, IrcConfig,
 };
@@ -29,6 +29,7 @@ pub struct IrcChannel {
     outbound_rx: Option<broadcast::Receiver<OutboundMessage>>,
     retry_state: RetryState,
     config_path: Option<PathBuf>,
+    runtime_status: ChannelStatusHandle,
 }
 
 impl IrcChannel {
@@ -37,6 +38,7 @@ impl IrcChannel {
         inbound_tx: mpsc::Sender<InboundMessage>,
         outbound_rx: broadcast::Receiver<OutboundMessage>,
         config_path: Option<PathBuf>,
+        runtime_status: ChannelStatusHandle,
     ) -> Self {
         Self {
             config,
@@ -44,6 +46,7 @@ impl IrcChannel {
             outbound_rx: Some(outbound_rx),
             retry_state: RetryState::new(),
             config_path,
+            runtime_status,
         }
     }
 
@@ -119,6 +122,7 @@ impl Channel for IrcChannel {
     }
 
     async fn start(&mut self) -> Result<()> {
+        self.runtime_status.mark_starting();
         info!(channel = %self.config.name, "IRC channel starting");
 
         let retry_policy = RetryPolicy::default();
@@ -152,6 +156,7 @@ impl Channel for IrcChannel {
             server = ?self.config.server,
             "IRC channel connected"
         );
+        self.runtime_status.mark_connected();
         self.retry_state.reset();
 
         let channel_name = self.config.name.clone();
@@ -165,6 +170,7 @@ impl Channel for IrcChannel {
         let sender = client.sender();
         let sender_out = sender.clone();
         let channel_name_out = channel_name.clone();
+        let runtime_status_out = self.runtime_status.clone();
         let mut outbound_rx = self.outbound_rx.take().unwrap();
 
         tokio::spawn(async move {
@@ -185,12 +191,17 @@ impl Channel for IrcChannel {
 
                 // IRC has a 512-byte line limit; split long messages
                 for line in content.lines() {
+                    let started = std::time::Instant::now();
                     if let Err(e) = sender_out.send_privmsg(&msg.chat_id, line) {
+                        runtime_status_out.record_error(format!("IRC send_privmsg failed: {e:#}"));
                         error!(
                             channel = %channel_name_out,
                             error = %e,
                             "IRC send_privmsg failed"
                         );
+                    } else {
+                        runtime_status_out.record_sent();
+                        runtime_status_out.record_latency(started.elapsed().as_millis() as u64);
                     }
                 }
             }
@@ -203,6 +214,7 @@ impl Channel for IrcChannel {
             match result {
                 Err(e) => {
                     let err_msg = format!("{e:#}");
+                    self.runtime_status.mark_reconnecting(Some(&err_msg));
                     let should_retry = self.retry_state.record_failure(&retry_policy, err_msg.clone());
                     if should_retry {
                         let delay = self.retry_state.next_delay(&retry_policy);
@@ -286,6 +298,8 @@ impl Channel for IrcChannel {
 
                         if let Err(e) = inbound_tx.send(inbound).await {
                             error!("Failed to forward IRC message to bus: {e}");
+                        } else {
+                            self.runtime_status.record_received();
                         }
                     }
                 }
@@ -296,6 +310,7 @@ impl Channel for IrcChannel {
     }
 
     async fn stop(&mut self) -> Result<()> {
+        self.runtime_status.mark_stopped();
         info!(channel = %self.config.name, "IRC channel stopping");
         Ok(())
     }
@@ -334,7 +349,13 @@ impl crate::channels::ChannelFactory for IrcChannelFactory {
             warn!("IRC channel '{}' created without nickname", cfg.name);
         }
 
-        let ch = IrcChannel::new(cfg, ctx.inbound_tx, ctx.outbound_rx, ctx.config_path);
+        let ch = IrcChannel::new(
+            cfg,
+            ctx.inbound_tx,
+            ctx.outbound_rx,
+            ctx.config_path,
+            ctx.runtime_status,
+        );
         Ok(Box::new(ch))
     }
 }
@@ -368,7 +389,7 @@ mod tests {
     fn make_channel() -> IrcChannel {
         let (inbound_tx, _) = mpsc::channel(16);
         let (_, outbound_rx) = broadcast::channel(16);
-        IrcChannel::new(make_config(), inbound_tx, outbound_rx, None)
+        IrcChannel::new(make_config(), inbound_tx, outbound_rx, None, ChannelStatusHandle::detached())
     }
 
     #[test]
@@ -457,7 +478,7 @@ mod tests {
             enable_allowlist: true,
             agent: "main".to_string(),
         };
-        let ch = IrcChannel::new(cfg, inbound_tx, outbound_rx, None);
+        let ch = IrcChannel::new(cfg, inbound_tx, outbound_rx, None, ChannelStatusHandle::detached());
         let irc_cfg = ch.build_irc_config();
         assert_eq!(irc_cfg.server.as_deref(), Some("irc.libera.chat"));
         assert_eq!(irc_cfg.nickname.as_deref(), Some("synbot"));
@@ -478,6 +499,7 @@ mod tests {
             approval_manager: None,
             completion_model: None,
             outbound_tx: Some(outbound_tx),
+            runtime_status: ChannelStatusHandle::detached(),
             config_path: None,
         };
         let config = serde_json::json!({
@@ -510,6 +532,7 @@ mod tests {
             approval_manager: None,
             completion_model: None,
             outbound_tx: Some(outbound_tx),
+            runtime_status: ChannelStatusHandle::detached(),
             config_path: None,
         };
         let result = factory.create(serde_json::json!("not_an_object"), ctx);

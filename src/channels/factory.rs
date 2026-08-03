@@ -43,6 +43,7 @@ impl crate::channels::ChannelFactory for DingTalkChannelFactory {
             ctx.tool_result_preview_chars,
             ctx.workspace,
             ctx.config_path,
+            ctx.runtime_status,
         );
         Ok(Box::new(ch))
     }
@@ -64,6 +65,7 @@ impl crate::channels::ChannelFactory for TelegramChannelFactory {
             ctx.show_tool_calls,
             ctx.tool_result_preview_chars,
             ctx.config_path,
+            ctx.runtime_status,
         );
         Ok(Box::new(ch))
     }
@@ -86,6 +88,7 @@ impl crate::channels::ChannelFactory for FeishuChannelFactory {
             ctx.tool_result_preview_chars,
             ctx.workspace,
             ctx.config_path,
+            ctx.runtime_status,
         );
         if let Some(tx) = ctx.outbound_tx {
             ch = ch.with_outbound_tx(tx);
@@ -117,6 +120,7 @@ impl crate::channels::ChannelFactory for DiscordChannelFactory {
             ctx.tool_result_preview_chars,
             ctx.workspace,
             ctx.config_path,
+            ctx.runtime_status,
         );
         Ok(Box::new(ch))
     }
@@ -139,6 +143,7 @@ impl crate::channels::ChannelFactory for SlackChannelFactory {
             ctx.tool_result_preview_chars,
             ctx.workspace,
             ctx.config_path,
+            ctx.runtime_status,
         )?;
         Ok(Box::new(ch))
     }
@@ -159,6 +164,7 @@ impl crate::channels::ChannelFactory for EmailChannelFactory {
             ctx.outbound_rx,
             ctx.show_tool_calls,
             ctx.tool_result_preview_chars,
+            ctx.runtime_status,
         );
         Ok(Box::new(ch))
     }
@@ -181,6 +187,7 @@ impl crate::channels::ChannelFactory for MatrixChannelFactory {
             ctx.tool_result_preview_chars,
             ctx.workspace,
             ctx.config_path,
+            ctx.runtime_status,
         )?;
         Ok(Box::new(ch))
     }
@@ -195,7 +202,13 @@ impl crate::channels::ChannelFactory for WhatsAppChannelFactory {
         ctx: ChannelStartContext,
     ) -> Result<Box<dyn Channel>> {
         let cfg: WhatsAppConfig = serde_json::from_value(config)?;
-        let ch = whatsapp::WhatsAppChannel::new(cfg, ctx.inbound_tx, ctx.outbound_rx, ctx.config_path);
+        let ch = whatsapp::WhatsAppChannel::new(
+            cfg,
+            ctx.inbound_tx,
+            ctx.outbound_rx,
+            ctx.config_path,
+            ctx.runtime_status,
+        );
         Ok(Box::new(ch))
     }
 }
@@ -209,7 +222,13 @@ impl crate::channels::ChannelFactory for IrcChannelFactory {
         ctx: ChannelStartContext,
     ) -> Result<Box<dyn Channel>> {
         let cfg: IrcConfig = serde_json::from_value(config)?;
-        let ch = irc::IrcChannel::new(cfg, ctx.inbound_tx, ctx.outbound_rx, ctx.config_path);
+        let ch = irc::IrcChannel::new(
+            cfg,
+            ctx.inbound_tx,
+            ctx.outbound_rx,
+            ctx.config_path,
+            ctx.runtime_status,
+        );
         Ok(Box::new(ch))
     }
 }

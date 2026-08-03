@@ -17,7 +17,7 @@ use crate::bus::{InboundMessage, OutboundMessage, OutboundMessageType};
 use crate::channels::approval_formatter;
 use crate::channels::dingtalk_stream;
 use crate::channels::file_handler;
-use crate::channels::Channel;
+use crate::channels::{Channel, ChannelStatusHandle};
 use crate::config::{
     pairing_allows, pairing_message, pairings_from_config_file_cached, DingTalkConfig,
 };
@@ -87,6 +87,7 @@ pub struct DingTalkChannel {
     http: reqwest::Client,
     workspace_dir: Option<PathBuf>,
     config_path: Option<PathBuf>,
+    runtime_status: ChannelStatusHandle,
 }
 
 /// Resolve clientId/clientSecret with optional appKey/appSecret fallback; trims whitespace.
@@ -157,6 +158,7 @@ impl DingTalkChannel {
         tool_result_preview_chars: usize,
         workspace_dir: Option<PathBuf>,
         config_path: Option<PathBuf>,
+        runtime_status: ChannelStatusHandle,
     ) -> Self {
         let robot_code_config = config.robot_code.trim().to_string();
         Self {
@@ -170,6 +172,7 @@ impl DingTalkChannel {
             http: crate::appcontainer_dns::build_reqwest_client(),
             workspace_dir,
             config_path,
+            runtime_status,
         }
     }
 
@@ -241,6 +244,7 @@ impl Channel for DingTalkChannel {
     }
 
     async fn start(&mut self) -> Result<()> {
+        self.runtime_status.mark_starting();
         let channel_name = self.config.name.clone();
         let (client_id, client_secret) = effective_credentials(&self.config);
         let inbound_tx = self.inbound_tx.clone();
@@ -255,11 +259,13 @@ impl Channel for DingTalkChannel {
         let tool_preview = self.tool_result_preview_chars;
         let workspace_dir = self.workspace_dir.clone();
         let config_path = self.config_path.clone();
+        let runtime_status = self.runtime_status.clone();
 
         let channel_name_out = channel_name.clone();
         let client_id_ws = client_id.clone();
         let client_secret_ws = client_secret.clone();
         let workspace_out = workspace_dir.clone();
+        let runtime_status_out = runtime_status.clone();
         tokio::spawn(async move {
             run_outbound_dingtalk(
                 channel_name_out,
@@ -271,6 +277,7 @@ impl Channel for DingTalkChannel {
                 client_id_ws,
                 client_secret_ws,
                 workspace_out,
+                runtime_status_out,
             )
             .await;
         });
@@ -280,7 +287,9 @@ impl Channel for DingTalkChannel {
         let app_key_file = client_id.clone();
         let app_secret_file = client_secret.clone();
         let robot_code_cfg = self.robot_code_config.clone();
-        dingtalk_stream::run_forever(http_loop, client_id, client_secret, move |data_str| {
+        let runtime_status_loop = runtime_status.clone();
+        let runtime_status_events = runtime_status.clone();
+        dingtalk_stream::run_forever(http_loop, client_id, client_secret, runtime_status_loop, move |data_str| {
             let inbound_tx = inbound_tx.clone();
             let sessions = Arc::clone(&sessions);
             let channel_name = channel_name.clone();
@@ -293,6 +302,7 @@ impl Channel for DingTalkChannel {
             let app_key = app_key_file.clone();
             let app_secret = app_secret_file.clone();
             let robot_code_cfg = robot_code_cfg.clone();
+            let runtime_status = runtime_status_events.clone();
             tokio::spawn(async move {
                 let data: BotMessageData = match serde_json::from_str(&data_str) {
                     Ok(d) => d,
@@ -568,8 +578,9 @@ impl Channel for DingTalkChannel {
                     media: vec![],
                     metadata,
                 };
-                if inbound_tx.send(msg).await.is_err() {
-                    warn!("DingTalk inbound_tx closed");
+                match inbound_tx.send(msg).await {
+                    Ok(()) => runtime_status.record_received(),
+                    Err(_) => warn!("DingTalk inbound_tx closed"),
                 }
             });
         })
@@ -578,6 +589,7 @@ impl Channel for DingTalkChannel {
     }
 
     async fn stop(&mut self) -> Result<()> {
+        self.runtime_status.mark_stopped();
         Ok(())
     }
 
@@ -691,6 +703,7 @@ async fn run_outbound_dingtalk(
     app_key: String,
     app_secret: String,
     workspace_dir: Option<PathBuf>,
+    runtime_status: ChannelStatusHandle,
 ) {
     while let Ok(msg) = outbound_rx.recv().await {
         if msg.channel != channel_name {
@@ -747,8 +760,13 @@ async fn run_outbound_dingtalk(
             if chunk.is_empty() {
                 continue;
             }
+            let started = std::time::Instant::now();
             if let Err(e) = post_session_text_http(&http, &webhook, &chunk).await {
+                runtime_status.record_error(format!("DingTalk outbound send failed: {e}"));
                 warn!(error = %e, "DingTalk sessionWebhook text send failed");
+            } else {
+                runtime_status.record_sent();
+                runtime_status.record_latency(started.elapsed().as_millis() as u64);
             }
         }
 

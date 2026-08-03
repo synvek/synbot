@@ -2,6 +2,7 @@ use crate::agent::agent_registry::AgentRegistry;
 use crate::agent::session_manager::SessionManager;
 use crate::agent::skills::SkillProvider;
 use crate::bus::{InboundMessage, OutboundMessage};
+use crate::channels::ChannelStatusRegistry;
 use crate::config::Config;
 use crate::cron::service::CronService;
 use crate::web::log_buffer::SharedLogBuffer;
@@ -24,6 +25,7 @@ pub struct AppState {
     pub log_buffer: SharedLogBuffer,
     pub approval_manager: Arc<crate::tools::approval::ApprovalManager>,
     pub permission_policy: Option<Arc<crate::tools::permission::CommandPermissionPolicy>>,
+    pub runtime_status: Arc<ChannelStatusRegistry>,
 }
 
 impl AppState {
@@ -39,6 +41,7 @@ impl AppState {
         log_buffer: SharedLogBuffer,
         approval_manager: Arc<crate::tools::approval::ApprovalManager>,
         permission_policy: Option<Arc<crate::tools::permission::CommandPermissionPolicy>>,
+        runtime_status: Arc<ChannelStatusRegistry>,
     ) -> Self {
         Self {
             config,
@@ -52,6 +55,7 @@ impl AppState {
             log_buffer,
             approval_manager,
             permission_policy,
+            runtime_status,
         }
     }
 
@@ -91,6 +95,7 @@ mod tests {
             Arc::new(RwLock::new(crate::web::log_buffer::LogBuffer::new(100))),
             Arc::new(crate::tools::approval::ApprovalManager::new()),
             None,
+            Arc::new(ChannelStatusRegistry::new()),
         );
         let cloned = state.clone();
         assert!(Arc::ptr_eq(&state.config, &cloned.config));

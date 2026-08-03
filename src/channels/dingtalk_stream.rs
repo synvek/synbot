@@ -11,6 +11,8 @@ use serde_json::json;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, info, warn};
 
+use crate::channels::ChannelStatusHandle;
+
 const OPEN_URL: &str = "https://api.dingtalk.com/v1.0/gateway/connections/open";
 const BOT_TOPIC: &str = "/v1.0/im/bot/messages/get";
 
@@ -245,7 +247,13 @@ where
 }
 
 /// Long-running loop: open -> connect -> run session -> backoff on error.
-pub async fn run_forever<F>(http: reqwest::Client, client_id: String, client_secret: String, mut on_bot_message: F)
+pub async fn run_forever<F>(
+    http: reqwest::Client,
+    client_id: String,
+    client_secret: String,
+    runtime_status: ChannelStatusHandle,
+    mut on_bot_message: F,
+)
 where
     F: FnMut(String) + Send + 'static,
 {
@@ -254,6 +262,7 @@ where
     loop {
         match open_connection(&http, &client_id, &client_secret).await {
             Ok((endpoint, ticket)) => {
+                runtime_status.mark_connected();
                 attempt = 0;
                 let url = ws_url(&endpoint, &ticket);
                 match run_ws_session(url, |data| on_bot_message(data)).await {
@@ -262,6 +271,7 @@ where
                         tokio::time::sleep(Duration::from_secs(2)).await;
                     }
                     Err(e) => {
+                        runtime_status.mark_reconnecting(Some(&e.to_string()));
                         warn!(error = %e, "DingTalk Stream session error");
                         let delay = policy.delay_for_attempt(attempt);
                         attempt = (attempt + 1).min(policy.max_retries);
@@ -270,6 +280,7 @@ where
                 }
             }
             Err(e) => {
+                runtime_status.mark_reconnecting(Some(&e.to_string()));
                 warn!(error = %e, "DingTalk Stream open_connection failed");
                 let delay = policy.delay_for_attempt(attempt);
                 attempt = (attempt + 1).min(policy.max_retries);

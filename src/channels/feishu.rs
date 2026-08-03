@@ -21,7 +21,7 @@ use crate::channels::file_handler;
 use crate::channels::approval_classifier;
 use crate::channels::feishu_api::FeishuApiClient;
 use crate::channels::feishu_ws::{build_event_response_frame, get_ws_endpoint, run_ws_loop};
-use crate::channels::{approval_formatter, Channel, RetryPolicy, RetryState};
+use crate::channels::{approval_formatter, Channel, ChannelStatusHandle, RetryPolicy, RetryState};
 use crate::config::{
     pairing_allows, pairing_message, pairings_from_config_file_cached, AllowlistEntry, FeishuConfig,
 };
@@ -67,6 +67,7 @@ pub struct FeishuChannel {
     pending_approvals: Arc<RwLock<HashMap<String, (String, String)>>>,
     workspace_dir: Option<PathBuf>,
     config_path: Option<PathBuf>,
+    runtime_status: ChannelStatusHandle,
 }
 
 // ---------------------------------------------------------------------------
@@ -493,6 +494,7 @@ impl FeishuChannel {
         tool_result_preview_chars: usize,
         workspace_dir: Option<PathBuf>,
         config_path: Option<PathBuf>,
+        runtime_status: ChannelStatusHandle,
     ) -> Self {
         Self {
             config,
@@ -507,6 +509,7 @@ impl FeishuChannel {
             pending_approvals: Arc::new(RwLock::new(HashMap::new())),
             workspace_dir,
             config_path,
+            runtime_status,
         }
     }
 
@@ -597,6 +600,7 @@ struct WsEventHeader {
 
 async fn attempt_ws_connection(
     inbound_tx: mpsc::Sender<InboundMessage>,
+    runtime_status: ChannelStatusHandle,
     allowlist: Vec<AllowlistEntry>,
     channel_name: String,
     channel_provider: &'static str,
@@ -646,6 +650,7 @@ async fn attempt_ws_connection(
     let result = run_ws_loop(ws_url, client_config, move |frame: Frame| {
         let inbound_tx = inbound_tx.clone();
         let channel_name = channel_name.clone();
+        let runtime_status = runtime_status.clone();
         let config = config.clone();
         let approval_manager = approval_manager.clone();
         let event_state = event_state.clone();
@@ -669,6 +674,7 @@ async fn attempt_ws_connection(
             let client = FeishuApiClient::new(&config.app_id, &config.app_secret);
             process_im_message_receive(
                 &channel_name,
+                &runtime_status,
                 channel_provider,
                 config_path_ev.as_ref(),
                 &config,
@@ -702,6 +708,7 @@ async fn attempt_ws_connection(
 /// Process a single im.message.receive_v1 event: allowlist/mention logic, file download, approval, forward to bus.
 async fn process_im_message_receive(
     channel_name: &str,
+    runtime_status: &ChannelStatusHandle,
     channel_provider: &str,
     config_path: Option<&PathBuf>,
     config: &FeishuConfig,
@@ -1125,7 +1132,10 @@ async fn process_im_message_receive(
         metadata: meta,
     };
     match inbound_tx.try_send(inbound) {
-        Ok(()) => info!("Feishu inbound message forwarded to bus"),
+        Ok(()) => {
+            runtime_status.record_received();
+            info!("Feishu inbound message forwarded to bus");
+        }
         Err(e) => error!("Failed to forward Feishu inbound message: {e}"),
     }
 }
@@ -1141,6 +1151,7 @@ impl Channel for FeishuChannel {
     }
 
     async fn start(&mut self) -> Result<()> {
+        self.runtime_status.mark_starting();
         info!("Feishu channel starting (WebSocket long-connection)");
         self.running = true;
 
@@ -1149,6 +1160,7 @@ impl Channel for FeishuChannel {
         let feishu_bot_open_id = match client.get_bot_info().await {
             Ok(info) => {
                 info!("Feishu bot connected successfully");
+                self.runtime_status.mark_connected();
                 if let Some(name) = &info.app_name {
                     info!("  Bot name: {name}");
                 }
@@ -1183,6 +1195,7 @@ impl Channel for FeishuChannel {
         let tool_result_preview_chars = self.tool_result_preview_chars;
         let workspace_dir = self.workspace_dir.clone();
         let outbound_tx_for_fail = self.outbound_tx.clone();
+        let runtime_status = self.runtime_status.clone();
 
         tokio::spawn(async move {
             while let Ok(msg) = outbound_rx.recv().await {
@@ -1234,9 +1247,14 @@ impl Channel for FeishuChannel {
                     }
                 };
                 if !content.is_empty() {
+                    let started = Instant::now();
                     if let Err(e) = FeishuChannel::send_text(&outbound_client, &msg.chat_id, &content).await
                     {
+                        runtime_status.record_error(format!("Feishu outbound send failed: {e:#}"));
                         error!("Feishu outbound send error: {e:#}");
+                    } else {
+                        runtime_status.record_sent();
+                        runtime_status.record_latency(started.elapsed().as_millis() as u64);
                     }
                 }
                 if !media_paths.is_empty() && workspace_dir.is_some() {
@@ -1289,7 +1307,10 @@ impl Channel for FeishuChannel {
                                             .send_message("chat_id", &msg.chat_id, msg_type, &content_str)
                                             .await
                                         {
+                                            runtime_status.record_error(format!("Feishu file send failed: {e:#}"));
                                             error!("Feishu send file message error: {e:#}");
+                                        } else {
+                                            runtime_status.record_sent();
                                         }
                                     }
                                     Err(e) => {
@@ -1323,6 +1344,7 @@ impl Channel for FeishuChannel {
         while self.running {
             let result = attempt_ws_connection(
                 self.inbound_tx.clone(),
+                self.runtime_status.clone(),
                 self.config.allowlist.clone(),
                 self.config.name.clone(),
                 "feishu",
@@ -1342,6 +1364,7 @@ impl Channel for FeishuChannel {
 
             match result {
                 Ok(()) => {
+                    self.runtime_status.mark_reconnecting(None);
                     if retry_state.attempts > 0 {
                         info!(
                             attempts = retry_state.attempts,
@@ -1353,6 +1376,7 @@ impl Channel for FeishuChannel {
                     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                 }
                 Err(FeishuWsError::Unrecoverable(msg)) => {
+                    self.runtime_status.mark_failed(msg.clone());
                     error!(
                         error = %msg,
                         "Feishu encountered unrecoverable error, stopping channel"
@@ -1364,6 +1388,7 @@ impl Channel for FeishuChannel {
                     ));
                 }
                 Err(FeishuWsError::Transient(msg)) => {
+                    self.runtime_status.mark_reconnecting(Some(&msg));
                     let should_retry = retry_state.record_failure(&retry_policy, msg.clone());
                     if should_retry {
                         let delay = retry_state.next_delay(&retry_policy);
@@ -1393,6 +1418,7 @@ impl Channel for FeishuChannel {
     }
 
     async fn stop(&mut self) -> Result<()> {
+        self.runtime_status.mark_stopped();
         info!("Feishu channel stopping");
         self.running = false;
         Ok(())

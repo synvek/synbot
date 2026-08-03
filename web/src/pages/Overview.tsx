@@ -33,8 +33,8 @@ const Overview: React.FC = () => {
   useEffect(() => {
     fetchStatus()
     
-    // Auto-refresh every 30 seconds
-    const interval = setInterval(fetchStatus, 30000)
+    // Auto-refresh runtime state every 5 seconds
+    const interval = setInterval(fetchStatus, 5000)
     
     return () => clearInterval(interval)
   }, [])
@@ -57,6 +57,10 @@ const Overview: React.FC = () => {
 
   if (!status) return null
 
+  const enabledChannelCount = status.channels.filter((channel) => channel.enabled).length
+  const connectedChannelCount = status.channels.filter((channel) => channel.status === 'connected').length
+  const failedChannelCount = status.channels.filter((channel) => channel.status === 'failed').length
+
   const cards = [
     {
       title: t('overview.systemStatus'),
@@ -72,8 +76,8 @@ const Overview: React.FC = () => {
     },
     {
       title: t('overview.channels'),
-      value: status.channel_count,
-      color: 'accent',
+      value: `${connectedChannelCount}/${enabledChannelCount}`,
+      color: failedChannelCount > 0 ? 'error' : 'accent',
       icon: ChannelsIcon,
     },
     {
@@ -127,7 +131,7 @@ const Overview: React.FC = () => {
       </div>
 
       <div className="mt-4 text-sm text-text-secondary">
-        {t('overview.lastUpdated')}: {new Date().toLocaleTimeString()} • {t('overview.autoRefresh')}: 30s
+        {t('overview.lastUpdated')}: {new Date().toLocaleTimeString()} • {t('overview.autoRefresh')}: 5s
       </div>
     </div>
   )

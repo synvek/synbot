@@ -11,9 +11,12 @@ pub mod dingtalk_stream;
 pub mod factory;
 pub mod matrix;
 pub mod slack;
+pub mod status;
 pub mod telegram;
 pub mod whatsapp;
 pub mod irc;
+
+pub use status::{ChannelStatusHandle, ChannelStatusRegistry, RuntimeChannelSnapshot, RuntimeChannelStatus};
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -199,6 +202,7 @@ pub struct ChannelStartContext {
     pub approval_manager: Option<Arc<crate::tools::approval::ApprovalManager>>,
     pub completion_model: Option<Arc<dyn crate::rig_provider::SynbotCompletionModel>>,
     pub outbound_tx: Option<broadcast::Sender<OutboundMessage>>,
+    pub runtime_status: ChannelStatusHandle,
     /// Config JSON path for reloading `pairings` without daemon restart (mtime cache).
     pub config_path: Option<std::path::PathBuf>,
 }

@@ -20,7 +20,7 @@ use tracing::{error, info, warn};
 
 use crate::bus::{InboundMessage, OutboundMessage};
 use crate::channels::file_handler;
-use crate::channels::{Channel, approval_formatter};
+use crate::channels::{Channel, ChannelStatusHandle, approval_formatter};
 use crate::config::{
     pairing_allows, pairing_message, pairings_from_config_file_cached, AllowlistEntry, SlackConfig,
 };
@@ -233,6 +233,7 @@ struct SlackPushStateInner {
     /// Bot token (xoxb-...) for downloading private file URLs.
     token: String,
     config_path: Option<PathBuf>,
+    runtime_status: ChannelStatusHandle,
 }
 
 // ---------------------------------------------------------------------------
@@ -250,6 +251,7 @@ pub struct SlackChannel {
     /// Workspace directory for resolving outbound file paths. Slack does not support multiple files in one message; we send one file per message.
     workspace_dir: Option<PathBuf>,
     config_path: Option<PathBuf>,
+    runtime_status: ChannelStatusHandle,
 }
 
 impl SlackChannel {
@@ -261,6 +263,7 @@ impl SlackChannel {
         tool_result_preview_chars: usize,
         workspace_dir: Option<PathBuf>,
         config_path: Option<PathBuf>,
+        runtime_status: ChannelStatusHandle,
     ) -> Result<Self> {
         // Warn if tokens look swapped (common cause of not_allowed_token_type)
         let token_trim = config.token.trim();
@@ -291,6 +294,7 @@ impl SlackChannel {
             running: false,
             workspace_dir,
             config_path,
+            runtime_status,
         })
     }
 
@@ -325,6 +329,7 @@ impl SlackChannel {
                 workspace_dir: self.workspace_dir.clone(),
                 token: self.config.token.clone(),
                 config_path: self.config_path.clone(),
+                runtime_status: self.runtime_status.clone(),
             }),
         };
 
@@ -364,6 +369,7 @@ impl SlackChannel {
             "If you see 'not_allowed_token_type': use appToken=xapp-... (App-level token) and token=xoxb-... (Bot token). Do not swap them."
         );
         if let Err(e) = socket_mode_listener.listen_for(&app_token).await {
+            self.runtime_status.mark_reconnecting(Some(&e.to_string()));
             error!(
                 channel = %self.config.name,
                 error = %e,
@@ -375,6 +381,7 @@ impl SlackChannel {
             channel = %self.config.name,
             "Slack Socket Mode registered, starting WebSocket connections (wait a few seconds, then send a message in Slack; if no response, check Event Subscriptions: message.channels, message.im, app_mention)"
         );
+        self.runtime_status.mark_connected();
         info!(
             channel = %self.config.name,
             "Tip: to see WebSocket connect/disconnect logs, run with RUST_LOG=slack_morphism=debug (not RSUT_LOG)"
@@ -427,6 +434,8 @@ async fn slack_push_events_handler(
             );
             if let Err(e) = state_inner.inbound_tx.send(inbound).await {
                 error!("Slack: failed to forward inbound message to bus: {e}");
+            } else {
+                state_inner.runtime_status.record_received();
             }
         }
         SlackInboundOutcome::Denied { chat_id } => {
@@ -686,6 +695,7 @@ impl Channel for SlackChannel {
     }
 
     async fn start(&mut self) -> Result<()> {
+        self.runtime_status.mark_starting();
         info!("Slack channel starting (Socket Mode)");
         self.running = true;
 
@@ -696,6 +706,7 @@ impl Channel for SlackChannel {
         let show_tool_calls = self.show_tool_calls;
         let tool_result_preview_chars = self.tool_result_preview_chars;
         let workspace_dir = self.workspace_dir.clone();
+        let runtime_status = self.runtime_status.clone();
 
         tokio::spawn(async move {
             while let Ok(msg) = outbound_rx.recv().await {
@@ -754,8 +765,13 @@ impl Channel for SlackChannel {
                             raw_channel_id.clone().into(),
                             SlackMessageContent::new().with_text(chunk.clone().into()),
                         );
+                        let started = Instant::now();
                         if let Err(e) = session.chat_post_message(&req).await {
+                            runtime_status.record_error(format!("Slack outbound send failed: {e:#}"));
                             error!("Slack outbound send error: {e:#}");
+                        } else {
+                            runtime_status.record_sent();
+                            runtime_status.record_latency(started.elapsed().as_millis() as u64);
                         }
                     }
                 }
@@ -775,7 +791,8 @@ impl Channel for SlackChannel {
                                     .file_name()
                                     .map(|n| n.to_string_lossy().into_owned())
                                     .unwrap_or_else(|| "file".to_string());
-                                if let Err(e) = slack_upload_file_v2(
+                                let started = Instant::now();
+                                match slack_upload_file_v2(
                                     &token_str,
                                     &raw_channel_id,
                                     &file_name,
@@ -783,7 +800,14 @@ impl Channel for SlackChannel {
                                 )
                                 .await
                                 {
-                                    error!("Slack file upload error: {e:#}");
+                                    Ok(()) => {
+                                        runtime_status.record_sent();
+                                        runtime_status.record_latency(started.elapsed().as_millis() as u64);
+                                    }
+                                    Err(e) => {
+                                        runtime_status.record_error(format!("Slack file upload failed: {e}"));
+                                        error!("Slack file upload error: {e}");
+                                    }
                                 }
                             }
                         }
@@ -796,6 +820,7 @@ impl Channel for SlackChannel {
     }
 
     async fn stop(&mut self) -> Result<()> {
+        self.runtime_status.mark_stopped();
         info!("Slack channel stopping");
         self.running = false;
         Ok(())

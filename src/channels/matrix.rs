@@ -24,7 +24,7 @@ use tokio::sync::{broadcast, broadcast::error::RecvError, mpsc};
 use tracing::{debug, error, info, warn};
 
 use crate::bus::{InboundMessage, OutboundMessage};
-use crate::channels::{approval_formatter, Channel};
+use crate::channels::{approval_formatter, Channel, ChannelStatusHandle};
 use crate::config::{
     pairing_allows, pairing_message, pairings_from_config_file_cached, sessions_root, MatrixConfig,
 };
@@ -156,6 +156,7 @@ pub struct MatrixChannel {
     client: Option<Arc<Client>>,
     workspace_dir: Option<PathBuf>,
     config_path: Option<PathBuf>,
+    runtime_status: ChannelStatusHandle,
 }
 
 impl MatrixChannel {
@@ -167,6 +168,7 @@ impl MatrixChannel {
         tool_result_preview_chars: usize,
         workspace_dir: Option<PathBuf>,
         config_path: Option<PathBuf>,
+        runtime_status: ChannelStatusHandle,
     ) -> Result<Self> {
         Ok(Self {
             config,
@@ -177,6 +179,7 @@ impl MatrixChannel {
             client: None,
             workspace_dir,
             config_path,
+            runtime_status,
         })
     }
 
@@ -330,6 +333,7 @@ impl Channel for MatrixChannel {
     }
 
     async fn start(&mut self) -> Result<()> {
+        self.runtime_status.mark_starting();
         info!(channel = %self.config.name, "Matrix channel starting");
 
         let client = self.ensure_client().await?;
@@ -342,6 +346,7 @@ impl Channel for MatrixChannel {
         let inbound_tx = self.inbound_tx.clone();
         let config_path = self.config_path.clone();
         let bot_user_id = matrix_bot_user_id(&self.config);
+        let runtime_status = self.runtime_status.clone();
 
         if enable_allowlist && allowlist.is_empty() {
             warn!(
@@ -360,6 +365,7 @@ impl Channel for MatrixChannel {
                 let inbound_tx = inbound_tx.clone();
                 let config_path = config_path.clone();
                 let bot_user_id = bot_user_id.clone();
+                let runtime_status = runtime_status.clone();
 
                 async move {
                     if room.state() != RoomState::Joined {
@@ -487,6 +493,7 @@ impl Channel for MatrixChannel {
                     if let Err(e) = inbound_tx.send(inbound).await {
                         error!("Matrix: failed to forward inbound message: {e}");
                     } else {
+                        runtime_status.record_received();
                         info!(
                             room_id = %room_id,
                             sender = %sender,
@@ -504,6 +511,7 @@ impl Channel for MatrixChannel {
         let show_tool_calls = self.show_tool_calls;
         let tool_result_preview_chars = self.tool_result_preview_chars;
         let workspace_dir = self.workspace_dir.clone();
+        let runtime_status_out = self.runtime_status.clone();
 
         tokio::spawn(async move {
             loop {
@@ -568,10 +576,15 @@ impl Channel for MatrixChannel {
                         Some(room) => {
                             let chunks = split_message(&content, MATRIX_MAX_MESSAGE_LEN);
                             for chunk in chunks {
+                                let started = std::time::Instant::now();
                                 if let Err(e) =
                                     room.send(RoomMessageEventContent::text_plain(&chunk)).await
                                 {
+                                    runtime_status_out.record_error(format!("Matrix outbound send failed: {e:#}"));
                                     error!("Matrix outbound send error: {e:#}");
+                                } else {
+                                    runtime_status_out.record_sent();
+                                    runtime_status_out.record_latency(started.elapsed().as_millis() as u64);
                                 }
                             }
                         }
@@ -614,6 +627,7 @@ impl Channel for MatrixChannel {
         });
 
         let sync_token = client.sync_once(SyncSettings::default()).await?.next_batch;
+        self.runtime_status.mark_connected();
 
         let joined = client.joined_rooms();
         info!(
@@ -649,6 +663,7 @@ impl Channel for MatrixChannel {
     }
 
     async fn stop(&mut self) -> Result<()> {
+        self.runtime_status.mark_stopped();
         info!(channel = %self.config.name, "Matrix channel stopping");
         Ok(())
     }

@@ -36,6 +36,8 @@ pub async fn cmd_start() -> Result<()> {
     let mut cfg = config::load_config(None)?;
     let _pid_guard = write_pid_file()?;
     let shared_config = std::sync::Arc::new(tokio::sync::RwLock::new(cfg.clone()));
+    let runtime_status = std::sync::Arc::new(crate::channels::ChannelStatusRegistry::new());
+    runtime_status.mark_running();
 
     // Create log buffer and channel for web UI before logging init
     let log_buffer = crate::web::create_log_buffer(1000);
@@ -123,7 +125,6 @@ pub async fn cmd_start() -> Result<()> {
     let mut bus = crate::bus::MessageBus::new();
     let inbound_tx = bus.inbound_sender();
     let inbound_rx = bus.take_inbound_receiver().unwrap();
-
     // Create approval manager with outbound sender so approval requests reach Web/other channels
     let approval_manager = std::sync::Arc::new(
         crate::tools::approval::ApprovalManager::with_outbound(bus.outbound_tx_clone()),
@@ -291,8 +292,15 @@ pub async fn cmd_start() -> Result<()> {
     )
     .await;
     let loop_ref = std::sync::Arc::new(tokio::sync::Mutex::new(agent_loop));
+    let runtime_status_for_agent = std::sync::Arc::clone(&runtime_status);
     tokio::spawn(async move {
-        if let Err(e) = crate::agent::r#loop::AgentLoop::run(loop_ref, inbound_rx).await {
+        if let Err(e) = crate::agent::r#loop::AgentLoop::run_with_runtime_status(
+            loop_ref,
+            inbound_rx,
+            Some(runtime_status_for_agent),
+        )
+        .await
+        {
             tracing::error!("Agent loop error: {e:#}");
         }
     });
@@ -320,11 +328,25 @@ pub async fn cmd_start() -> Result<()> {
             Some(f) => f,
             None => continue,
         };
-        for config_value in configs {
+        for (index, config_value) in configs.into_iter().enumerate() {
             let enabled = config_value
                 .get("enabled")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
+            let name = config_value
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or(&type_name)
+                .to_string();
+            let instance_id = format!("{type_name}:{index}:{name}");
+            let status_handle = runtime_status.register(
+                instance_id,
+                type_name.clone(),
+                name,
+                enabled,
+                type_name != "whatsapp",
+                true,
+            );
             if !enabled {
                 continue;
             }
@@ -344,19 +366,29 @@ pub async fn cmd_start() -> Result<()> {
                 approval_manager: Some(std::sync::Arc::clone(&approval_manager)),
                 completion_model: Some(std::sync::Arc::clone(&completion_model)),
                 outbound_tx: Some(bus.outbound_tx_clone()),
+                runtime_status: status_handle.clone(),
                 config_path: Some(config::config_path()),
             };
             let factory = std::sync::Arc::clone(&factory);
             let type_name = type_name.clone();
             match factory.create(config_value, ctx) {
                 Ok(mut ch) => {
+                    let status_handle = status_handle.clone();
                     tokio::spawn(async move {
-                        if let Err(e) = ch.start().await {
-                            tracing::error!(channel = %type_name, "Channel error: {e:#}");
+                        status_handle.mark_starting();
+                        match ch.start().await {
+                            Ok(()) => status_handle.mark_stopped(),
+                            Err(e) => {
+                                status_handle.mark_failed(format!("{e:#}"));
+                                tracing::error!(channel = %type_name, "Channel error: {e:#}");
+                            }
                         }
                     });
                 }
-                Err(e) => tracing::error!(channel = %type_name, "Channel init error: {e:#}"),
+                Err(e) => {
+                    status_handle.mark_failed(format!("channel initialization failed: {e:#}"));
+                    tracing::error!(channel = %type_name, "Channel init error: {e:#}");
+                }
             }
         }
     }
@@ -387,6 +419,7 @@ pub async fn cmd_start() -> Result<()> {
             log_buffer,
             approval_manager,
             permission_policy,
+            std::sync::Arc::clone(&runtime_status),
         );
 
         // Run web server in the main task (it will block until Ctrl+C)
@@ -405,6 +438,7 @@ pub async fn cmd_start() -> Result<()> {
         tokio::signal::ctrl_c().await?;
         info!("Shutting down...");
     }
+    runtime_status.mark_shutdown();
     Ok(())
 }
 

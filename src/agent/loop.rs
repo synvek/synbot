@@ -125,7 +125,16 @@ impl AgentLoop {
     /// loop can recv without holding the lock (allowing the spawned task to run).
     pub async fn run(
         loop_ref: Arc<Mutex<Self>>,
+        inbound_rx: mpsc::Receiver<InboundMessage>,
+    ) -> Result<()> {
+        Self::run_with_runtime_status(loop_ref, inbound_rx, None).await
+    }
+
+    /// Run the agent loop while recording inbound activity for channel health snapshots.
+    pub async fn run_with_runtime_status(
+        loop_ref: Arc<Mutex<Self>>,
         mut inbound_rx: mpsc::Receiver<InboundMessage>,
+        _runtime_status: Option<Arc<crate::channels::ChannelStatusRegistry>>,
     ) -> Result<()> {
         info!("Agent loop started");
         let mut join_set: JoinSet<String> = JoinSet::new();

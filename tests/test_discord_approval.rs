@@ -34,6 +34,7 @@ fn create_test_channel(
         2048,
         None,
         None,
+        synbot::channels::ChannelStatusHandle::detached(),
     );
     if let Some(manager) = approval_manager {
         channel = channel.with_approval_manager(manager);

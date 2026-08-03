@@ -12,7 +12,7 @@ use tokio::sync::{broadcast, mpsc};
 use tracing::{info, warn};
 
 use crate::bus::{InboundMessage, OutboundMessage};
-use crate::channels::Channel;
+use crate::channels::{Channel, ChannelStatusHandle};
 use crate::config::{
     pairing_allows, pairings_from_config_file_cached, pairing_message, AllowlistEntry, WhatsAppConfig,
 };
@@ -29,6 +29,7 @@ struct WhatsAppEventState {
     agent: String,
     channel_name: String,
     config_path: Option<PathBuf>,
+    runtime_status: ChannelStatusHandle,
 }
 
 pub struct WhatsAppChannel {
@@ -37,6 +38,7 @@ pub struct WhatsAppChannel {
     #[allow(dead_code)]
     outbound_rx: Option<broadcast::Receiver<OutboundMessage>>,
     config_path: Option<PathBuf>,
+    runtime_status: ChannelStatusHandle,
 }
 
 impl WhatsAppChannel {
@@ -45,12 +47,14 @@ impl WhatsAppChannel {
         inbound_tx: mpsc::Sender<InboundMessage>,
         outbound_rx: broadcast::Receiver<OutboundMessage>,
         config_path: Option<PathBuf>,
+        runtime_status: ChannelStatusHandle,
     ) -> Self {
         Self {
             config,
             inbound_tx,
             outbound_rx: Some(outbound_rx),
             config_path,
+            runtime_status,
         }
     }
 }
@@ -62,6 +66,7 @@ impl Channel for WhatsAppChannel {
     }
 
     async fn start(&mut self) -> Result<()> {
+        self.runtime_status.mark_starting();
         if self.config.session_dir.trim().is_empty() {
             warn!(
                 channel = %self.config.name,
@@ -87,6 +92,7 @@ impl Channel for WhatsAppChannel {
             agent: self.config.agent.clone(),
             channel_name: self.config.name.clone(),
             config_path: self.config_path.clone(),
+            runtime_status: self.runtime_status.clone(),
         });
 
         let mut bot = Bot::builder()
@@ -98,6 +104,7 @@ impl Channel for WhatsAppChannel {
                 async move {
                     match event {
                         Event::PairingQrCode { code, .. } => {
+                            state.runtime_status.mark_connected();
                             info!(
                                 channel = %state.channel_name,
                                 "whatsapp pairing QR received:\n{}",
@@ -105,6 +112,7 @@ impl Channel for WhatsAppChannel {
                             );
                         }
                         Event::PairingCode { code, .. } => {
+                            state.runtime_status.mark_connected();
                             info!(
                                 channel = %state.channel_name,
                                 "whatsapp pairing code received: {}",
@@ -112,6 +120,7 @@ impl Channel for WhatsAppChannel {
                             );
                         }
                         Event::Message(msg, info) => {
+                            state.runtime_status.mark_connected();
                             let sender_debug = format!("{:?}", info.source.sender);
                             let sender_id: String =
                                 sender_debug.chars().filter(|c| c.is_ascii_digit()).collect();
@@ -161,6 +170,8 @@ impl Channel for WhatsAppChannel {
                                     channel = %state.channel_name,
                                     "whatsapp: failed to forward inbound message to bus: {e}"
                                 );
+                            } else {
+                                state.runtime_status.record_received();
                             }
                         }
                         _ => {}
@@ -182,6 +193,7 @@ impl Channel for WhatsAppChannel {
     }
 
     async fn stop(&mut self) -> Result<()> {
+        self.runtime_status.mark_stopped();
         info!(channel = %self.config.name, "whatsapp stopping");
         Ok(())
     }

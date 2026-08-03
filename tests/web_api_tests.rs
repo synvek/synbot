@@ -28,7 +28,9 @@ async fn create_test_state() -> AppState {
     let (inbound_tx, _) = tokio::sync::mpsc::channel(100);
     let (outbound_tx, _) = tokio::sync::broadcast::channel(100);
     let approval_manager = Arc::new(ApprovalManager::new());
-    common::create_test_app_state_with_approval(inbound_tx, outbound_tx, approval_manager).await
+    let state = common::create_test_app_state_with_approval(inbound_tx, outbound_tx, approval_manager).await;
+    state.runtime_status.mark_running();
+    state
 }
 
 fn basic_auth_header(username: &str, password: &str) -> String {
@@ -559,4 +561,45 @@ async fn test_get_pending_approvals_returns_200() {
     let body: serde_json::Value = test::read_body_json(resp).await;
     assert_eq!(body["success"], true);
     assert!(body["data"].is_array());
+}
+
+#[actix_web::test]
+async fn test_runtime_channel_snapshot_is_not_derived_from_enabled_config() {
+    let state = create_test_state().await;
+    let handle = state.runtime_status.register(
+        "matrix:0:primary".into(),
+        "matrix".into(),
+        "primary".into(),
+        true,
+        true,
+        true,
+    );
+    handle.mark_starting();
+    handle.mark_connected();
+    handle.record_received();
+    handle.record_sent();
+    handle.record_latency(17);
+
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(state))
+            .route("/api/status", web::get().to(api::get_status)),
+    )
+    .await;
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::get().uri("/api/status").to_request(),
+    )
+    .await;
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    let channel = body["data"]["channels"]
+        .as_array()
+        .and_then(|channels| channels.iter().find(|c| c["instance_id"] == "matrix:0:primary"))
+        .expect("matrix runtime snapshot");
+    assert_eq!(channel["status"], "connected");
+    assert_eq!(channel["last_latency_ms"], 17);
+    assert!(channel["started_at"].is_string());
+    assert!(channel["last_connected_at"].is_string());
+    assert!(channel["last_received_at"].is_string());
+    assert!(channel["last_sent_at"].is_string());
 }

@@ -13,6 +13,31 @@ export interface PaginatedResponse<T> {
 }
 
 // System Status
+export type RuntimeChannelStatus =
+  | 'starting'
+  | 'connected'
+  | 'reconnecting'
+  | 'failed'
+  | 'disabled'
+  | 'stopped';
+
+export interface RuntimeChannelSnapshot {
+  instance_id: string;
+  channel_type: string;
+  name: string;
+  enabled: boolean;
+  status: RuntimeChannelStatus;
+  started_at: string | null;
+  last_connected_at: string | null;
+  last_error: string | null;
+  reconnect_count: number;
+  last_received_at: string | null;
+  last_sent_at: string | null;
+  last_latency_ms: number | null;
+  supports_send: boolean;
+  supports_receive: boolean;
+}
+
 export interface SystemStatus {
   running: boolean;
   uptime_secs: number;
@@ -20,6 +45,7 @@ export interface SystemStatus {
   channel_count: number;
   cron_job_count: number;
   agent_count: number;
+  channels: RuntimeChannelSnapshot[];
 }
 
 // Session Types
@@ -54,14 +80,8 @@ export interface SessionDetail {
 }
 
 // Channel Types
-export type ChannelStatus = 'connected' | 'disconnected' | 'error' | 'disabled';
-
-export interface ChannelInfo {
-  name: string;
-  enabled: boolean;
-  status: ChannelStatus;
-  config?: Record<string, unknown>;
-}
+export type ChannelStatus = RuntimeChannelStatus;
+export type ChannelInfo = RuntimeChannelSnapshot;
 
 // Cron Job Types
 export interface CronJobState {

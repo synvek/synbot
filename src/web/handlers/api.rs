@@ -110,7 +110,7 @@ impl From<anyhow::Error> for ApiError {
     }
 }
 
-/// System status response
+/// System status response.
 #[derive(Serialize)]
 pub struct SystemStatus {
     pub running: bool,
@@ -119,54 +119,38 @@ pub struct SystemStatus {
     pub channel_count: usize,
     pub cron_job_count: usize,
     pub agent_count: usize,
+    pub channels: Vec<crate::channels::RuntimeChannelSnapshot>,
 }
 
-/// GET /api/status - Returns system status
+/// GET /api/status - Returns runtime status for the daemon and every channel instance.
 pub async fn get_status(state: web::Data<AppState>) -> Result<HttpResponse> {
-    let cfg = state.config.read().await;
+    let (agent_count, channels) = {
+        let cfg = state.config.read().await;
+        (
+            1 + cfg.main_agent.agents.len(),
+            state.runtime_status.snapshots(),
+        )
+    };
 
-    // Count enabled channel connections
-    let channel_count = cfg
-        .channels
-        .telegram
-        .iter()
-        .filter(|c| c.enabled)
-        .count()
-        + cfg
-            .channels
-            .discord
-            .iter()
-            .filter(|c| c.enabled)
-            .count()
-        + cfg
-            .channels
-            .feishu
-            .iter()
-            .filter(|c| c.enabled)
-            .count();
-
-    // Get session count
     let session_count = {
         let sm = state.session_manager.read().await;
         sm.session_count()
     };
 
-    // Get cron job count
     let cron_job_count = {
         let cron = state.cron_service.read().await;
         cron.job_count()
     };
 
-    // Get agent count
-    let agent_count = 1 + cfg.main_agent.agents.len();
-
+    let channel_count = channels.iter().filter(|channel| channel.enabled).count();
     let status = SystemStatus {
-        running: true,
-        uptime_secs: 0, // TODO: Track actual uptime
+        running: state.runtime_status.is_running(),
+        uptime_secs: state.runtime_status.uptime_secs(),
         session_count,
         channel_count,
         cron_job_count,
         agent_count,
+        channels,
     };
 
     Ok(HttpResponse::Ok().json(ApiResponse::success(status)))
@@ -382,108 +366,12 @@ pub async fn get_session_by_id(
     Ok(HttpResponse::Ok().json(ApiResponse::success(detail)))
 }
 
-/// Channel information for API responses
-#[derive(Serialize)]
-pub struct ChannelInfo {
-    pub name: String,
-    pub enabled: bool,
-    pub status: ChannelStatus,
-}
+/// Channel information for API responses.
+pub type ChannelInfo = crate::channels::RuntimeChannelSnapshot;
 
-/// Channel connection status
-#[derive(Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ChannelStatus {
-    Connected,
-    Disconnected,
-    Error,
-    Disabled,
-}
-
-/// GET /api/channels - Returns list of channel connections with status
+/// GET /api/channels - Returns runtime state for every configured channel instance.
 pub async fn get_channels(state: web::Data<AppState>) -> Result<HttpResponse> {
-    let cfg = state.config.read().await;
-    let mut channels = Vec::new();
-    for c in &cfg.channels.telegram {
-        channels.push(ChannelInfo {
-            name: c.name.clone(),
-            enabled: c.enabled,
-            status: if c.enabled {
-                ChannelStatus::Connected
-            } else {
-                ChannelStatus::Disabled
-            },
-        });
-    }
-    for c in &cfg.channels.discord {
-        channels.push(ChannelInfo {
-            name: c.name.clone(),
-            enabled: c.enabled,
-            status: if c.enabled {
-                ChannelStatus::Connected
-            } else {
-                ChannelStatus::Disabled
-            },
-        });
-    }
-    for c in &cfg.channels.feishu {
-        channels.push(ChannelInfo {
-            name: c.name.clone(),
-            enabled: c.enabled,
-            status: if c.enabled {
-                ChannelStatus::Connected
-            } else {
-                ChannelStatus::Disabled
-            },
-        });
-    }
-    for c in &cfg.channels.slack {
-        channels.push(ChannelInfo {
-            name: c.name.clone(),
-            enabled: c.enabled,
-            status: if c.enabled {
-                ChannelStatus::Connected
-            } else {
-                ChannelStatus::Disabled
-            },
-        });
-    }
-    for c in &cfg.channels.email {
-        channels.push(ChannelInfo {
-            name: c.name.clone(),
-            enabled: c.enabled,
-            status: if c.enabled {
-                ChannelStatus::Connected
-            } else {
-                ChannelStatus::Disabled
-            },
-        });
-    }
-    for c in &cfg.channels.matrix {
-        channels.push(ChannelInfo {
-            name: c.name.clone(),
-            enabled: c.enabled,
-            status: if c.enabled {
-                ChannelStatus::Connected
-            } else {
-                ChannelStatus::Disabled
-            },
-        });
-    }
-    if let Some(list) = &cfg.channels.whatsapp {
-        for c in list {
-            channels.push(ChannelInfo {
-                name: c.name.clone(),
-                enabled: c.enabled,
-                status: if c.enabled {
-                    ChannelStatus::Connected
-                } else {
-                    ChannelStatus::Disabled
-                },
-            });
-        }
-    }
-    Ok(HttpResponse::Ok().json(ApiResponse::success(channels)))
+    Ok(HttpResponse::Ok().json(ApiResponse::success(state.runtime_status.snapshots())))
 }
 
 /// Cron job information for API responses
