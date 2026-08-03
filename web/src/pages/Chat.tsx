@@ -8,7 +8,8 @@ export default function Chat() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { t } = useI18n();
   
-  const wsUrl = `ws://${window.location.hostname}:${window.location.port || '8080'}/ws/chat`;
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${wsProtocol}//${window.location.host}/ws/chat`;
   const { connected, messages, toolProgressList, send, sendApprovalResponse, sessionId } = useWebSocket({
     url: wsUrl,
     autoConnect: true,

@@ -1,12 +1,26 @@
 use actix_web::{
     body::EitherBody,
+    cookie::{Cookie, SameSite},
     dev::{forward_ready, Service, ServiceRequest, ServiceResponse, Transform},
     Error, HttpMessage, HttpResponse,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use futures_util::future::LocalBoxFuture;
+use std::collections::HashSet;
 use std::future::{ready, Ready};
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
+use uuid::Uuid;
+
+const AUTH_COOKIE_NAME: &str = "synbot_auth";
+
+fn decode_basic_credentials(value: &str) -> Option<(String, String)> {
+    let encoded = value.strip_prefix("Basic ")?;
+    let decoded = BASE64.decode(encoded).ok()?;
+    let decoded = String::from_utf8(decoded).ok()?;
+    let (username, password) = decoded.split_once(':')?;
+    Some((username.to_string(), password.to_string()))
+}
 
 use crate::config::WebAuthConfig;
 use crate::web::handlers::api::ErrorResponse;
@@ -15,11 +29,15 @@ use crate::web::handlers::api::ErrorResponse;
 #[derive(Clone)]
 pub struct BasicAuth {
     config: Option<WebAuthConfig>,
+    sessions: Arc<Mutex<HashSet<String>>>,
 }
 
 impl BasicAuth {
     pub fn new(config: Option<WebAuthConfig>) -> Self {
-        Self { config }
+        Self {
+            config,
+            sessions: Arc::new(Mutex::new(HashSet::new())),
+        }
     }
 }
 
@@ -39,6 +57,7 @@ where
         ready(Ok(BasicAuthMiddleware {
             service: Rc::new(service),
             config: self.config.clone(),
+            sessions: self.sessions.clone(),
         }))
     }
 }
@@ -46,6 +65,7 @@ where
 pub struct BasicAuthMiddleware<S> {
     service: Rc<S>,
     config: Option<WebAuthConfig>,
+    sessions: Arc<Mutex<HashSet<String>>>,
 }
 
 impl<S, B> Service<ServiceRequest> for BasicAuthMiddleware<S>
@@ -63,55 +83,66 @@ where
     fn call(&self, req: ServiceRequest) -> Self::Future {
         let service = self.service.clone();
         let config = self.config.clone();
+        let sessions = self.sessions.clone();
 
         Box::pin(async move {
-            // If auth is not configured, allow all requests
+            // If auth is not configured, allow all requests.
             let Some(auth_config) = config else {
-                return service.call(req).await.map(ServiceResponse::map_into_left_body);
+                return service
+                    .call(req)
+                    .await
+                    .map(ServiceResponse::map_into_left_body);
             };
 
-            // Check if the request has Authorization header
-            let auth_header = req.headers().get("Authorization");
+            let basic_authorized = req
+                .headers()
+                .get("Authorization")
+                .and_then(|value| value.to_str().ok())
+                .and_then(decode_basic_credentials)
+                .is_some_and(|(username, password)| {
+                    username == auth_config.username && password == auth_config.password
+                });
 
-            let authorized = if let Some(auth_value) = auth_header {
-                // Parse Basic Auth header
-                if let Ok(auth_str) = auth_value.to_str() {
-                    if let Some(credentials) = auth_str.strip_prefix("Basic ") {
-                        // Decode base64 credentials
-                        if let Ok(decoded) = BASE64.decode(credentials) {
-                            if let Ok(decoded_str) = String::from_utf8(decoded) {
-                                // Split username:password
-                                if let Some((username, password)) = decoded_str.split_once(':') {
-                                    // Verify credentials
-                                    username == auth_config.username
-                                        && password == auth_config.password
-                                } else {
-                                    false
-                                }
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        }
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            } else {
-                false
-            };
+            // Native browser WebSocket clients cannot set Authorization headers, but they do
+            // send same-origin HttpOnly cookies during the upgrade request.
+            let session_authorized = req
+                .cookie(AUTH_COOKIE_NAME)
+                .is_some_and(|cookie| sessions.lock().unwrap().contains(cookie.value()));
 
-            if authorized {
-                // Store authenticated user in request extensions
+            if basic_authorized || session_authorized {
                 req.extensions_mut().insert(AuthenticatedUser {
                     username: auth_config.username.clone(),
                 });
-                service.call(req).await.map(ServiceResponse::map_into_left_body)
+
+                let session_token = if basic_authorized {
+                    let token = Uuid::new_v4().to_string();
+                    sessions.lock().unwrap().insert(token.clone());
+                    Some(token)
+                } else {
+                    None
+                };
+
+                let response = service.call(req).await?;
+                let mut response = response.map_into_left_body();
+
+                if let Some(token) = session_token {
+                    let mut cookie = Cookie::new(AUTH_COOKIE_NAME, token);
+                    cookie.set_path("/");
+                    cookie.set_http_only(true);
+                    cookie.set_same_site(Some(SameSite::Lax));
+                    response
+                        .response_mut()
+                        .add_cookie(&cookie)
+                        .map_err(|error| {
+                            actix_web::error::ErrorInternalServerError(format!(
+                                "Failed to set authentication cookie: {error}"
+                            ))
+                        })?;
+                }
+
+                Ok(response)
             } else {
-                // Return 401 Unauthorized
+                // Return 401 for every protected route, including WebSocket upgrades.
                 let error_response = ErrorResponse::new(
                     "Authentication required".to_string(),
                     "UNAUTHORIZED".to_string(),

@@ -5,27 +5,16 @@ use crate::web::{BasicAuth, Cors};
 use actix_web::{web, App, HttpServer};
 use anyhow::{Context, Result};
 
-/// Start the web server with the given configuration and application state
-pub async fn start_web_server(config: WebConfig, state: AppState) -> Result<()> {
-    if !config.enabled {
-        tracing::info!("Web server is disabled in configuration");
-        return Ok(());
-    }
-
-    let bind_addr = format!("{}:{}", config.host, config.port);
-    tracing::info!("Starting web server on {}", bind_addr);
-
-    let auth = BasicAuth::new(config.auth.clone());
-    let cors = Cors::new(config.cors_origins.clone());
-
-    HttpServer::new(move || {
-        App::new()
-            .wrap(cors.clone())
-            .app_data(web::Data::new(state.clone()))
-            // API routes (protected by auth if configured)
+/// Configure the web application routes.
+///
+/// REST and WebSocket endpoints share the same authentication middleware. Static
+/// assets remain public so unauthenticated users can load the login page.
+pub fn configure_routes(cfg: &mut web::ServiceConfig, state: AppState, auth: BasicAuth) {
+    cfg.app_data(web::Data::new(state)).service(
+        web::scope("")
+            .wrap(auth)
             .service(
                 web::scope("/api")
-                    .wrap(auth.clone())
                     .route("/status", web::get().to(api::get_status))
                     .route("/sessions", web::get().to(api::get_sessions))
                     .route("/sessions/{id}", web::get().to(api::get_session_by_id))
@@ -40,14 +29,35 @@ pub async fn start_web_server(config: WebConfig, state: AppState) -> Result<()> 
                     .route("/logs", web::get().to(api::get_logs))
                     .route("/approvals/history", web::get().to(api::get_approval_history))
                     .route("/approvals/pending", web::get().to(api::get_pending_approvals))
-                    .route("/approvals/{id}/respond", web::post().to(api::submit_approval_response))
+                    .route("/approvals/{id}/respond", web::post().to(api::submit_approval_response)),
             )
-            // WebSocket routes
             .route("/ws/chat", web::get().to(ws::ws_chat))
-            .route("/ws/logs", web::get().to(ws::ws_logs))
-            // Static files (root and catch-all for SPA routing)
-            .route("/", web::get().to(static_files::serve_index))
-            .route("/{path:.*}", web::get().to(static_files::serve_static))
+            .route("/ws/logs", web::get().to(ws::ws_logs)),
+    );
+
+    cfg.route("/", web::get().to(static_files::serve_index))
+        .route("/{path:.*}", web::get().to(static_files::serve_static));
+}
+
+/// Start the web server with the given configuration and application state
+pub async fn start_web_server(config: WebConfig, state: AppState) -> Result<()> {
+    if !config.enabled {
+        tracing::info!("Web server is disabled in configuration");
+        return Ok(());
+    }
+
+    let bind_addr = format!("{}:{}", config.host, config.port);
+    tracing::info!("Starting web server on {}", bind_addr);
+
+    let auth = BasicAuth::new(config.auth.clone());
+    let cors = Cors::new(config.cors_origins.clone());
+
+    HttpServer::new(move || {
+        let state = state.clone();
+        let auth = auth.clone();
+        App::new()
+            .wrap(cors.clone())
+            .configure(move |cfg| configure_routes(cfg, state.clone(), auth.clone()))
     })
     .bind(&bind_addr)
     .with_context(|| format!("Failed to bind web server to {}", bind_addr))?
