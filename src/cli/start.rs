@@ -145,16 +145,7 @@ pub async fn cmd_start() -> Result<()> {
 
     // Optional sandbox: create and start app/tool sandboxes when configured.
     let sandbox_context = init_sandbox_if_configured(&cfg).await;
-    let tool_sandbox_delegate: crate::sandbox::SandboxContext =
-        match &sandbox_context {
-            None => None,
-            Some((mgr, Some(id), kind)) => Some(crate::sandbox::ToolSandboxDelegate::Local {
-                manager: std::sync::Arc::clone(mgr),
-                sandbox_id: id.clone(),
-                kind: *kind,
-            }),
-            Some((_, None, _)) => None,
-        };
+    let tool_sandbox_delegate = tool_sandbox_delegate_from_startup(&sandbox_context);
     let tool_sandbox_exec_kind = tool_sandbox_delegate.as_ref().map(|d| d.exec_kind());
 
     // Shared session state (in-memory + persistence); load before agent loop and tools
@@ -446,7 +437,24 @@ pub async fn cmd_start() -> Result<()> {
 /// Returns (manager, Some(tool_sandbox_id)) when tool sandbox is running (exec uses it),
 /// or (manager, None) when only app sandbox is running (keeps manager alive so app sandbox is not stopped).
 /// When we are already inside the app sandbox (child of `synbot sandbox`), we skip creating/starting app sandbox.
-async fn init_sandbox_if_configured(
+pub(crate) fn tool_sandbox_delegate_from_startup(
+    sandbox_context: &Option<(
+        std::sync::Arc<crate::sandbox::SandboxManager>,
+        Option<String>,
+        crate::sandbox::types::ToolSandboxExecKind,
+    )>,
+) -> crate::sandbox::SandboxContext {
+    match sandbox_context {
+        Some((mgr, Some(id), kind)) => Some(crate::sandbox::ToolSandboxDelegate::Local {
+            manager: std::sync::Arc::clone(mgr),
+            sandbox_id: id.clone(),
+            kind: *kind,
+        }),
+        _ => None,
+    }
+}
+
+pub(crate) async fn init_sandbox_if_configured(
     cfg: &config::Config,
 ) -> Option<(
     std::sync::Arc<crate::sandbox::SandboxManager>,
@@ -484,7 +492,7 @@ async fn init_sandbox_if_configured(
                 match manager.create_tool_sandbox(sandbox_config).await {
                     Ok(id) => {
                         if let Err(e) = manager.start_sandbox(&id).await {
-                            warn!(sandbox_id = %id, error = %e, "Tool sandbox start failed (exec will run on host)");
+                            warn!(sandbox_id = %id, error = %e, "Tool sandbox start failed (exec will be blocked in Safe mode)");
                         } else {
                             info!(sandbox_id = %id, "Tool sandbox started (exec runs in sandbox)");
                             let kind = config::tool_sandbox_exec_kind(tool_cfg);
@@ -496,7 +504,7 @@ async fn init_sandbox_if_configured(
                         warn!(
                             error = %e,
                             requested_type = %requested,
-                            "Tool sandbox creation failed (exec will run on host). \
+                            "Tool sandbox creation failed (exec will be blocked in Safe mode; other profiles may run on host). \
                              If you accept a less isolated backend, set toolSandbox.sandboxType in config \
                              (e.g. \"plain-docker\" when gVisor is not available) and restart."
                         );

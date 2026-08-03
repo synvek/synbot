@@ -254,6 +254,8 @@
         "keepRecentMessages": "保留最近消息条数（可选数字）"
       },
       "tools": {
+        "securityProfile": "安全模式",
+        "securityProfileHint": "Safe 开启审批、工作区限制并优先使用工具沙盒；Developer 自动允许常见低风险命令；Trusted 保持旧行为。",
         "exec": "Exec 工具",
         "execTimeout": "超时（秒）",
         "restrictToWorkspace": "限制在工作区内",

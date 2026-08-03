@@ -1731,8 +1731,28 @@ pub struct SandboxMonitoringConfig {
 }
 
 // ---------------------------------------------------------------------------
-// Root config
+// Security profile and root config
 // ---------------------------------------------------------------------------
+
+/// Preset security posture for tools that can execute commands or access data.
+///
+/// `Safe` is the default for new installations. Existing configuration files
+/// without an explicit profile are migrated to `Trusted` so their effective
+/// behavior is not changed silently.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum SecurityProfile {
+    Safe,
+    Developer,
+    Trusted,
+}
+
+impl Default for SecurityProfile {
+    fn default() -> Self {
+        Self::Safe
+    }
+}
 
 fn default_true() -> bool {
     true
@@ -1742,10 +1762,85 @@ fn default_tool_result_preview_chars() -> u32 {
     2048
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+fn object_field<'a>(object: &'a mut serde_json::Map<String, serde_json::Value>, key: &str) -> &'a mut serde_json::Map<String, serde_json::Value> {
+    let value = object
+        .entry(key.to_string())
+        .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+    if !value.is_object() {
+        *value = serde_json::Value::Object(serde_json::Map::new());
+    }
+    value.as_object_mut().expect("object field was just initialized")
+}
+
+/// Apply only missing profile defaults to a raw config value. Explicit values
+/// remain authoritative, including explicit opt-outs in Safe/Developer mode.
+fn apply_security_profile_defaults(value: &mut serde_json::Value, profile: SecurityProfile) {
+    let Some(root) = value.as_object_mut() else {
+        return;
+    };
+
+    // Safe mode prefers an isolated execution backend. An explicitly
+    // configured null still means the user opted out and is preserved.
+    if matches!(profile, SecurityProfile::Safe) {
+        root.entry("toolSandbox".to_string())
+            .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
+    }
+
+    let tools = object_field(root, "tools");
+    let exec = object_field(tools, "exec");
+
+    match profile {
+        SecurityProfile::Safe => {
+            {
+                let permissions = object_field(exec, "permissions");
+                permissions
+                    .entry("enabled".to_string())
+                    .or_insert(serde_json::Value::Bool(true));
+            }
+            exec.entry("restrictToWorkspace".to_string())
+                .or_insert(serde_json::Value::Bool(true));
+        }
+        SecurityProfile::Developer => {
+            {
+                let permissions = object_field(exec, "permissions");
+                permissions
+                    .entry("enabled".to_string())
+                    .or_insert(serde_json::Value::Bool(true));
+                permissions
+                    .entry("defaultLevel".to_string())
+                    .or_insert(serde_json::Value::String("require_approval".to_string()));
+            }
+            exec.entry("restrictToWorkspace".to_string())
+                .or_insert(serde_json::Value::Bool(true));
+            object_field(exec, "permissions")
+                .entry("rules".to_string())
+                .or_insert_with(|| {
+                    serde_json::json!([
+                        { "pattern": "pwd", "level": "allow", "description": "Read the current working directory" },
+                        { "pattern": "ls*", "level": "allow", "description": "List workspace files" },
+                        { "pattern": "dir*", "level": "allow", "description": "List workspace files" },
+                        { "pattern": "git status*", "level": "allow", "description": "Inspect Git status" },
+                        { "pattern": "git diff*", "level": "allow", "description": "Inspect Git changes" },
+                        { "pattern": "git log*", "level": "allow", "description": "Inspect Git history" },
+                        { "pattern": "cargo check*", "level": "allow", "description": "Run a Cargo check" },
+                        { "pattern": "npm run lint*", "level": "allow", "description": "Run the project linter" }
+                    ])
+                });
+        }
+        SecurityProfile::Trusted => {
+            // Trusted is the explicit opt-in compatibility posture. Do not
+            // inject any new restrictions into an existing configuration.
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
+    /// Security preset. New installations default to `safe`.
+    #[serde(default)]
+    pub security_profile: SecurityProfile,
     /// When true (default), all channels may receive tool execution progress; each channel can override via channels.*.showToolCalls.
     #[serde(default = "default_true")]
     pub show_tool_calls: bool,
@@ -1797,8 +1892,16 @@ pub struct Config {
     pub config_version: u32,
 }
 
+impl Default for Config {
+    fn default() -> Self {
+        let mut value = serde_json::json!({ "securityProfile": "safe" });
+        apply_security_profile_defaults(&mut value, SecurityProfile::Safe);
+        serde_json::from_value(value).expect("the built-in default config must deserialize")
+    }
+}
+
 fn default_config_version() -> u32 {
-    1
+    2
 }
 
 /// Generates the JSON Schema for the root config. Available only when the `schema` feature is enabled.
@@ -3307,12 +3410,22 @@ impl ConfigMigrator {
 }
 
 /// Build the application's ConfigMigrator with all registered migration steps.
-/// The current version is 1. Add new migration steps here as the config schema evolves.
+/// Version 2 introduces an explicit security profile. Configurations written
+/// before that field existed are marked `trusted` to preserve their behavior;
+/// they are not silently upgraded to Safe.
 fn build_config_migrator() -> ConfigMigrator {
-    // Current version is 1; no migrations needed yet.
-    // Example of adding a migration in the future:
-    //   migrator.register(1, 2, |mut v| { /* transform v */ Ok(v) });
-    ConfigMigrator::new(1)
+    let mut migrator = ConfigMigrator::new(2);
+    migrator.register(1, 2, |mut value| {
+        if let Some(object) = value.as_object_mut() {
+            object
+                .entry("securityProfile".to_string())
+                .or_insert_with(|| serde_json::Value::String("trusted".to_string()));
+            Ok(value)
+        } else {
+            anyhow::bail!("configuration root must be a JSON object")
+        }
+    });
+    migrator
 }
 
 pub fn load_config(path: Option<&Path>) -> Result<Config> {
@@ -3332,6 +3445,22 @@ pub fn load_config(path: Option<&Path>) -> Result<Config> {
 
         let migrator = build_config_migrator();
         value = migrator.migrate(&p, value)?;
+
+        // A file that still omits the field (for example, one already marked
+        // as version 2 by an older build) remains legacy-compatible. Explicit
+        // profiles receive only the defaults they did not set themselves.
+        let profile = if let Some(profile) = value.get("securityProfile").cloned() {
+            profile
+        } else {
+            let profile = serde_json::Value::String("trusted".to_string());
+            if let Some(object) = value.as_object_mut() {
+                object.insert("securityProfile".to_string(), profile.clone());
+            }
+            profile
+        };
+        let profile: SecurityProfile = serde_json::from_value(profile)
+            .with_context(|| "invalid securityProfile; expected safe, developer, or trusted")?;
+        apply_security_profile_defaults(&mut value, profile);
 
         serde_json::from_value(value)
             .with_context(|| format!("deserializing config from {}", p.display()))?
@@ -4048,9 +4177,12 @@ mod tests {
     // --- Permission config loading tests ---
 
     #[test]
-    fn permission_config_default_is_disabled() {
+    fn permission_config_default_is_safe() {
         let cfg = valid_config();
-        assert!(!cfg.tools.exec.permissions.enabled);
+        assert_eq!(cfg.security_profile, SecurityProfile::Safe);
+        assert!(cfg.tools.exec.permissions.enabled);
+        assert!(cfg.tools.exec.restrict_to_workspace);
+        assert!(cfg.tool_sandbox.is_some());
         assert_eq!(cfg.tools.exec.permissions.default_level, PermissionLevel::RequireApproval);
         assert_eq!(cfg.tools.exec.permissions.approval_timeout_secs, 300);
         assert!(cfg.tools.exec.permissions.rules.is_empty());

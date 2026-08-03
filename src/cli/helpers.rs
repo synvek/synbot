@@ -94,6 +94,7 @@ pub fn build_default_tools(
         channel: None,
         chat_id: None,
         sandbox_context: sandbox_context.clone(),
+        require_sandbox: matches!(cfg.security_profile, config::SecurityProfile::Safe),
     })).expect("register ExecTool");
     reg.register(std::sync::Arc::new(web::WebSearchTool::from_config(&cfg.tools.web)))
         .expect("register WebSearchTool");

@@ -254,6 +254,8 @@
         "keepRecentMessages": "Keep recent messages (optional number)"
       },
       "tools": {
+        "securityProfile": "Security profile",
+        "securityProfileHint": "Safe enables approvals, workspace limits, and prefers a tool sandbox. Developer allows common low-risk commands. Trusted preserves legacy behavior.",
         "exec": "Exec tool",
         "execTimeout": "Timeout (seconds)",
         "restrictToWorkspace": "Restrict to workspace",

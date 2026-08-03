@@ -73,6 +73,10 @@ pub async fn cmd_acp(provider: Option<String>, model: Option<String>) -> Result<
 
     let shared_config = std::sync::Arc::new(tokio::sync::RwLock::new(cfg.clone()));
 
+    let sandbox_context = super::start::init_sandbox_if_configured(&cfg).await;
+    let tool_sandbox_delegate =
+        super::start::tool_sandbox_delegate_from_startup(&sandbox_context);
+
     let (mut tool_reg, spawn_context) = build_default_tools(
         &cfg,
         std::sync::Arc::clone(&shared_config),
@@ -81,7 +85,7 @@ pub async fn cmd_acp(provider: Option<String>, model: Option<String>) -> Result<
         std::sync::Arc::clone(&approval_manager),
         permission_policy,
         None, // no heartbeat/cron tools in ACP mode
-        &None, // no sandbox in ACP mode
+        &tool_sandbox_delegate, // use the configured sandbox; Safe mode fails closed if unavailable
         shared_session_state.clone(),
         bus.outbound_tx_clone(),
     );

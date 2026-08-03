@@ -80,6 +80,21 @@ export const ToolsSection: React.FC<SectionProps> = ({ draft, setDraft, t }) => 
 
   return (
     <FieldGroup>
+      <Subheading>{t('config.sections.tools.securityProfile')}</Subheading>
+      <SelectField
+        id="securityProfile"
+        label={t('config.sections.tools.securityProfile')}
+        value={typeof draft.securityProfile === 'string' ? draft.securityProfile : 'safe'}
+        onChange={(v) => setDraft((d) => ({ ...d, securityProfile: v }))}
+        options={[
+          { value: 'safe', label: 'Safe' },
+          { value: 'developer', label: 'Developer' },
+          { value: 'trusted', label: 'Trusted' },
+        ]}
+      />
+      <p className="text-xs text-text-secondary -mt-2 mb-2">
+        {t('config.sections.tools.securityProfileHint')}
+      </p>
       <Subheading>{t('config.sections.tools.exec')}</Subheading>
       <NumberField
         id="execTimeout"

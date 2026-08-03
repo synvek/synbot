@@ -35,7 +35,7 @@
     },
     "configVersion": {
       "description": "Config file format version. Used by ConfigMigrator to apply incremental migrations.",
-      "default": 1,
+      "default": 2,
       "type": "integer",
       "format": "uint32",
       "minimum": 0.0
@@ -229,6 +229,15 @@
         },
         {
           "type": "null"
+        }
+      ]
+    },
+    "securityProfile": {
+      "description": "Security preset. New installations default to `safe`.",
+      "default": "safe",
+      "allOf": [
+        {
+          "$ref": "#/definitions/SecurityProfile"
         }
       ]
     },
@@ -2069,6 +2078,15 @@
           "format": "uint64",
           "minimum": 0.0
         }
+      ]
+    },
+    "SecurityProfile": {
+      "description": "Preset security posture for tools that can execute commands or access data.\n\n`Safe` is the default for new installations. Existing configuration files without an explicit profile are migrated to `Trusted` so their effective behavior is not changed silently.",
+      "type": "string",
+      "enum": [
+        "safe",
+        "developer",
+        "trusted"
       ]
     },
     "SlackConfig": {

@@ -28,7 +28,26 @@ The permission system provides:
 3. **Approval Workflow**: Process for requesting and granting approvals
 4. **Audit Logging**: Complete record of all permission decisions
 
-## Permission Levels
+## Security profiles
+
+New installations use `safe` by default. Safe enables Exec approvals, restricts paths to the workspace, and prefers a tool sandbox; if no sandbox backend is available, Exec fails closed instead of falling back to the host.
+
+Available presets:
+
+| Profile | Behavior |
+|---|---|
+| `safe` | Approval and workspace restrictions enabled; prefers the tool sandbox. Explicit user values remain authoritative |
+| `developer` | Approval and workspace restrictions enabled; common low-risk commands are allowed automatically, while other commands require approval |
+| `trusted` | Explicit compatibility mode with no new restrictions injected; intended for local experiments |
+
+```json
+{
+  "securityProfile": "safe"
+}
+```
+
+Existing configuration files without `securityProfile` are migrated to `trusted`, preserving their effective behavior instead of silently adding restrictions. The config version becomes 2 and a migration backup is retained next to the original file.
+
 
 ### Allow
 The action can be performed without any restrictions.

@@ -255,6 +255,8 @@ pub struct ExecTool {
     pub chat_id: Option<String>,
     /// When set, exec runs inside this sandbox instead of on the host.
     pub sandbox_context: ExecSandboxContext,
+    /// Safe mode must fail closed when no sandbox backend is available.
+    pub require_sandbox: bool,
 }
 
 #[async_trait::async_trait]
@@ -388,6 +390,12 @@ impl DynTool for ExecTool {
                     // Allow execution, continue
                 }
             }
+        }
+
+        if self.require_sandbox && self.sandbox_context.is_none() {
+            return Err(anyhow::anyhow!(
+                "Safe security profile requires a tool sandbox, but no sandbox backend is active; command was not executed"
+            ));
         }
 
         let start = Instant::now();
@@ -897,6 +905,7 @@ mod tests {
             channel: None,
             chat_id: None,
             sandbox_context: None,
+            require_sandbox: false,
         };
 
         let args = json!({
@@ -935,6 +944,7 @@ mod tests {
             channel: None,
             chat_id: None,
             sandbox_context: None,
+            require_sandbox: false,
         };
 
         let args = json!({
@@ -972,6 +982,7 @@ mod tests {
             channel: None,
             chat_id: None,
             sandbox_context: None,
+            require_sandbox: false,
         };
 
         let args = json!({
@@ -1013,6 +1024,7 @@ mod tests {
             channel: Some("test".to_string()),
             chat_id: Some("test-chat".to_string()),
             sandbox_context: None,
+            require_sandbox: false,
         };
 
         // Verify that the tool has approval manager configured
@@ -1034,6 +1046,7 @@ mod tests {
             channel: None,
             chat_id: None,
             sandbox_context: None,
+            require_sandbox: false,
         };
 
         let args = json!({
@@ -1065,6 +1078,7 @@ mod tests {
             channel: None,
             chat_id: None,
             sandbox_context: None,
+            require_sandbox: false,
         };
 
         let args = json!({

@@ -72,6 +72,10 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
     // Same source of truth as AgentLoop (embeddingDimensions, etc.); tools must not use load_config(None) alone.
     let shared_config = std::sync::Arc::new(tokio::sync::RwLock::new(cfg.clone()));
 
+    let sandbox_context = super::start::init_sandbox_if_configured(&cfg).await;
+    let tool_sandbox_delegate =
+        super::start::tool_sandbox_delegate_from_startup(&sandbox_context);
+
     // Build tools (pass subagent manager, approval manager, permission policy, session state, and outbound_tx for message tool)
     let (mut tool_reg, spawn_context) = build_default_tools(
         &cfg,
@@ -81,7 +85,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
         approval_manager,
         permission_policy,
         None, // no heartbeat/cron tools in CLI agent mode
-        &None, // no sandbox in CLI agent mode
+        &tool_sandbox_delegate, // use the configured sandbox; Safe mode fails closed if unavailable
         shared_session_state.clone(),
         bus.outbound_tx_clone(),
     );
