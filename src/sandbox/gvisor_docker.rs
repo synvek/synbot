@@ -7,8 +7,8 @@ use super::types::{
 };
 use super::plain_docker::connect_docker;
 use bollard::container::{
-    Config, CreateContainerOptions, RemoveContainerOptions, StartContainerOptions,
-    StopContainerOptions,
+    Config, CreateContainerOptions, KillContainerOptions, RemoveContainerOptions,
+    StartContainerOptions, StopContainerOptions,
 };
 use bollard::exec::{CreateExecOptions, StartExecResults};
 use bollard::models::HostConfig;
@@ -113,6 +113,7 @@ impl Sandbox for GVisorDockerSandbox {
         let binds = self.get_volumes();
         let memory = self.config.resources.max_memory as i64;
         let nano_cpus = (self.config.resources.max_cpu * 1_000_000_000.0) as i64;
+        let pids_limit = self.config.process.max_processes as i64;
         let cap_add = self.get_required_capabilities();
         let image = self
             .config
@@ -176,6 +177,8 @@ impl Sandbox for GVisorDockerSandbox {
                     binds: Some(binds),
                     memory: Some(memory),
                     nano_cpus: Some(nano_cpus),
+                    // Docker's pids controller limits the whole container tree.
+                    pids_limit: Some(pids_limit),
                     security_opt: Some(vec!["no-new-privileges".to_string()]),
                     cap_drop: Some(vec!["ALL".to_string()]),
                     cap_add: Some(cap_add),
@@ -207,44 +210,47 @@ impl Sandbox for GVisorDockerSandbox {
         self.container_id = Some(container_id);
         self.status.state = SandboxState::Running;
         self.status.started_at = Some(Utc::now());
+        self.status.error = None;
 
         Ok(())
     }
     
     fn stop(&mut self) -> Result<()> {
-        let Some(container_id) = self.container_id.take() else {
+        let Some(container_id) = self.container_id.clone() else {
             return Ok(());
         };
 
         self.status.state = SandboxState::Stopping;
         let docker = self.docker.clone();
 
-        tokio::task::block_in_place(|| {
+        let exit_reason = tokio::task::block_in_place(|| {
             let runtime = tokio::runtime::Runtime::new()
                 .map_err(|e| SandboxError::ExecutionFailed(format!("Failed to create runtime: {}", e)))?;
-
             runtime.block_on(async move {
-                docker
-                    .stop_container(&container_id, None::<StopContainerOptions>)
-                    .await
-                    .ok();
-                docker
-                    .remove_container(
-                        &container_id,
-                        Some(RemoveContainerOptions {
-                            force: true,
-                            ..Default::default()
-                        }),
-                    )
-                    .await
-                    .ok();
-                Ok::<(), SandboxError>(())
+                docker.stop_container(&container_id, None::<StopContainerOptions>).await.ok();
+                let reason = docker.inspect_container(&container_id, None).await.ok().and_then(|info| {
+                    info.state.and_then(|state| state.error.filter(|reason| !reason.is_empty()).or_else(|| {
+                        if state.oom_killed == Some(true) {
+                            Some("container was killed by the OOM killer".to_string())
+                        } else if let Some(exit_code) = state.exit_code {
+                            Some(format!("container exited with code {}", exit_code))
+                        } else {
+                            state.status.map(|status| format!("container exited with status {}", status))
+                        }
+                    }))
+                });
+                docker.remove_container(&container_id, Some(RemoveContainerOptions {
+                    force: true, ..Default::default()
+                })).await.ok();
+                Ok::<Option<String>, SandboxError>(reason)
             })
         })?;
 
+        // The container is removed by stop(), so never retain its stale ID.
+        self.container_id = None;
+        self.status.error = exit_reason;
         self.status.state = SandboxState::Stopped;
         self.status.stopped_at = Some(Utc::now());
-
         Ok(())
     }
     
@@ -255,81 +261,54 @@ impl Sandbox for GVisorDockerSandbox {
         timeout: Duration,
         working_dir: Option<&str>,
     ) -> Result<ExecutionResult> {
-        let container_id = self
-            .container_id
-            .as_ref()
-            .ok_or(SandboxError::NotStarted)?
-            .clone();
+        let container_id = self.container_id.as_ref().ok_or(SandboxError::NotStarted)?.clone();
         let docker = self.docker.clone();
-        let cmd_parts: Vec<String> = std::iter::once(command.to_string())
-            .chain(args.iter().cloned())
-            .collect();
-        let working_dir_owned: Option<String> = working_dir.map(str::to_string);
+        let cmd: Vec<String> = std::iter::once(command.to_string()).chain(args.iter().cloned()).collect();
+        let working_dir = working_dir.map(str::to_string);
 
         tokio::task::block_in_place(|| {
             let runtime = tokio::runtime::Runtime::new()
                 .map_err(|e| SandboxError::ExecutionFailed(format!("Failed to create runtime: {}", e)))?;
-
             runtime.block_on(async move {
                 let exec_config = CreateExecOptions {
-                    cmd: Some(cmd_parts),
-                    attach_stdout: Some(true),
-                    attach_stderr: Some(true),
-                    working_dir: working_dir_owned,
-                    ..Default::default()
+                    cmd: Some(cmd), attach_stdout: Some(true), attach_stderr: Some(true),
+                    working_dir, ..Default::default()
                 };
-
-                let exec = docker
-                    .create_exec(&container_id, exec_config)
-                    .await
+                let exec = docker.create_exec(&container_id, exec_config).await
                     .map_err(|e| SandboxError::ExecutionFailed(format!("Failed to create exec: {}", e)))?;
-
-                let start = std::time::Instant::now();
-
-                let result = tokio_timeout(timeout, docker.start_exec(&exec.id, None)).await;
-
-                match result {
-                    Ok(Ok(StartExecResults::Attached { output, .. })) => {
-                        let mut stdout = Vec::new();
-                        let mut stderr = Vec::new();
-
-                        use futures_util::stream::StreamExt;
-                        let mut output_stream = output;
-
-                        while let Some(chunk) = output_stream.next().await {
-                            match chunk {
-                                Ok(bollard::container::LogOutput::StdOut { message }) => {
-                                    stdout.extend_from_slice(&message);
+                let started_at = std::time::Instant::now();
+                let result = tokio_timeout(timeout, async {
+                    match docker.start_exec(&exec.id, None).await {
+                        Ok(StartExecResults::Attached { output, .. }) => {
+                            let mut stdout = Vec::new();
+                            let mut stderr = Vec::new();
+                            use futures_util::stream::StreamExt;
+                            tokio::pin!(output);
+                            while let Some(chunk) = output.next().await {
+                                match chunk {
+                                    Ok(bollard::container::LogOutput::StdOut { message }) => stdout.extend_from_slice(&message),
+                                    Ok(bollard::container::LogOutput::StdErr { message }) => stderr.extend_from_slice(&message),
+                                    _ => {}
                                 }
-                                Ok(bollard::container::LogOutput::StdErr { message }) => {
-                                    stderr.extend_from_slice(&message);
-                                }
-                                _ => {}
                             }
+                            let inspect = docker.inspect_exec(&exec.id).await
+                                .map_err(|e| SandboxError::ExecutionFailed(format!("Failed to inspect exec: {}", e)))?;
+                            Ok::<ExecutionResult, SandboxError>(ExecutionResult {
+                                exit_code: inspect.exit_code.unwrap_or(-1) as i32, stdout, stderr,
+                                duration: started_at.elapsed(), error: None,
+                            })
                         }
-
-                        let inspect = docker
-                            .inspect_exec(&exec.id)
-                            .await
-                            .map_err(|e| {
-                                SandboxError::ExecutionFailed(format!("Failed to inspect exec: {}", e))
-                            })?;
-
-                        let exit_code = inspect.exit_code.unwrap_or(-1) as i32;
-
-                        Ok(ExecutionResult {
-                            exit_code,
-                            stdout,
-                            stderr,
-                            duration: start.elapsed(),
-                            error: None,
-                        })
+                        Ok(StartExecResults::Detached) => Err(SandboxError::ExecutionFailed("Docker exec unexpectedly detached".to_string())),
+                        Err(e) => Err(SandboxError::ExecutionFailed(format!("Exec failed: {}", e))),
                     }
-                    Err(_) => Err(SandboxError::Timeout),
-                    Ok(Err(e)) => Err(SandboxError::ExecutionFailed(format!("Exec failed: {}", e))),
-                    _ => Err(SandboxError::ExecutionFailed(
-                        "Unexpected exec result".to_string(),
-                    )),
+                }).await;
+                match result {
+                    Ok(result) => result,
+                    Err(_) => {
+                        let _ = docker.kill_container(&container_id, None::<KillContainerOptions<String>>).await;
+                        let _ = docker.start_container(&container_id, None::<StartContainerOptions<String>>).await;
+                        Err(SandboxError::Timeout)
+                    }
                 }
             })
         })

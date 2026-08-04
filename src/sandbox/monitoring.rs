@@ -99,6 +99,21 @@ impl MonitoringModule {
         loggers
     }
     
+    /// Record a lifecycle transition in the audit log.
+    pub async fn log_sandbox_lifecycle(
+        &self,
+        sandbox_id: &str,
+        transition: &str,
+        details: serde_json::Value,
+    ) {
+        self.write_audit_log(AuditEvent {
+            timestamp: Utc::now(),
+            sandbox_id: sandbox_id.to_string(),
+            event_type: format!("sandbox_{}", transition),
+            details,
+        }).await;
+    }
+
     /// Log sandbox creation
     pub fn log_sandbox_created(&self, sandbox_id: &str, sandbox_type: &str) {
         let event = AuditEvent {
@@ -290,24 +305,91 @@ impl MetricsCollector {
         }
     }
     
-    /// Collect metrics for a sandbox
+    /// Collect Docker cgroup CPU/memory and Docker stats network counters.
+    /// Non-Docker backends retain zero values until a backend-specific provider is added.
     pub fn collect(&self, sandbox_id: &str) -> SandboxMetrics {
-        // In a real implementation, this would query the actual sandbox runtime
-        // For now, we'll collect basic system metrics as placeholders
-        
-        let cpu_usage = self.get_cpu_usage(sandbox_id);
-        let memory_usage = self.get_memory_usage(sandbox_id);
-        let disk_usage = self.get_disk_usage(sandbox_id);
-        let network_io = self.get_network_io(sandbox_id);
-        
+        if let Some((cpu_usage, memory_usage, disk_usage, network_io)) = self.collect_docker_metrics(sandbox_id) {
+            return SandboxMetrics { cpu_usage, memory_usage, disk_usage, network_io };
+        }
         SandboxMetrics {
-            cpu_usage,
-            memory_usage,
-            disk_usage,
-            network_io,
+            cpu_usage: 0.0,
+            memory_usage: 0,
+            disk_usage: 0,
+            network_io: HashMap::from([
+                ("rx_bytes".to_string(), 0),
+                ("tx_bytes".to_string(), 0),
+            ]),
         }
     }
-    
+
+    fn collect_docker_metrics(&self, sandbox_id: &str) -> Option<(f64, u64, u64, HashMap<String, u64>)> {
+        let docker = super::plain_docker::connect_docker().ok()?;
+        let container = sandbox_id.to_string();
+        let future = async move {
+            use futures_util::stream::StreamExt;
+            let mut stream = docker.stats(&container, Some(bollard::container::StatsOptions {
+                stream: false,
+                one_shot: true,
+            }));
+            let stats = stream.next().await
+                .and_then(|result| result.ok())
+                .and_then(|stats| serde_json::to_value(stats).ok())?;
+            // `size_rw` is the Docker writable-layer size in bytes. It does
+            // not include bind-mounted host directories.
+            let disk_usage = docker
+                .inspect_container(
+                    &container,
+                    Some(bollard::container::InspectContainerOptions {
+                        size: true,
+                        ..Default::default()
+                    }),
+                )
+                .await
+                .ok()
+                .and_then(|info| info.size_rw)
+                .and_then(|size| u64::try_from(size).ok())
+                .unwrap_or(0);
+            Some((stats, disk_usage))
+        };
+        // `collect` is synchronous, while Docker stats is asynchronous. Run the
+        // request on a dedicated thread so this remains safe from both Tokio
+        // multi-thread and current-thread runtimes (the latter cannot use
+        // `block_in_place`).
+        let (value, disk_usage) = std::thread::spawn(move || {
+            tokio::runtime::Runtime::new().ok()?.block_on(future)
+        })
+        .join()
+        .ok()
+        .flatten()?;
+        let u64_at = |path: &str| value.pointer(path).and_then(serde_json::Value::as_u64).unwrap_or(0);
+        let cpu_delta = u64_at("/cpu_stats/cpu_usage/total_usage")
+            .saturating_sub(u64_at("/precpu_stats/cpu_usage/total_usage")) as f64;
+        let system_delta = u64_at("/cpu_stats/system_cpu_usage")
+            .saturating_sub(u64_at("/precpu_stats/system_cpu_usage")) as f64;
+        let online_cpus = u64_at("/cpu_stats/online_cpus").max(1) as f64;
+        let cpu_usage = if system_delta > 0.0 {
+            cpu_delta / system_delta * online_cpus * 100.0
+        } else {
+            0.0
+        };
+        let memory_usage = u64_at("/memory_stats/usage");
+        let mut network_io = HashMap::from([
+            ("rx_bytes".to_string(), 0),
+            ("tx_bytes".to_string(), 0),
+        ]);
+        if let Some(networks) = value.pointer("/networks").and_then(serde_json::Value::as_object) {
+            let (rx, tx) = networks.values().fold((0u64, 0u64), |(rx, tx), network| {
+                (
+                    rx.saturating_add(network.get("rx_bytes").and_then(serde_json::Value::as_u64).unwrap_or(0)),
+                    tx.saturating_add(network.get("tx_bytes").and_then(serde_json::Value::as_u64).unwrap_or(0)),
+                )
+            });
+            network_io.insert("rx_bytes".to_string(), rx);
+            network_io.insert("tx_bytes".to_string(), tx);
+        }
+        Some((cpu_usage, memory_usage, disk_usage, network_io))
+    }
+
     /// Store metrics for historical tracking
     pub async fn store_metrics(&self, sandbox_id: &str, metrics: SandboxMetrics) {
         let mut history = self.metrics_history.write().await;
@@ -332,36 +414,6 @@ impl MetricsCollector {
         history.remove(sandbox_id);
     }
     
-    /// Get CPU usage for a sandbox
-    fn get_cpu_usage(&self, _sandbox_id: &str) -> f64 {
-        // In a real implementation, this would query cgroup stats or Docker API
-        // Placeholder: return 0.0
-        0.0
-    }
-    
-    /// Get memory usage for a sandbox
-    fn get_memory_usage(&self, _sandbox_id: &str) -> u64 {
-        // In a real implementation, this would query cgroup stats or Docker API
-        // Placeholder: return 0
-        0
-    }
-    
-    /// Get disk usage for a sandbox
-    fn get_disk_usage(&self, _sandbox_id: &str) -> u64 {
-        // In a real implementation, this would query filesystem stats
-        // Placeholder: return 0
-        0
-    }
-    
-    /// Get network I/O for a sandbox
-    fn get_network_io(&self, _sandbox_id: &str) -> HashMap<String, u64> {
-        // In a real implementation, this would query network stats
-        // Placeholder: return empty map
-        let mut io = HashMap::new();
-        io.insert("rx_bytes".to_string(), 0);
-        io.insert("tx_bytes".to_string(), 0);
-        io
-    }
 }
 
 impl Default for MetricsCollector {

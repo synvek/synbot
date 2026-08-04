@@ -131,8 +131,9 @@ impl SandboxManager {
             sandboxes.insert(sandbox_id.clone(), sandbox);
         }
         
-        // Log sandbox creation
-        self.monitoring.log_sandbox_created(&sandbox_id, "app");
+        self.monitoring
+            .log_sandbox_lifecycle(&sandbox_id, "created", serde_json::json!({ "sandbox_type": "app" }))
+            .await;
         
         Ok(sandbox_id)
     }
@@ -191,8 +192,9 @@ impl SandboxManager {
             sandboxes.insert(sandbox_id.clone(), sandbox);
         }
 
-        // Log sandbox creation
-        self.monitoring.log_sandbox_created(&sandbox_id, "tool");
+        self.monitoring
+            .log_sandbox_lifecycle(&sandbox_id, "created", serde_json::json!({ "sandbox_type": "tool" }))
+            .await;
 
         Ok(sandbox_id)
     }
@@ -237,15 +239,18 @@ impl SandboxManager {
     /// - The sandbox is not found
     /// - The sandbox cannot be stopped
     pub async fn destroy_sandbox(&self, sandbox_id: &str) -> Result<()> {
-        let mut sandboxes = self.sandboxes.write().await;
-        
-        if let Some(mut sandbox) = sandboxes.remove(sandbox_id) {
-            // Stop the sandbox before destroying
-            sandbox.stop()?;
-            Ok(())
-        } else {
-            Err(SandboxError::NotFound)
-        }
+        // Remove and stop the sandbox while holding the registry lock, but do not
+        // hold that lock across the asynchronous audit write below.
+        let mut sandbox = {
+            let mut sandboxes = self.sandboxes.write().await;
+            sandboxes.remove(sandbox_id).ok_or(SandboxError::NotFound)?
+        };
+
+        sandbox.stop()?;
+        self.monitoring
+            .log_sandbox_lifecycle(sandbox_id, "destroyed", serde_json::json!({ "state": "removed" }))
+            .await;
+        Ok(())
     }
     
     /// Start a sandbox by ID
@@ -260,14 +265,16 @@ impl SandboxManager {
     /// - The sandbox is not found
     /// - The sandbox cannot be started
     pub async fn start_sandbox(&self, sandbox_id: &str) -> Result<()> {
-        let mut sandboxes = self.sandboxes.write().await;
-        
-        if let Some(sandbox) = sandboxes.get_mut(sandbox_id) {
+        {
+            let mut sandboxes = self.sandboxes.write().await;
+            let sandbox = sandboxes.get_mut(sandbox_id).ok_or(SandboxError::NotFound)?;
             sandbox.start()?;
-            Ok(())
-        } else {
-            Err(SandboxError::NotFound)
         }
+
+        self.monitoring
+            .log_sandbox_lifecycle(sandbox_id, "started", serde_json::json!({ "state": "running" }))
+            .await;
+        Ok(())
     }
     
     /// Stop a sandbox by ID
@@ -282,14 +289,21 @@ impl SandboxManager {
     /// - The sandbox is not found
     /// - The sandbox cannot be stopped
     pub async fn stop_sandbox(&self, sandbox_id: &str) -> Result<()> {
-        let mut sandboxes = self.sandboxes.write().await;
-        
-        if let Some(sandbox) = sandboxes.get_mut(sandbox_id) {
+        let status = {
+            let mut sandboxes = self.sandboxes.write().await;
+            let sandbox = sandboxes.get_mut(sandbox_id).ok_or(SandboxError::NotFound)?;
             sandbox.stop()?;
-            Ok(())
-        } else {
-            Err(SandboxError::NotFound)
-        }
+            sandbox.get_status()
+        };
+
+        self.monitoring
+            .log_sandbox_lifecycle(
+                sandbox_id,
+                "stopped",
+                serde_json::json!({ "state": "stopped", "error": status.error }),
+            )
+            .await;
+        Ok(())
     }
     
     /// Get the number of active sandboxes

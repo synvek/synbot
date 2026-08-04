@@ -5,7 +5,9 @@
 
 use super::error::{Result, SandboxError};
 use super::types::SandboxConfig;
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
+use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
 
 /// Security validator for sandbox configurations and runtime behavior
 pub struct SecurityValidator {
@@ -575,19 +577,25 @@ impl ResourceExhaustionPrevention {
         #[cfg(target_os = "linux")]
         {
             use std::fs;
-            
-            // Read memory usage from cgroup
-            if let Ok(usage) = fs::read_to_string("/sys/fs/cgroup/memory/memory.usage_in_bytes") {
-                if let Ok(current_usage) = usage.trim().parse::<u64>() {
-                    if current_usage > max_memory {
-                        return Err(SandboxError::ResourceExhausted(
-                            format!("Memory usage {} exceeds limit {}", current_usage, max_memory)
-                        ));
-                    }
+
+            // Support both cgroup v1 and the unified cgroup v2 hierarchy.
+            let paths = [
+                "/sys/fs/cgroup/memory/memory.usage_in_bytes",
+                "/sys/fs/cgroup/memory.current",
+            ];
+            if let Some(current_usage) = paths.iter().find_map(|path| {
+                fs::read_to_string(path).ok()?.trim().parse::<u64>().ok()
+            }) {
+                if current_usage > max_memory {
+                    return Err(SandboxError::ResourceExhausted(
+                        format!("Memory usage {} exceeds limit {}", current_usage, max_memory)
+                    ));
                 }
+            } else {
+                log::debug!("Unable to read a supported memory cgroup usage file");
             }
         }
-        
+
         Ok(())
     }
     
@@ -596,19 +604,25 @@ impl ResourceExhaustionPrevention {
         #[cfg(target_os = "linux")]
         {
             use std::fs;
-            
-            // Count processes in current cgroup
-            if let Ok(procs) = fs::read_to_string("/sys/fs/cgroup/pids/pids.current") {
-                if let Ok(current_count) = procs.trim().parse::<u32>() {
-                    if current_count > max_processes {
-                        return Err(SandboxError::ResourceExhausted(
-                            format!("Process count {} exceeds limit {}", current_count, max_processes)
-                        ));
-                    }
+
+            // Support both cgroup v1 and the unified cgroup v2 hierarchy.
+            let paths = [
+                "/sys/fs/cgroup/pids/pids.current",
+                "/sys/fs/cgroup/pids.current",
+            ];
+            if let Some(current_count) = paths.iter().find_map(|path| {
+                fs::read_to_string(path).ok()?.trim().parse::<u32>().ok()
+            }) {
+                if current_count > max_processes {
+                    return Err(SandboxError::ResourceExhausted(
+                        format!("Process count {} exceeds limit {}", current_count, max_processes)
+                    ));
                 }
+            } else {
+                log::debug!("Unable to read a supported process cgroup count file");
             }
         }
-        
+
         Ok(())
     }
     
@@ -641,15 +655,35 @@ impl ResourceExhaustionPrevention {
     /// # Returns
     /// 
     /// Returns `Ok(())` if rate is acceptable, or an error if fork bomb detected
-    pub fn prevent_fork_bomb(_max_rate: u32) -> Result<()> {
-        // This would track process creation rate over time
-        // For now, this is a placeholder for future implementation
-        
-        // In a full implementation, this would:
-        // 1. Track process creation timestamps
-        // 2. Calculate rate over sliding window
-        // 3. Block if rate exceeds threshold
-        
+    pub fn prevent_fork_bomb(max_rate: u32) -> Result<()> {
+        static PROCESS_EVENTS: OnceLock<Mutex<VecDeque<Instant>>> = OnceLock::new();
+
+        if max_rate == 0 {
+            return Err(SandboxError::ResourceExhausted(
+                "Process creation rate limit must be greater than zero".to_string(),
+            ));
+        }
+
+        let events = PROCESS_EVENTS.get_or_init(|| Mutex::new(VecDeque::new()));
+        let now = Instant::now();
+        let mut events = events.lock().map_err(|_| {
+            SandboxError::ExecutionFailed("Fork-bomb guard mutex was poisoned".to_string())
+        })?;
+        while events
+            .front()
+            .is_some_and(|timestamp| now.duration_since(*timestamp).as_secs() >= 1)
+        {
+            events.pop_front();
+        }
+
+        if events.len() >= max_rate as usize {
+            return Err(SandboxError::ResourceExhausted(format!(
+                "Process creation rate exceeded {} per second",
+                max_rate
+            )));
+        }
+
+        events.push_back(now);
         Ok(())
     }
 }

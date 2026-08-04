@@ -84,9 +84,20 @@ impl PlatformDetector {
     
     #[cfg(target_os = "windows")]
     fn detect_windows_version() -> String {
-        // Try to get Windows version from registry or system info
-        // For now, return a placeholder
-        "10+".to_string()
+        std::process::Command::new("cmd")
+            .args(["/C", "ver"])
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .and_then(|output| String::from_utf8(output.stdout).ok())
+            .and_then(|version| {
+                let version = version.trim();
+                version
+                    .split_once("Version ")
+                    .map(|(_, value)| value.trim_end_matches(']').trim().to_string())
+                    .filter(|value| !value.is_empty())
+            })
+            .unwrap_or_else(|| "unknown".to_string())
     }
     
     #[cfg(target_os = "linux")]
@@ -107,9 +118,15 @@ impl PlatformDetector {
     
     #[cfg(target_os = "macos")]
     fn detect_macos_version() -> String {
-        // Try to get macOS version from system_profiler or sw_vers
-        // For now, return a placeholder
-        "10.15+".to_string()
+        std::process::Command::new("sw_vers")
+            .arg("-productVersion")
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .and_then(|output| String::from_utf8(output.stdout).ok())
+            .map(|version| version.trim().to_string())
+            .filter(|version| !version.is_empty())
+            .unwrap_or_else(|| "unknown".to_string())
     }
     
     /// Get sandbox recommendations for a platform

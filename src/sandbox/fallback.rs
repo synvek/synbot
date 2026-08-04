@@ -208,10 +208,24 @@ impl FallbackManager {
                         &format!("gVisor failed: {}", e),
                     ).await;
                     
-                    // Create standard Docker sandbox (implementation would go here)
-                    return Err(SandboxError::CreationFailed(
-                        format!("Standard Docker fallback not yet implemented: {}", e)
-                    ));
+                    use crate::sandbox::plain_docker::PlainDockerSandbox;
+
+                    match PlainDockerSandbox::new(config) {
+                        Ok(sandbox) => {
+                            log::warn!(
+                                "Using plain Docker fallback for {} after WSL2 + gVisor failed",
+                                sandbox.get_info().sandbox_id
+                            );
+                            Ok((
+                                Box::new(sandbox),
+                                FallbackResult::Fallback("plain-docker".to_string()),
+                            ))
+                        }
+                        Err(fallback_error) => Err(SandboxError::CreationFailed(format!(
+                            "WSL2 + gVisor failed: {}; plain Docker fallback also failed: {}",
+                            e, fallback_error
+                        ))),
+                    }
                 }
             }
         }
@@ -330,8 +344,11 @@ impl FallbackManager {
             "nono" => {
                 #[cfg(any(target_os = "linux", target_os = "macos"))]
                 {
-                    // Check if nono.sh is available
-                    true // Simplified for now
+                    std::process::Command::new("nono")
+                        .arg("--version")
+                        .output()
+                        .map(|output| output.status.success())
+                        .unwrap_or(false)
                 }
                 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
                 {
@@ -339,9 +356,15 @@ impl FallbackManager {
                 }
             }
             "gvisor" => {
-                // Check if gVisor is available
-                // This would involve checking Docker and gVisor runtime
-                true // Simplified for now
+                // Docker must be reachable and advertise the runsc runtime.
+                std::process::Command::new("docker")
+                    .args(["info", "--format", "{{json .Runtimes}}"])
+                    .output()
+                    .map(|output| {
+                        output.status.success()
+                            && String::from_utf8_lossy(&output.stdout).contains("runsc")
+                    })
+                    .unwrap_or(false)
             }
             _ => false,
         }
@@ -481,11 +504,13 @@ mod tests {
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
             assert!(!manager.is_implementation_available("appcontainer"));
-            assert!(manager.is_implementation_available("nono"));
+            // Availability is environment-dependent: the nono binary may not
+            // be installed even when the nono backend is compiled in.
+            let _nono_available = manager.is_implementation_available("nono");
         }
         
-        // gVisor should be available on all platforms (via Docker)
-        assert!(manager.is_implementation_available("gvisor"));
+        // Docker and the runsc runtime are environment-dependent as well.
+        let _gvisor_available = manager.is_implementation_available("gvisor");
         
         // Unknown implementation
         assert!(!manager.is_implementation_available("unknown"));
