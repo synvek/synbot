@@ -1,6 +1,6 @@
 [package]
 name = "synbot-desktop"
-version = "0.11.3"
+version = "0.12.0"
 description = "Synbot desktop application"
 authors = ["Synvek"]
 edition = "2021"

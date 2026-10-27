@@ -1,7 +1,7 @@
 {
   "name": "synbot-desktop",
   "private": true,
-  "version": "0.11.3",
+  "version": "0.12.0",
   "type": "module",
   "scripts": {
     "prepare:sidecar": "node scripts/copy-sidecar.mjs --debug --skip-build",
