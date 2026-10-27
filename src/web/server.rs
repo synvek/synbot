@@ -9,33 +9,41 @@ use anyhow::{Context, Result};
 ///
 /// REST and WebSocket endpoints share the same authentication middleware. Static
 /// assets remain public so unauthenticated users can load the login page.
+///
+/// Important: do **not** wrap authenticated routes in `web::scope("")` — an empty
+/// scope matches every path and returns 404 for `/` and other static assets before
+/// the public static routes can run.
 pub fn configure_routes(cfg: &mut web::ServiceConfig, state: AppState, auth: BasicAuth) {
-    cfg.app_data(web::Data::new(state)).service(
-        web::scope("")
-            .wrap(auth)
-            .service(
-                web::scope("/api")
-                    .route("/status", web::get().to(api::get_status))
-                    .route("/sessions", web::get().to(api::get_sessions))
-                    .route("/sessions/{id}", web::get().to(api::get_session_by_id))
-                    .route("/channels", web::get().to(api::get_channels))
-                    .route("/cron", web::get().to(api::get_cron_jobs))
-                    .route("/cron/{id}", web::patch().to(api::update_cron_job))
-                    .route("/agents", web::get().to(api::get_agents))
-                    .route("/skills", web::get().to(api::get_skills))
-                    .route("/skills/{name}", web::get().to(api::get_skill_by_name))
-                    .route("/config", web::get().to(api::get_config))
-                    .route("/config", web::put().to(api::put_config))
-                    .route("/logs", web::get().to(api::get_logs))
-                    .route("/approvals/history", web::get().to(api::get_approval_history))
-                    .route("/approvals/pending", web::get().to(api::get_pending_approvals))
-                    .route("/approvals/{id}/respond", web::post().to(api::submit_approval_response)),
-            )
-            .route("/ws/chat", web::get().to(ws::ws_chat))
-            .route("/ws/logs", web::get().to(ws::ws_logs)),
-    );
-
-    cfg.route("/", web::get().to(static_files::serve_index))
+    cfg.app_data(web::Data::new(state))
+        .service(
+            web::scope("/api")
+                .wrap(auth.clone())
+                .route("/status", web::get().to(api::get_status))
+                .route("/sessions", web::get().to(api::get_sessions))
+                .route("/sessions/{id}", web::get().to(api::get_session_by_id))
+                .route("/channels", web::get().to(api::get_channels))
+                .route("/cron", web::get().to(api::get_cron_jobs))
+                .route("/cron/{id}", web::patch().to(api::update_cron_job))
+                .route("/agents", web::get().to(api::get_agents))
+                .route("/skills", web::get().to(api::get_skills))
+                .route("/skills/{name}", web::get().to(api::get_skill_by_name))
+                .route("/config", web::get().to(api::get_config))
+                .route("/config", web::put().to(api::put_config))
+                .route("/logs", web::get().to(api::get_logs))
+                .route("/approvals/history", web::get().to(api::get_approval_history))
+                .route("/approvals/pending", web::get().to(api::get_pending_approvals))
+                .route(
+                    "/approvals/{id}/respond",
+                    web::post().to(api::submit_approval_response),
+                ),
+        )
+        .service(
+            web::scope("/ws")
+                .wrap(auth)
+                .route("/chat", web::get().to(ws::ws_chat))
+                .route("/logs", web::get().to(ws::ws_logs)),
+        )
+        .route("/", web::get().to(static_files::serve_index))
         .route("/{path:.*}", web::get().to(static_files::serve_static));
 }
 
