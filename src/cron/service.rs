@@ -164,12 +164,10 @@ impl CronService {
         for job in &mut self.store.jobs {
             if job.enabled && job.state.next_run_at_ms.is_none() {
                 let next = match &job.schedule {
-                    Schedule::Cron { expr, .. } => {
-                        cron::Schedule::from_str(expr)
-                            .ok()
-                            .and_then(|s| s.upcoming(chrono::Utc).next())
-                            .map(|dt| dt.timestamp_millis())
-                    }
+                    Schedule::Cron { expr, .. } => cron::Schedule::from_str(expr)
+                        .ok()
+                        .and_then(|s| s.upcoming(chrono::Utc).next())
+                        .map(|dt| dt.timestamp_millis()),
                     Schedule::Every { every_ms } => Some(now_ms + every_ms),
                     Schedule::At { at_ms } => Some(*at_ms),
                 };

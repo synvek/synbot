@@ -24,13 +24,31 @@ struct SecretPattern {
 
 /// All well-known sensitive token prefixes and their human-readable labels.
 static PATTERNS: &[SecretPattern] = &[
-    SecretPattern { prefix: "sk-",   label: "api_key"    },
-    SecretPattern { prefix: "xoxb-", label: "slack_bot"  },
-    SecretPattern { prefix: "xoxp-", label: "slack_user" },
-    SecretPattern { prefix: "ghp_",  label: "github_pat" },
-    SecretPattern { prefix: "gho_",  label: "github_oauth" },
+    SecretPattern {
+        prefix: "sk-",
+        label: "api_key",
+    },
+    SecretPattern {
+        prefix: "xoxb-",
+        label: "slack_bot",
+    },
+    SecretPattern {
+        prefix: "xoxp-",
+        label: "slack_user",
+    },
+    SecretPattern {
+        prefix: "ghp_",
+        label: "github_pat",
+    },
+    SecretPattern {
+        prefix: "gho_",
+        label: "github_oauth",
+    },
     // Bearer is handled specially: the token follows the space
-    SecretPattern { prefix: "Bearer ", label: "bearer_token" },
+    SecretPattern {
+        prefix: "Bearer ",
+        label: "bearer_token",
+    },
 ];
 
 // ---------------------------------------------------------------------------
@@ -55,6 +73,11 @@ impl SecretMaskerLayer {
         Self {
             config_secrets: Arc::new(RwLock::new(Vec::new())),
         }
+    }
+
+    /// Number of built-in token prefixes the masker recognises.
+    pub fn pattern_count() -> usize {
+        PATTERNS.len()
     }
 
     /// Extract all sensitive field values from the application [`Config`] and
@@ -261,7 +284,8 @@ impl MaskingVisitor {
 
 impl Visit for MaskingVisitor {
     fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
-        self.fields.push((field.name().to_string(), value.to_string()));
+        self.fields
+            .push((field.name().to_string(), value.to_string()));
     }
 
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
@@ -324,7 +348,10 @@ mod tests {
     fn test_mask_bearer_token() {
         let m = masker();
         let result = m.mask("Authorization: Bearer eyJhbGciOiJIUzI1NiJ9");
-        assert!(result.contains("Bear[REDACTED:bearer_token]"), "got: {result}");
+        assert!(
+            result.contains("Bear[REDACTED:bearer_token]"),
+            "got: {result}"
+        );
         assert!(!result.contains("eyJhbGciOiJIUzI1NiJ9"));
     }
 
@@ -332,7 +359,10 @@ mod tests {
     fn test_mask_github_pat() {
         let m = masker();
         let result = m.mask("token ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ");
-        assert!(result.contains("ghp_[REDACTED:github_pat]"), "got: {result}");
+        assert!(
+            result.contains("ghp_[REDACTED:github_pat]"),
+            "got: {result}"
+        );
     }
 
     #[test]
@@ -374,7 +404,10 @@ mod tests {
             secrets.push("supersecretvalue123".to_string());
         }
         let result = m.mask("Loaded key supersecretvalue123 from env");
-        assert!(result.contains("supe[REDACTED:config_secret]"), "got: {result}");
+        assert!(
+            result.contains("supe[REDACTED:config_secret]"),
+            "got: {result}"
+        );
         assert!(!result.contains("supersecretvalue123"));
     }
 
@@ -382,6 +415,9 @@ mod tests {
     fn test_mask_gho_token() {
         let m = masker();
         let result = m.mask("oauth token gho_ABCDEFGHIJKLMNOP");
-        assert!(result.contains("gho_[REDACTED:github_oauth]"), "got: {result}");
+        assert!(
+            result.contains("gho_[REDACTED:github_oauth]"),
+            "got: {result}"
+        );
     }
 }

@@ -73,7 +73,8 @@ description: 一个简单的配置，用于开始使用 Synbot
     "model": "claude-3-5-sonnet-20241022",
     "maxTokens": 8192,
     "temperature": 0.7,
-    "maxToolIterations": 20,
+    "maxToolIterations": 99,
+    "maxIdleIterations": 6,
     "maxConcurrentSubagents": 5,
     "roles": []
   },
@@ -231,7 +232,8 @@ cat > ~/.synbot/config.json << 'EOF'
     "model": "claude-3-5-sonnet-20241022",
     "maxTokens": 8192,
     "temperature": 0.7,
-    "maxToolIterations": 20,
+    "maxToolIterations": 99,
+    "maxIdleIterations": 6,
     "maxConcurrentSubagents": 5,
     "roles": []
   },
@@ -395,7 +397,8 @@ synbot --root-dir ~/.synbot start
   "model": "claude-3-5-sonnet-20241022",
   "maxTokens": 8192,
   "temperature": 0.7,
-  "maxToolIterations": 20,
+  "maxToolIterations": 99,
+  "maxIdleIterations": 6,
   "maxConcurrentSubagents": 5,
   "roles": []
 }
@@ -404,7 +407,7 @@ synbot --root-dir ~/.synbot start
 - 使用 Claude 3.5 Sonnet 模型
 - 8192 令牌限制
 - 0.7 温度（有创意但专注）
-- 20 个最大工具迭代
+- 99 个最大工具迭代（连续 6 轮无进展则提前停止）
 - 5 个并发子代理
 - 未定义自定义角色
 

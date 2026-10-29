@@ -42,7 +42,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             endpoint: "http://localhost:9090/metrics".to_string(),
         },
     };
-    
+
     let monitoring = MonitoringModule::new(monitoring_config);
     println!("   ✓ Monitoring configured with file and syslog output\n");
 
@@ -54,11 +54,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     // Step 3: Create sandbox manager with custom security validator
     println!("3. Creating sandbox manager with security validator...");
     let security_validator = SecurityValidator::new();
-    let manager = SandboxManager::with_security_validator(
-        config_manager,
-        monitoring,
-        security_validator,
-    );
+    let manager =
+        SandboxManager::with_security_validator(config_manager, monitoring, security_validator);
     println!("   ✓ Manager created with enhanced security\n");
 
     // Step 4: Create sandbox with fine-grained filesystem controls
@@ -86,7 +83,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         ],
         ..Default::default()
     };
-    
+
     println!("   Readonly paths: {}", fs_config.readonly_paths.len());
     println!("   Writable paths: {}", fs_config.writable_paths.len());
     println!("   Hidden paths: {}\n", fs_config.hidden_paths.len());
@@ -102,7 +99,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         ],
         allowed_ports: vec![80, 443, 8080],
     };
-    
+
     println!("   Network enabled: {}", network_config.enabled);
     println!("   Allowed hosts: {:?}", network_config.allowed_hosts);
     println!("   Allowed ports: {:?}\n", network_config.allowed_ports);
@@ -111,13 +108,19 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     println!("6. Setting resource limits...");
     let resource_config = ResourceConfig {
         max_memory: 4 * 1024 * 1024 * 1024, // 4GB
-        max_cpu: 4.0, // 4 cores
-        max_disk: 20 * 1024 * 1024 * 1024, // 20GB
+        max_cpu: 4.0,                       // 4 cores
+        max_disk: 20 * 1024 * 1024 * 1024,  // 20GB
     };
-    
-    println!("   Max memory: {} GB", resource_config.max_memory / (1024 * 1024 * 1024));
+
+    println!(
+        "   Max memory: {} GB",
+        resource_config.max_memory / (1024 * 1024 * 1024)
+    );
     println!("   Max CPU: {} cores", resource_config.max_cpu);
-    println!("   Max disk: {} GB\n", resource_config.max_disk / (1024 * 1024 * 1024));
+    println!(
+        "   Max disk: {} GB\n",
+        resource_config.max_disk / (1024 * 1024 * 1024)
+    );
 
     // Step 7: Configure process controls
     println!("7. Configuring process controls...");
@@ -125,7 +128,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         allow_fork: false,
         max_processes: 20,
     };
-    
+
     println!("   Allow fork: {}", process_config.allow_fork);
     println!("   Max processes: {}\n", process_config.max_processes);
 
@@ -151,19 +154,22 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     // Step 9: Demonstrate command validation
     println!("9. Testing command validation...");
-    
+
     let safe_commands = vec![
         ("ls", vec!["-la".to_string()]),
         ("cat", vec!["file.txt".to_string()]),
         ("echo", vec!["Hello".to_string()]),
     ];
-    
+
     let dangerous_commands = vec![
         ("rm", vec!["-rf".to_string(), "/".to_string()]),
-        ("dd", vec!["if=/dev/zero".to_string(), "of=/dev/sda".to_string()]),
+        (
+            "dd",
+            vec!["if=/dev/zero".to_string(), "of=/dev/sda".to_string()],
+        ),
         ("chmod", vec!["777".to_string(), "/etc/shadow".to_string()]),
     ];
-    
+
     println!("   Safe commands:");
     for (cmd, args) in safe_commands {
         match manager.validate_command(cmd, &args) {
@@ -171,7 +177,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             Err(e) => println!("     ✗ {} {:?} - blocked: {:?}", cmd, args, e),
         }
     }
-    
+
     println!("\n   Dangerous commands:");
     for (cmd, args) in dangerous_commands {
         match manager.validate_command(cmd, &args) {
@@ -184,14 +190,14 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     // Step 10: Demonstrate monitoring
     println!("10. Demonstrating audit logging...");
     let monitoring_ref = manager.monitoring();
-    
+
     // Log various events
     monitoring_ref.log_file_access(&sandbox_id, "/etc/passwd", "read", true);
     monitoring_ref.log_file_access(&sandbox_id, "/etc/shadow", "read", false);
     monitoring_ref.log_network_access(&sandbox_id, "api.example.com", 443, true);
     monitoring_ref.log_network_access(&sandbox_id, "malicious.com", 80, false);
     monitoring_ref.log_process_creation(&sandbox_id, "bash", &["-c".to_string(), "ls".to_string()]);
-    
+
     println!("   ✓ Logged 5 audit events");
     println!("     - 2 file access events");
     println!("     - 2 network access events");
@@ -201,7 +207,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     println!("11. Collecting sandbox metrics...");
     let metrics = monitoring_ref.collect_metrics(&sandbox_id);
     println!("   CPU usage: {:.2}%", metrics.cpu_usage);
-    println!("   Memory usage: {} MB", metrics.memory_usage / (1024 * 1024));
+    println!(
+        "   Memory usage: {} MB",
+        metrics.memory_usage / (1024 * 1024)
+    );
     println!("   Disk usage: {} MB", metrics.disk_usage / (1024 * 1024));
     println!("   Network I/O:");
     for (key, value) in &metrics.network_io {
@@ -211,19 +220,19 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     // Step 12: Security validation
     println!("12. Running security validation...");
-    
+
     // Verify isolation
     match manager.verify_sandbox_isolation(&sandbox_id).await {
         Ok(_) => println!("   ✓ Isolation integrity verified"),
         Err(e) => println!("   ✗ Isolation check failed: {:?}", e),
     }
-    
+
     // Enforce resource limits
     match manager.enforce_resource_limits(&sandbox_id).await {
         Ok(_) => println!("   ✓ Resource limits enforced"),
         Err(e) => println!("   ✗ Resource enforcement failed: {:?}", e),
     }
-    
+
     // Verify no-new-privileges
     match manager.verify_no_new_privileges() {
         Ok(_) => println!("   ✓ No-new-privileges verified"),
@@ -255,6 +264,6 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     println!("  ✓ Comprehensive audit logging");
     println!("  ✓ Metrics collection");
     println!("  ✓ Security validation");
-    
+
     Ok(())
 }

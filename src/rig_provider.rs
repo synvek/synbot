@@ -11,10 +11,11 @@
 //! the sandbox. Outside AppContainer the default reqwest client is used unchanged.
 
 use anyhow::{anyhow, Result};
+use futures_util::StreamExt;
 use rig::client::CompletionClient;
 use rig::client::Nothing;
 use rig::completion::request::{
-    CompletionError, CompletionRequest, CompletionResponse,
+    CompletionError, CompletionRequest, CompletionResponse, GetTokenUsage,
 };
 use rig::completion::CompletionModel;
 use rig::message::{AssistantContent, UserContent};
@@ -23,17 +24,63 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use tokio::sync::{mpsc, oneshot};
+
+/// One incremental chunk of a streaming completion.
+#[derive(Debug, Clone, PartialEq)]
+pub enum StreamDelta {
+    /// Assistant text.
+    Text(String),
+    /// Reasoning / thinking text (DeepSeek `reasoning_content`, Anthropic thinking, ...).
+    Reasoning(String),
+    /// A tool call fragment. OpenAI-style providers stream the name once, then arguments as text.
+    ToolCallDelta {
+        id: String,
+        name: Option<String>,
+        arguments: String,
+    },
+}
+
+/// A live streaming completion.
+///
+/// Deltas arrive on [`StreamSession::deltas`]; [`StreamSession::final_choice`] resolves with the
+/// aggregated assistant content once the provider is done, so callers can reuse the same
+/// tool-call handling path as the non-streaming API.
+pub struct StreamSession {
+    pub deltas: mpsc::Receiver<Result<StreamDelta, CompletionError>>,
+    pub final_choice: oneshot::Receiver<Result<StreamFinal, CompletionError>>,
+}
+
+/// The aggregated result of a streaming completion.
+#[derive(Debug, Clone)]
+pub struct StreamFinal {
+    pub choice: rig::OneOrMany<AssistantContent>,
+    /// Provider-reported usage, when the stream carried it (many APIs only send it in the
+    /// last chunk).
+    pub usage: Option<rig::completion::Usage>,
+}
 
 /// Provider-agnostic completion model trait (replaces rig_dyn::CompletionModel).
 pub trait SynbotCompletionModel: Send + Sync {
     fn completion(
         &self,
         request: CompletionRequest,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = Result<CompletionResponse<()>, CompletionError>> + Send + '_,
-        >,
-    >;
+    ) -> Pin<Box<dyn Future<Output = Result<CompletionResponse<()>, CompletionError>> + Send + '_>>;
+
+    /// Stream a completion.
+    ///
+    /// The default implementation reports "unsupported", which lets [`crate::agent::r#loop`]
+    /// fall back to [`Self::completion`] without every provider having to opt in.
+    fn completion_stream(
+        &self,
+        _request: CompletionRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<StreamSession, CompletionError>> + Send + '_>> {
+        Box::pin(async {
+            Err(CompletionError::ProviderError(
+                "streaming is not supported by this model".to_string(),
+            ))
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -229,9 +276,7 @@ impl ProviderFactory for AnthropicCompatibleProviderFactory {
 pub fn register_extra_providers_from_config(cfg: &crate::config::Config) {
     let openai_factory: Arc<dyn ProviderFactory> = Arc::new(OpenAiCompatibleProviderFactory);
     let anthropic_factory: Arc<dyn ProviderFactory> = Arc::new(AnthropicCompatibleProviderFactory);
-    let mut reg = default_registry()
-        .write()
-        .expect("provider registry lock");
+    let mut reg = default_registry().write().expect("provider registry lock");
     for (name, entry) in &cfg.providers.extra {
         let key = name.trim().to_lowercase();
         if BUILTIN_PROVIDER_NAMES.iter().any(|n| key == *n) {
@@ -312,7 +357,8 @@ fn build_completion_model_builtin(
             .filter(|s| !s.trim().is_empty())
             .map(|s| s.trim().to_string())
             .unwrap_or_else(|| DEEPSEEK_API_BASE.to_string());
-        let m = DeepSeekDirectModel::new(mk_http(), api_key.to_string(), model_name.to_string(), base);
+        let m =
+            DeepSeekDirectModel::new(mk_http(), api_key.to_string(), model_name.to_string(), base);
         Arc::new(m) as Arc<dyn SynbotCompletionModel>
     } else if lower.contains("moonshot") {
         let client = rig::providers::moonshot::Client::<RC>::builder()
@@ -336,8 +382,10 @@ fn build_completion_model_builtin(
             .filter(|s| !s.trim().is_empty())
             .map(|s| s.trim().trim_end_matches('/').to_string())
             .unwrap_or_else(|| "https://api.kimi.com/coding".to_string());
-        let http_kimi = crate::appcontainer_dns::build_reqwest_client_with_user_agent("KimiCLI/1.3");
-        let m = KimiCodeDirectModel::new(http_kimi, api_key.to_string(), model_name.to_string(), base);
+        let http_kimi =
+            crate::appcontainer_dns::build_reqwest_client_with_user_agent("KimiCLI/1.3");
+        let m =
+            KimiCodeDirectModel::new(http_kimi, api_key.to_string(), model_name.to_string(), base);
         Arc::new(m) as Arc<dyn SynbotCompletionModel>
     } else if lower.contains("openrouter") {
         // OpenRouter: use direct HTTP with /chat/completions. rig's OpenAI client uses /v1/responses
@@ -347,7 +395,12 @@ fn build_completion_model_builtin(
             .filter(|s| !s.trim().is_empty())
             .map(|s| s.trim().trim_end_matches('/').to_string())
             .unwrap_or_else(|| OPENROUTER_API_BASE.to_string());
-        let m = OpenRouterDirectModel::new(mk_http(), api_key.to_string(), model_name.to_string(), base);
+        let m = OpenRouterDirectModel::new(
+            mk_http(),
+            api_key.to_string(),
+            model_name.to_string(),
+            base,
+        );
         Arc::new(m) as Arc<dyn SynbotCompletionModel>
     } else {
         // OpenAI or default: use Responses API (/v1/responses) for official OpenAI;
@@ -384,10 +437,7 @@ fn build_completion_model_builtin(
 
 macro_rules! impl_model {
     ($name:ident, $client:ty) => {
-        struct $name(
-            $client,
-            <$client as CompletionClient>::CompletionModel,
-        );
+        struct $name($client, <$client as CompletionClient>::CompletionModel);
         impl SynbotCompletionModel for $name {
             fn completion(
                 &self,
@@ -410,16 +460,310 @@ macro_rules! impl_model {
                 };
                 Box::pin(fut)
             }
+
+            /// Streaming via rig's `CompletionModel::stream` (every rig provider implements it).
+            fn completion_stream(
+                &self,
+                request: CompletionRequest,
+            ) -> Pin<Box<dyn Future<Output = Result<StreamSession, CompletionError>> + Send + '_>>
+            {
+                let model = self.1.clone();
+                Box::pin(async move {
+                    let mut stream = model.stream(request).await?;
+                    let (tx, deltas) = mpsc::channel(256);
+                    let (final_tx, final_choice) = oneshot::channel();
+                    tokio::spawn(async move {
+                        while let Some(item) = stream.next().await {
+                            let delta = match item {
+                                Ok(rig::streaming::StreamedAssistantContent::Text(t)) => {
+                                    StreamDelta::Text(t.text)
+                                }
+                                Ok(rig::streaming::StreamedAssistantContent::Reasoning(r)) => {
+                                    StreamDelta::Reasoning(r.reasoning.join("\n"))
+                                }
+                                Ok(rig::streaming::StreamedAssistantContent::ReasoningDelta {
+                                    reasoning,
+                                    ..
+                                }) => StreamDelta::Reasoning(reasoning),
+                                Ok(rig::streaming::StreamedAssistantContent::ToolCall {
+                                    tool_call,
+                                    ..
+                                }) => StreamDelta::ToolCallDelta {
+                                    id: tool_call.id.clone(),
+                                    name: Some(tool_call.function.name.clone()),
+                                    arguments: tool_call.function.arguments.to_string(),
+                                },
+                                Ok(rig::streaming::StreamedAssistantContent::ToolCallDelta {
+                                    id,
+                                    content,
+                                    ..
+                                }) => {
+                                    let (name, arguments) = match content {
+                                        rig::streaming::ToolCallDeltaContent::Name(n) => {
+                                            (Some(n), String::new())
+                                        }
+                                        rig::streaming::ToolCallDeltaContent::Delta(d) => (None, d),
+                                    };
+                                    StreamDelta::ToolCallDelta {
+                                        id,
+                                        name,
+                                        arguments,
+                                    }
+                                }
+                                Ok(rig::streaming::StreamedAssistantContent::Final(_)) => continue,
+                                Err(e) => {
+                                    let _ = tx.send(Err(e)).await;
+                                    return;
+                                }
+                            };
+                            if tx.send(Ok(delta)).await.is_err() {
+                                return;
+                            }
+                        }
+                        let usage = stream.response.as_ref().and_then(|r| r.token_usage());
+                        let _ = final_tx.send(Ok(StreamFinal {
+                            choice: stream.choice.clone(),
+                            usage,
+                        }));
+                    });
+                    Ok(StreamSession {
+                        deltas,
+                        final_choice,
+                    })
+                })
+            }
         }
     };
 }
 
 impl_model!(OpenAiModel, rig::providers::openai::Client);
-impl_model!(OpenAiCompletionsModel, rig::providers::openai::CompletionsClient);
+impl_model!(
+    OpenAiCompletionsModel,
+    rig::providers::openai::CompletionsClient
+);
 impl_model!(AnthropicModel, rig::providers::anthropic::Client);
 impl_model!(GeminiModel, rig::providers::gemini::Client);
 impl_model!(MoonshotModel, rig::providers::moonshot::Client);
 impl_model!(OllamaModel, rig::providers::ollama::Client);
+
+// ---------------------------------------------------------------------------
+// Shared SSE reader for OpenAI Chat Completions–compatible endpoints
+// ---------------------------------------------------------------------------
+
+/// Stream a `chat/completions` request by parsing server-sent events.
+///
+/// Used by the direct-HTTP providers (DeepSeek / Kimi / OpenRouter) where the request body is
+/// built by hand instead of going through rig's provider clients. Text, reasoning and tool-call
+/// fragments are forwarded as [`StreamDelta`]s; the aggregated assistant content is delivered on
+/// [`StreamSession::final_choice`].
+///
+/// Byte-level line splitting is intentional: `\n` never appears inside a multi-byte UTF-8
+/// sequence, so text split across network chunks (e.g. Chinese) is reassembled correctly.
+async fn stream_chat_completions_sse(
+    http: &reqwest::Client,
+    url: &str,
+    api_key: &str,
+    user_agent: Option<&str>,
+    model_name: &str,
+    body: Value,
+) -> Result<StreamSession, CompletionError> {
+    let mut req = http.post(url).bearer_auth(api_key).json(&body);
+    if let Some(ua) = user_agent {
+        req = req.header(reqwest::header::USER_AGENT, ua);
+    }
+    let resp = req.send().await.map_err(|e| {
+        CompletionError::ProviderError(format!(
+            "Streaming request failed (url={}, model={}): {}",
+            url, model_name, e
+        ))
+    })?;
+    let status = resp.status();
+    if !status.is_success() {
+        let msg = resp.text().await.unwrap_or_default();
+        return Err(CompletionError::ProviderError(format!(
+            "Invalid status code {} (url={}, model={}) with message: {}",
+            status, url, model_name, msg
+        )));
+    }
+
+    let (tx, deltas) = mpsc::channel(256);
+    let (final_tx, final_choice) = oneshot::channel();
+    let url_owned = url.to_string();
+    tokio::spawn(async move {
+        let mut stream = resp.bytes_stream();
+        let mut buf: Vec<u8> = Vec::new();
+        let mut text_acc = String::new();
+        let mut reasoning_acc = String::new();
+        // tool call index -> (id, name, arguments)
+        let mut tool_acc: Vec<(String, String, String)> = Vec::new();
+        let mut usage: Option<rig::completion::Usage> = None;
+        let mut failure: Option<CompletionError> = None;
+        let mut saw_data = false;
+        let mut done = false;
+
+        while !done {
+            let chunk = match stream.next().await {
+                None => break,
+                Some(Ok(c)) => c,
+                Some(Err(e)) => {
+                    failure = Some(CompletionError::ProviderError(format!(
+                        "Streaming read failed (url={}): {}",
+                        url_owned, e
+                    )));
+                    break;
+                }
+            };
+            buf.extend_from_slice(&chunk);
+
+            // Drain every complete line from the buffer.
+            let mut consumed = 0usize;
+            while let Some(pos) = buf[consumed..].iter().position(|b| *b == b'\n') {
+                let end = consumed + pos;
+                let raw = String::from_utf8_lossy(&buf[consumed..end]).to_string();
+                consumed = end + 1;
+                let line = raw.trim_end_matches('\r');
+                if !line.starts_with("data:") {
+                    continue;
+                }
+                let payload = line["data:".len()..].trim();
+                if payload.is_empty() {
+                    continue;
+                }
+                if payload == "[DONE]" {
+                    done = true;
+                    break;
+                }
+                let Ok(json) = serde_json::from_str::<Value>(payload) else {
+                    continue;
+                };
+                // OpenAI-compatible APIs emit usage either on every chunk or only on the last one
+                // (with an empty `choices`), so read it before looking at `choices`.
+                if let Some(u) = json.get("usage").filter(|v| !v.is_null()) {
+                    usage = Some(rig::completion::Usage {
+                        input_tokens: u["prompt_tokens"].as_u64().unwrap_or(0),
+                        output_tokens: u["completion_tokens"].as_u64().unwrap_or(0),
+                        total_tokens: u["total_tokens"].as_u64().unwrap_or(0),
+                        cached_input_tokens: u["prompt_tokens_details"]["cached_tokens"]
+                            .as_u64()
+                            .unwrap_or(0),
+                    });
+                }
+                let Some(choice) = json["choices"].as_array().and_then(|a| a.first()) else {
+                    continue;
+                };
+                saw_data = true;
+                let delta = &choice["delta"];
+
+                if let Some(t) = delta["reasoning_content"].as_str() {
+                    if !t.is_empty() {
+                        reasoning_acc.push_str(t);
+                        if tx
+                            .send(Ok(StreamDelta::Reasoning(t.to_string())))
+                            .await
+                            .is_err()
+                        {
+                            return;
+                        }
+                    }
+                }
+                if let Some(t) = delta["content"].as_str() {
+                    if !t.is_empty() {
+                        text_acc.push_str(t);
+                        if tx.send(Ok(StreamDelta::Text(t.to_string()))).await.is_err() {
+                            return;
+                        }
+                    }
+                }
+                if let Some(calls) = delta["tool_calls"].as_array() {
+                    for call in calls {
+                        let index = call["index"].as_u64().unwrap_or(0) as usize;
+                        while tool_acc.len() <= index {
+                            tool_acc.push((String::new(), String::new(), String::new()));
+                        }
+                        let name_frag = call["function"]["name"].as_str().unwrap_or("");
+                        let args_frag = call["function"]["arguments"].as_str().unwrap_or("");
+                        let slot = &mut tool_acc[index];
+                        if let Some(id) = call["id"].as_str() {
+                            if !id.is_empty() {
+                                slot.0 = id.to_string();
+                            }
+                        }
+                        if !name_frag.is_empty() {
+                            slot.1.push_str(name_frag);
+                        }
+                        if !args_frag.is_empty() {
+                            slot.2.push_str(args_frag);
+                        }
+                        let event = StreamDelta::ToolCallDelta {
+                            id: slot.0.clone(),
+                            name: if name_frag.is_empty() {
+                                None
+                            } else {
+                                Some(name_frag.to_string())
+                            },
+                            arguments: args_frag.to_string(),
+                        };
+                        if tx.send(Ok(event)).await.is_err() {
+                            return;
+                        }
+                    }
+                }
+            }
+            buf.drain(..consumed);
+        }
+
+        // A provider that ignores `stream: true` (or a proxy that swallows the body) yields no
+        // `data:` lines at all. Report an error so the caller falls back to non-streaming.
+        if failure.is_none() && !saw_data {
+            failure = Some(CompletionError::ProviderError(format!(
+                "Streaming response contained no data (url={}); falling back to non-streaming",
+                url_owned
+            )));
+        }
+
+        let result = match failure {
+            Some(e) => Err(e),
+            None => Ok(StreamFinal {
+                choice: build_streamed_choice(&reasoning_acc, &text_acc, &tool_acc),
+                usage,
+            }),
+        };
+        let _ = final_tx.send(result);
+    });
+
+    Ok(StreamSession {
+        deltas,
+        final_choice,
+    })
+}
+
+/// Aggregate streamed fragments into rig's assistant content, preserving reasoning first so
+/// providers such as DeepSeek can replay it on the next tool turn.
+fn build_streamed_choice(
+    reasoning: &str,
+    text: &str,
+    tool_calls: &[(String, String, String)],
+) -> rig::OneOrMany<AssistantContent> {
+    let mut contents: Vec<AssistantContent> = Vec::new();
+    if !reasoning.is_empty() {
+        contents.push(AssistantContent::reasoning(reasoning));
+    }
+    for (id, name, args) in tool_calls {
+        if name.is_empty() {
+            continue;
+        }
+        let args: Value = serde_json::from_str(args).unwrap_or_else(|_| json!({}));
+        contents.push(AssistantContent::tool_call(id, name, args));
+    }
+    if !text.is_empty() {
+        contents.push(AssistantContent::text(text));
+    }
+    if contents.is_empty() {
+        contents.push(AssistantContent::text(""));
+    }
+    rig::OneOrMany::many(contents)
+        .unwrap_or_else(|_| rig::OneOrMany::one(AssistantContent::text("")))
+}
 
 // ---------------------------------------------------------------------------
 // DeepSeek: custom implementation that correctly handles reasoning_content
@@ -487,7 +831,9 @@ impl DeepSeekDirectModel {
                             UserContent::ToolResult(tr) => {
                                 let content_str = match tr.content.first() {
                                     rig::message::ToolResultContent::Text(t) => t.text.clone(),
-                                    rig::message::ToolResultContent::Image(_) => "[Image]".to_string(),
+                                    rig::message::ToolResultContent::Image(_) => {
+                                        "[Image]".to_string()
+                                    }
                                 };
                                 tool_results.push(json!({
                                     "role": "tool",
@@ -650,6 +996,21 @@ fn strip_orphan_tool_messages(messages: &mut Vec<Value>) {
 }
 
 impl SynbotCompletionModel for DeepSeekDirectModel {
+    fn completion_stream(
+        &self,
+        request: CompletionRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<StreamSession, CompletionError>> + Send + '_>> {
+        let mut body = self.build_request_body(&request);
+        body["stream"] = json!(true);
+        let url = format!("{}/chat/completions", self.api_base);
+        let http = self.http.clone();
+        let api_key = self.api_key.clone();
+        let model_name = self.model.clone();
+        Box::pin(async move {
+            stream_chat_completions_sse(&http, &url, &api_key, None, &model_name, body).await
+        })
+    }
+
     fn completion(
         &self,
         request: CompletionRequest,
@@ -668,23 +1029,20 @@ impl SynbotCompletionModel for DeepSeekDirectModel {
                 .json(&body)
                 .send()
                 .await
-                .map_err(|e| CompletionError::ProviderError(format!(
-                    "Request failed (url={}, model={}): {}",
-                    url,
-                    model_name,
-                    e
-                )))?;
+                .map_err(|e| {
+                    CompletionError::ProviderError(format!(
+                        "Request failed (url={}, model={}): {}",
+                        url, model_name, e
+                    ))
+                })?;
 
             let status = resp.status();
-            let bytes = resp
-                .bytes()
-                .await
-                .map_err(|e| CompletionError::ProviderError(format!(
+            let bytes = resp.bytes().await.map_err(|e| {
+                CompletionError::ProviderError(format!(
                     "Reading response failed (url={}, model={}): {}",
-                    url,
-                    model_name,
-                    e
-                )))?;
+                    url, model_name, e
+                ))
+            })?;
 
             if !status.is_success() {
                 let msg = String::from_utf8_lossy(&bytes).to_string();
@@ -794,7 +1152,9 @@ impl KimiCodeDirectModel {
                             UserContent::ToolResult(tr) => {
                                 let content_str = match tr.content.first() {
                                     rig::message::ToolResultContent::Text(t) => t.text.clone(),
-                                    rig::message::ToolResultContent::Image(_) => "[Image]".to_string(),
+                                    rig::message::ToolResultContent::Image(_) => {
+                                        "[Image]".to_string()
+                                    }
                                 };
                                 tool_results.push(json!({
                                     "role": "tool",
@@ -838,7 +1198,11 @@ impl KimiCodeDirectModel {
                     if !tool_calls.is_empty() {
                         obj["tool_calls"] = json!(tool_calls);
                         // Kimi Code requires reasoning_content when thinking is enabled and message has tool_calls.
-                        obj["reasoning_content"] = json!(if reasoning_content.is_empty() { "" } else { &*reasoning_content });
+                        obj["reasoning_content"] = json!(if reasoning_content.is_empty() {
+                            ""
+                        } else {
+                            &*reasoning_content
+                        });
                     }
                     messages.push(obj);
                 }
@@ -880,10 +1244,34 @@ impl KimiCodeDirectModel {
 }
 
 impl SynbotCompletionModel for KimiCodeDirectModel {
+    fn completion_stream(
+        &self,
+        request: CompletionRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<StreamSession, CompletionError>> + Send + '_>> {
+        let mut body = self.build_request_body(&request);
+        body["stream"] = json!(true);
+        let url = format!("{}/v1/chat/completions", self.api_base);
+        let http = self.http.clone();
+        let api_key = self.api_key.clone();
+        let model_name = self.model.clone();
+        Box::pin(async move {
+            stream_chat_completions_sse(
+                &http,
+                &url,
+                &api_key,
+                Some("KimiCLI/1.3"),
+                &model_name,
+                body,
+            )
+            .await
+        })
+    }
+
     fn completion(
         &self,
         request: CompletionRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<CompletionResponse<()>, CompletionError>> + Send + '_>> {
+    ) -> Pin<Box<dyn Future<Output = Result<CompletionResponse<()>, CompletionError>> + Send + '_>>
+    {
         let body = self.build_request_body(&request);
         let url = format!("{}/v1/chat/completions", self.api_base);
         let model_name = self.model.clone();
@@ -897,18 +1285,19 @@ impl SynbotCompletionModel for KimiCodeDirectModel {
                 .json(&body)
                 .send()
                 .await
-                .map_err(|e| CompletionError::ProviderError(format!(
-                    "Request failed (url={}, model={}): {}",
-                    url, model_name, e
-                )))?;
+                .map_err(|e| {
+                    CompletionError::ProviderError(format!(
+                        "Request failed (url={}, model={}): {}",
+                        url, model_name, e
+                    ))
+                })?;
             let status = resp.status();
-            let bytes = resp
-                .bytes()
-                .await
-                .map_err(|e| CompletionError::ProviderError(format!(
+            let bytes = resp.bytes().await.map_err(|e| {
+                CompletionError::ProviderError(format!(
                     "Reading response failed (url={}, model={}): {}",
                     url, model_name, e
-                )))?;
+                ))
+            })?;
             if !status.is_success() {
                 let msg = String::from_utf8_lossy(&bytes).to_string();
                 return Err(CompletionError::ProviderError(format!(
@@ -1005,7 +1394,9 @@ impl OpenRouterDirectModel {
                             UserContent::ToolResult(tr) => {
                                 let content_str = match tr.content.first() {
                                     rig::message::ToolResultContent::Text(t) => t.text.clone(),
-                                    rig::message::ToolResultContent::Image(_) => "[Image]".to_string(),
+                                    rig::message::ToolResultContent::Image(_) => {
+                                        "[Image]".to_string()
+                                    }
                                 };
                                 tool_results.push(json!({
                                     "role": "tool",
@@ -1085,10 +1476,26 @@ impl OpenRouterDirectModel {
 }
 
 impl SynbotCompletionModel for OpenRouterDirectModel {
+    fn completion_stream(
+        &self,
+        request: CompletionRequest,
+    ) -> Pin<Box<dyn Future<Output = Result<StreamSession, CompletionError>> + Send + '_>> {
+        let mut body = self.build_request_body(&request);
+        body["stream"] = json!(true);
+        let url = format!("{}/chat/completions", self.api_base);
+        let http = self.http.clone();
+        let api_key = self.api_key.clone();
+        let model_name = self.model.clone();
+        Box::pin(async move {
+            stream_chat_completions_sse(&http, &url, &api_key, None, &model_name, body).await
+        })
+    }
+
     fn completion(
         &self,
         request: CompletionRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<CompletionResponse<()>, CompletionError>> + Send + '_>> {
+    ) -> Pin<Box<dyn Future<Output = Result<CompletionResponse<()>, CompletionError>> + Send + '_>>
+    {
         let body = self.build_request_body(&request);
         let url = format!("{}/chat/completions", self.api_base);
         let model_name = self.model.clone();
@@ -1102,18 +1509,19 @@ impl SynbotCompletionModel for OpenRouterDirectModel {
                 .json(&body)
                 .send()
                 .await
-                .map_err(|e| CompletionError::ProviderError(format!(
-                    "Request failed (url={}, model={}): {}",
-                    url, model_name, e
-                )))?;
+                .map_err(|e| {
+                    CompletionError::ProviderError(format!(
+                        "Request failed (url={}, model={}): {}",
+                        url, model_name, e
+                    ))
+                })?;
             let status = resp.status();
-            let bytes = resp
-                .bytes()
-                .await
-                .map_err(|e| CompletionError::ProviderError(format!(
+            let bytes = resp.bytes().await.map_err(|e| {
+                CompletionError::ProviderError(format!(
                     "Reading response failed (url={}, model={}): {}",
                     url, model_name, e
-                )))?;
+                ))
+            })?;
             if !status.is_success() {
                 let msg = String::from_utf8_lossy(&bytes).to_string();
                 return Err(CompletionError::ProviderError(format!(

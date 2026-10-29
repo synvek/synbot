@@ -3,9 +3,7 @@
 use anyhow::{bail, Result};
 use clap::Subcommand;
 
-use crate::config::{
-    is_pairing_channel_provider, load_config, save_config, Config, PairingEntry,
-};
+use crate::config::{is_pairing_channel_provider, load_config, save_config, Config, PairingEntry};
 
 #[derive(Subcommand)]
 pub enum PairingAction {
@@ -19,10 +17,7 @@ pub enum PairingAction {
     /// List all pairings.
     List,
     /// Remove a pairing entry.
-    Remove {
-        channel: String,
-        code: String,
-    },
+    Remove { channel: String, code: String },
 }
 
 fn normalize_pairing_code(code: &str) -> Result<String> {
@@ -67,10 +62,7 @@ pub async fn cmd_pairing(action: PairingAction) -> Result<()> {
             if cfg.pairings.is_empty() {
                 println!("No pairings configured.");
             } else {
-                println!(
-                    "{:<12} {}",
-                    "CHANNEL", "PAIRING_CODE"
-                );
+                println!("{:<12} {}", "CHANNEL", "PAIRING_CODE");
                 for p in &cfg.pairings {
                     println!("{:<12} {}", p.channel, p.pairing_code);
                 }

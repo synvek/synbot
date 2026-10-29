@@ -7,15 +7,11 @@ use tauri::{AppHandle, Manager, RunEvent};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
-#[cfg(not(debug_assertions))]
 const SYNBOT_HOST: &str = "127.0.0.1";
-#[cfg(not(debug_assertions))]
 const SYNBOT_PORT: u16 = 18888;
 #[cfg(not(debug_assertions))]
 const DASHBOARD_URL: &str = "http://127.0.0.1:18888";
-#[cfg(not(debug_assertions))]
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(60);
-#[cfg(not(debug_assertions))]
 const HEALTH_INTERVAL: Duration = Duration::from_millis(500);
 
 struct SidecarState {
@@ -29,25 +25,18 @@ impl SidecarState {
         }
     }
 
-    #[cfg(not(debug_assertions))]
     fn set_child(&self, child: CommandChild) {
         *self.child.lock().expect("sidecar lock poisoned") = Some(child);
     }
 
     #[allow(dead_code)]
     fn kill(&self) {
-        if let Some(child) = self
-            .child
-            .lock()
-            .expect("sidecar lock poisoned")
-            .take()
-        {
+        if let Some(child) = self.child.lock().expect("sidecar lock poisoned").take() {
             let _ = child.kill();
         }
     }
 }
 
-#[cfg(not(debug_assertions))]
 fn synbot_config_path() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -55,12 +44,10 @@ fn synbot_config_path() -> PathBuf {
         .join("config.json")
 }
 
-#[cfg(not(debug_assertions))]
 fn synbot_config_exists() -> bool {
     synbot_config_path().exists()
 }
 
-#[cfg(not(debug_assertions))]
 fn is_synbot_port_open() -> bool {
     let addr: SocketAddr = format!("{SYNBOT_HOST}:{SYNBOT_PORT}")
         .parse()
@@ -68,7 +55,6 @@ fn is_synbot_port_open() -> bool {
     TcpStream::connect_timeout(&addr, Duration::from_secs(1)).is_ok()
 }
 
-#[cfg(not(debug_assertions))]
 async fn wait_for_synbot() -> Result<(), String> {
     let deadline = Instant::now() + HEALTH_TIMEOUT;
     while Instant::now() < deadline {
@@ -83,8 +69,16 @@ async fn wait_for_synbot() -> Result<(), String> {
     ))
 }
 
+/// Production shows progress on the bundled loading page; the dev window hosts the Vite UI
+/// instead, so there is nothing to update there.
+#[cfg(debug_assertions)]
+fn set_loading_status(_window: Option<&tauri::WebviewWindow>, _message: &str, _is_error: bool) {}
+
 #[cfg(not(debug_assertions))]
-fn set_loading_status(window: &tauri::WebviewWindow, message: &str, is_error: bool) {
+fn set_loading_status(window: Option<&tauri::WebviewWindow>, message: &str, is_error: bool) {
+    let Some(window) = window else {
+        return;
+    };
     let escaped = message
         .replace('\\', "\\\\")
         .replace('\'', "\\'")
@@ -133,10 +127,7 @@ async fn run_sidecar_command(app: &AppHandle, args: &[&str]) -> Result<(), Strin
 
     match exit_code {
         Some(0) | None => Ok(()),
-        Some(code) => Err(format!(
-            "synbot {} exited with code {code}",
-            args.join(" ")
-        )),
+        Some(code) => Err(format!("synbot {} exited with code {code}", args.join(" "))),
     }
 }
 
@@ -146,15 +137,18 @@ async fn ensure_onboarded(app: &AppHandle, window: &tauri::WebviewWindow) -> Res
         return Ok(());
     }
 
-    set_loading_status(window, "First run: initializing synbot workspace…", false);
+    set_loading_status(
+        Some(window),
+        "First run: initializing synbot workspace…",
+        false,
+    );
     run_sidecar_command(app, &["onboard"]).await
 }
 
-#[cfg(not(debug_assertions))]
 async fn start_sidecar_daemon(
     app: &AppHandle,
     sidecar_state: &SidecarState,
-    window: &tauri::WebviewWindow,
+    window: Option<&tauri::WebviewWindow>,
 ) -> Result<(), String> {
     if is_synbot_port_open() {
         return Ok(());
@@ -206,17 +200,45 @@ async fn bootstrap_production(app: AppHandle) {
     let sidecar_state = app.state::<SidecarState>();
 
     if let Err(err) = ensure_onboarded(&app, &window).await {
-        set_loading_status(&window, &err, true);
+        set_loading_status(Some(&window), &err, true);
         return;
     }
 
-    if let Err(err) = start_sidecar_daemon(&app, sidecar_state.inner(), &window).await {
-        set_loading_status(&window, &err, true);
+    if let Err(err) = start_sidecar_daemon(&app, sidecar_state.inner(), Some(&window)).await {
+        set_loading_status(Some(&window), &err, true);
         return;
     }
 
     if let Err(err) = navigate_to_dashboard(&window) {
-        set_loading_status(&window, &err, true);
+        set_loading_status(Some(&window), &err, true);
+    }
+}
+
+/// `tauri dev` serves the UI from the Vite dev server (see `devUrl`), but `/api` and `/ws` are
+/// proxied to `SYNBOT_HOST:SYNBOT_PORT`, so the daemon still has to be running. Nothing spawns it
+/// otherwise, which made every request — including the login probe — fail against a dead port.
+#[cfg(debug_assertions)]
+async fn bootstrap_dev(app: AppHandle) {
+    if is_synbot_port_open() {
+        println!(
+            "[synbot-desktop] reusing the daemon already listening on {SYNBOT_HOST}:{SYNBOT_PORT}"
+        );
+        return;
+    }
+
+    if !synbot_config_exists() {
+        eprintln!(
+            "[synbot-desktop] no synbot config at {}; run `cargo run -- onboard` once, then restart",
+            synbot_config_path().display()
+        );
+        return;
+    }
+
+    println!("[synbot-desktop] starting local synbot daemon for the dev UI…");
+    let sidecar_state = app.state::<SidecarState>();
+    match start_sidecar_daemon(&app, sidecar_state.inner(), None).await {
+        Ok(()) => println!("[synbot-desktop] synbot daemon ready on {SYNBOT_HOST}:{SYNBOT_PORT}"),
+        Err(err) => eprintln!("[synbot-desktop] failed to start synbot daemon: {err}"),
     }
 }
 
@@ -226,13 +248,18 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(SidecarState::new())
         .setup(|_app| {
+            let handle = _app.handle().clone();
+
+            #[cfg(debug_assertions)]
+            tauri::async_runtime::spawn(async move {
+                bootstrap_dev(handle).await;
+            });
+
             #[cfg(not(debug_assertions))]
-            {
-                let handle = _app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    bootstrap_production(handle).await;
-                });
-            }
+            tauri::async_runtime::spawn(async move {
+                bootstrap_production(handle).await;
+            });
+
             Ok(())
         })
         .build(tauri::generate_context!())

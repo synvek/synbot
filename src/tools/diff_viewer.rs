@@ -31,8 +31,8 @@ fn path_for_prefix_check(p: &Path) -> PathBuf {
 }
 
 fn resolve_path(path: &str, workspace: &Path, restrict: bool) -> anyhow::Result<PathBuf> {
-    let effective_workspace = context::current_allowed_roots()
-        .unwrap_or_else(|| workspace.to_path_buf());
+    let effective_workspace =
+        context::current_allowed_roots().unwrap_or_else(|| workspace.to_path_buf());
     let p = if Path::new(path).is_absolute() {
         PathBuf::from(path)
     } else {
@@ -42,11 +42,15 @@ fn resolve_path(path: &str, workspace: &Path, restrict: bool) -> anyhow::Result<
     let canonical_norm = path_for_prefix_check(&canonical);
 
     let allowed = if let Some(ctx_workspace) = context::current_allowed_roots() {
-        let ws_canon = ctx_workspace.canonicalize().unwrap_or_else(|_| ctx_workspace.clone());
+        let ws_canon = ctx_workspace
+            .canonicalize()
+            .unwrap_or_else(|_| ctx_workspace.clone());
         let ws_norm = path_for_prefix_check(&ws_canon);
         canonical_norm.starts_with(&ws_norm)
     } else if restrict {
-        let ws_canon = workspace.canonicalize().unwrap_or_else(|_| workspace.to_path_buf());
+        let ws_canon = workspace
+            .canonicalize()
+            .unwrap_or_else(|_| workspace.to_path_buf());
         let ws_norm = path_for_prefix_check(&ws_canon);
         canonical_norm.starts_with(&ws_norm)
     } else {
@@ -144,9 +148,16 @@ pub fn generate_unified_diff(path: &str, original: &str, modified: &str) -> Stri
         for &(op, _, _) in &ops {
             positions.push((oi, ni));
             match op {
-                '=' => { oi += 1; ni += 1; }
-                '-' => { oi += 1; }
-                '+' => { ni += 1; }
+                '=' => {
+                    oi += 1;
+                    ni += 1;
+                }
+                '-' => {
+                    oi += 1;
+                }
+                '+' => {
+                    ni += 1;
+                }
                 _ => {}
             }
         }
@@ -172,7 +183,11 @@ pub fn generate_unified_diff(path: &str, original: &str, modified: &str) -> Stri
 
     // Build each hunk
     for (group_start, group_end) in groups {
-        let ctx_start = if group_start > context { group_start - context } else { 0 };
+        let ctx_start = if group_start > context {
+            group_start - context
+        } else {
+            0
+        };
         let ctx_end = (group_end + context + 1).min(ops.len());
 
         let old_start = positions[ctx_start].0 + 1; // 1-based
@@ -241,6 +256,10 @@ impl DynTool for DiffViewerTool {
         "show_diff"
     }
 
+    fn read_only(&self) -> bool {
+        true
+    }
+
     fn description(&self) -> &str {
         "Show unified diff between original content and current file content."
     }
@@ -266,9 +285,9 @@ impl DynTool for DiffViewerTool {
         let path_str = args["path"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("'path' is required and must be a string"))?;
-        let original_content = args["original_content"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("'original_content' is required and must be a string"))?;
+        let original_content = args["original_content"].as_str().ok_or_else(|| {
+            anyhow::anyhow!("'original_content' is required and must be a string")
+        })?;
 
         let resolved = resolve_path(path_str, &self.workspace, self.restrict)?;
         info!(path = %resolved.display(), "show_diff");

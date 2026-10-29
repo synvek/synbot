@@ -1,13 +1,13 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, RwLock};
 use tokio::time::sleep;
-use uuid::Uuid;
 use tracing::{info, warn};
+use uuid::Uuid;
 
 /// Approval request (agent → user)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,9 +71,10 @@ impl ApprovalMetrics {
             total as f64 / count as f64
         }
     }
-    
+
     pub fn record_response_time(&self, duration_ms: u64) {
-        self.total_response_time_ms.fetch_add(duration_ms, Ordering::Relaxed);
+        self.total_response_time_ms
+            .fetch_add(duration_ms, Ordering::Relaxed);
         self.response_count.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -86,7 +87,7 @@ impl ApprovalMetrics {
             approved as f64 / total as f64
         }
     }
-    
+
     pub fn reset(&self) {
         self.total_requests.store(0, Ordering::Relaxed);
         self.approved_count.store(0, Ordering::Relaxed);
@@ -131,7 +132,7 @@ impl ApprovalManager {
             metrics: Arc::new(ApprovalMetrics::default()),
         }
     }
-    
+
     pub fn with_outbound_and_capacity(
         outbound_tx: tokio::sync::broadcast::Sender<crate::bus::OutboundMessage>,
         capacity: usize,
@@ -144,16 +145,16 @@ impl ApprovalManager {
             metrics: Arc::new(ApprovalMetrics::default()),
         }
     }
-    
+
     async fn add_to_history(&self, request: ApprovalRequest, status: ApprovalStatus) {
         let mut history = self.history.write().await;
         if history.len() >= self.history_capacity {
             history.remove(0);
         }
-        
+
         history.push((request, status));
     }
-    
+
     pub async fn history_stats(&self) -> (usize, usize) {
         let history = self.history.read().await;
         (history.len(), self.history_capacity)
@@ -173,7 +174,7 @@ impl ApprovalManager {
     ) -> anyhow::Result<ApprovalOutcome> {
         // Increment total request count
         self.metrics.total_requests.fetch_add(1, Ordering::Relaxed);
-        
+
         let request_start = std::time::Instant::now();
         let request_id = Uuid::new_v4().to_string();
         let request = ApprovalRequest {
@@ -216,7 +217,7 @@ impl ApprovalManager {
                 None,
             );
             let _ = outbound_tx.send(approval_msg);
-            
+
             info!(
                 request_id = %request_id,
                 channel = %channel,
@@ -243,7 +244,7 @@ impl ApprovalManager {
             Ok(Some(response)) => {
                 let approved = response.approved;
                 let responder = response.responder.clone();
-                
+
                 info!(
                     request_id = %request_id,
                     approved = approved,
@@ -252,21 +253,25 @@ impl ApprovalManager {
                     response_time_ms = response_time_ms,
                     "Approval response received"
                 );
-                
+
                 // Update metrics
                 if approved {
                     self.metrics.approved_count.fetch_add(1, Ordering::Relaxed);
                 } else {
                     self.metrics.rejected_count.fetch_add(1, Ordering::Relaxed);
                 }
-                
+
                 let status = if approved {
                     ApprovalStatus::Approved(response)
                 } else {
                     ApprovalStatus::Rejected(response)
                 };
                 self.add_to_history(request, status).await;
-                let outcome = if approved { ApprovalOutcome::Approved } else { ApprovalOutcome::Rejected };
+                let outcome = if approved {
+                    ApprovalOutcome::Approved
+                } else {
+                    ApprovalOutcome::Rejected
+                };
                 return Ok(outcome);
             }
             Ok(None) => {
@@ -314,11 +319,11 @@ impl ApprovalManager {
         let history = self.history.read().await;
         history.clone()
     }
-    
+
     pub fn metrics(&self) -> Arc<ApprovalMetrics> {
         Arc::clone(&self.metrics)
     }
-    
+
     pub fn reset_metrics(&self) {
         self.metrics.reset();
     }
@@ -359,9 +364,12 @@ mod tests {
         // Wait briefly for the request to be created
         sleep(Duration::from_millis(100)).await;
 
-        // Check pending request
-        let pending = manager.pending.read().await;
-        assert_eq!(pending.len(), 1);
+        // Check pending request (drop the read guard before awaiting the request, which needs the
+        // write lock on timeout)
+        {
+            let pending = manager.pending.read().await;
+            assert_eq!(pending.len(), 1);
+        }
 
         // Wait for timeout
         let result = handle.await.unwrap();
@@ -795,13 +803,14 @@ mod tests {
     }
 }
 
-    #[tokio::test]
-    async fn test_approval_metrics() {
-        let manager = ApprovalManager::new();
+#[tokio::test]
+async fn test_approval_metrics() {
+    let manager = ApprovalManager::new();
 
-        // Create an approved request
-        let manager_clone = manager.clone_for_test();
-        let handle1: tokio::task::JoinHandle<anyhow::Result<ApprovalOutcome>> = tokio::spawn(async move {
+    // Create an approved request
+    let manager_clone = manager.clone_for_test();
+    let handle1: tokio::task::JoinHandle<anyhow::Result<ApprovalOutcome>> =
+        tokio::spawn(async move {
             manager_clone
                 .request_approval(
                     "session1".to_string(),
@@ -816,26 +825,27 @@ mod tests {
                 .await
         });
 
-        sleep(Duration::from_millis(100)).await;
+    sleep(Duration::from_millis(100)).await;
 
-        // Approve the request
-        let request_id = {
-            let pending = manager.pending.read().await;
-            pending.keys().next().unwrap().clone()
-        };
-        
-        let response = ApprovalResponse {
-            request_id,
-            approved: true,
-            responder: "user1".to_string(),
-            timestamp: Utc::now(),
-        };
-        manager.submit_response(response).await.unwrap();
-        assert_eq!(handle1.await.unwrap().unwrap(), ApprovalOutcome::Approved);
+    // Approve the request
+    let request_id = {
+        let pending = manager.pending.read().await;
+        pending.keys().next().unwrap().clone()
+    };
 
-        // Create a rejected request
-        let manager_clone = manager.clone_for_test();
-        let handle2: tokio::task::JoinHandle<anyhow::Result<ApprovalOutcome>> = tokio::spawn(async move {
+    let response = ApprovalResponse {
+        request_id,
+        approved: true,
+        responder: "user1".to_string(),
+        timestamp: Utc::now(),
+    };
+    manager.submit_response(response).await.unwrap();
+    assert_eq!(handle1.await.unwrap().unwrap(), ApprovalOutcome::Approved);
+
+    // Create a rejected request
+    let manager_clone = manager.clone_for_test();
+    let handle2: tokio::task::JoinHandle<anyhow::Result<ApprovalOutcome>> =
+        tokio::spawn(async move {
             manager_clone
                 .request_approval(
                     "session2".to_string(),
@@ -850,75 +860,75 @@ mod tests {
                 .await
         });
 
-        sleep(Duration::from_millis(100)).await;
+    sleep(Duration::from_millis(100)).await;
 
-        let request_id = {
-            let pending = manager.pending.read().await;
-            pending.keys().next().unwrap().clone()
-        };
-        
-        let response = ApprovalResponse {
-            request_id,
-            approved: false,
-            responder: "user1".to_string(),
-            timestamp: Utc::now(),
-        };
-        manager.submit_response(response).await.unwrap();
-        assert_eq!(handle2.await.unwrap().unwrap(), ApprovalOutcome::Rejected);
+    let request_id = {
+        let pending = manager.pending.read().await;
+        pending.keys().next().unwrap().clone()
+    };
 
-        // Create a timeout request
-        manager
-            .request_approval(
-                "session3".to_string(),
-                "web".to_string(),
-                "chat3".to_string(),
-                "test".to_string(),
-                "/home/user".to_string(),
-                "Test".to_string(),
-                1,
-                None,
-            )
-            .await
-            .unwrap();
+    let response = ApprovalResponse {
+        request_id,
+        approved: false,
+        responder: "user1".to_string(),
+        timestamp: Utc::now(),
+    };
+    manager.submit_response(response).await.unwrap();
+    assert_eq!(handle2.await.unwrap().unwrap(), ApprovalOutcome::Rejected);
 
-        // Verify metrics
-        let metrics = manager.metrics();
-        assert_eq!(metrics.total_requests.load(Ordering::Relaxed), 3);
-        assert_eq!(metrics.approved_count.load(Ordering::Relaxed), 1);
-        assert_eq!(metrics.rejected_count.load(Ordering::Relaxed), 1);
-        assert_eq!(metrics.timeout_count.load(Ordering::Relaxed), 1);
-        
-        // Verify approval rate
-        assert!((metrics.approval_rate() - 0.333).abs() < 0.01);
-        
-        // Verify average response time
-        assert!(metrics.avg_response_time_ms() > 0.0);
-    }
+    // Create a timeout request
+    manager
+        .request_approval(
+            "session3".to_string(),
+            "web".to_string(),
+            "chat3".to_string(),
+            "test".to_string(),
+            "/home/user".to_string(),
+            "Test".to_string(),
+            1,
+            None,
+        )
+        .await
+        .unwrap();
 
-    #[tokio::test]
-    async fn test_metrics_reset() {
-        let manager = ApprovalManager::new();
+    // Verify metrics
+    let metrics = manager.metrics();
+    assert_eq!(metrics.total_requests.load(Ordering::Relaxed), 3);
+    assert_eq!(metrics.approved_count.load(Ordering::Relaxed), 1);
+    assert_eq!(metrics.rejected_count.load(Ordering::Relaxed), 1);
+    assert_eq!(metrics.timeout_count.load(Ordering::Relaxed), 1);
 
-        // Create a timeout request
-        manager
-            .request_approval(
-                "session1".to_string(),
-                "web".to_string(),
-                "chat1".to_string(),
-                "test".to_string(),
-                "/home/user".to_string(),
-                "Test".to_string(),
-                1,
-                None,
-            )
-            .await
-            .unwrap();
+    // Verify approval rate
+    assert!((metrics.approval_rate() - 0.333).abs() < 0.01);
 
-        let metrics = manager.metrics();
-        assert_eq!(metrics.total_requests.load(Ordering::Relaxed), 1);
+    // Verify average response time
+    assert!(metrics.avg_response_time_ms() > 0.0);
+}
 
-        // Reset metrics
-        manager.reset_metrics();
-        assert_eq!(metrics.total_requests.load(Ordering::Relaxed), 0);
-        assert_eq!(metrics.timeout_count.load(Ordering::Relaxed), 0);
-    }
+#[tokio::test]
+async fn test_metrics_reset() {
+    let manager = ApprovalManager::new();
+
+    // Create a timeout request
+    manager
+        .request_approval(
+            "session1".to_string(),
+            "web".to_string(),
+            "chat1".to_string(),
+            "test".to_string(),
+            "/home/user".to_string(),
+            "Test".to_string(),
+            1,
+            None,
+        )
+        .await
+        .unwrap();
+
+    let metrics = manager.metrics();
+    assert_eq!(metrics.total_requests.load(Ordering::Relaxed), 1);
+
+    // Reset metrics
+    manager.reset_metrics();
+    assert_eq!(metrics.total_requests.load(Ordering::Relaxed), 0);
+    assert_eq!(metrics.timeout_count.load(Ordering::Relaxed), 0);
+}

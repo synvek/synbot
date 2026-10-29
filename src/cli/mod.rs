@@ -1,36 +1,36 @@
 //! CLI commands module.
 
-mod onboard;
-mod agent;
 #[cfg(feature = "acp")]
 mod acp;
-mod start;
+mod agent;
 mod cron;
+pub mod doctor;
+mod helpers;
+mod onboard;
+mod pairing;
 mod sandbox_cmd;
+mod service;
+mod start;
 #[cfg(target_os = "windows")]
 mod tool_sandbox_cmd;
-mod service;
-mod pairing;
-mod helpers;
-pub mod doctor;
 
-use std::path::PathBuf;
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
+use std::path::PathBuf;
 
-pub use onboard::cmd_onboard;
-pub use agent::cmd_agent;
 #[cfg(feature = "acp")]
 pub use acp::cmd_acp;
-pub use start::cmd_start;
+pub use agent::cmd_agent;
 pub use cron::{cmd_cron, CronAction};
+pub use onboard::cmd_onboard;
 pub use sandbox_cmd::cmd_sandbox;
+pub use start::cmd_start;
 
-#[cfg(target_os = "windows")]
-use tool_sandbox_cmd::cmd_tool_sandbox_serve;
-pub use service::{cmd_service, ServiceAction};
 pub use doctor::cmd_doctor;
 pub use pairing::{cmd_pairing, PairingAction};
+pub use service::{cmd_service, ServiceAction};
+#[cfg(target_os = "windows")]
+use tool_sandbox_cmd::cmd_tool_sandbox_serve;
 
 #[derive(Parser)]
 #[command(name = "synbot", about = "synbot — Personal AI Assistant")]
@@ -150,7 +150,11 @@ pub async fn run() -> Result<()> {
 
     match command {
         Commands::Onboard => cmd_onboard().await,
-        Commands::Agent { message, provider, model } => cmd_agent(message, provider, model).await,
+        Commands::Agent {
+            message,
+            provider,
+            model,
+        } => cmd_agent(message, provider, model).await,
         #[cfg(feature = "acp")]
         Commands::Acp { provider, model } => cmd_acp(provider, model).await,
         Commands::Start => cmd_start().await,
@@ -176,7 +180,9 @@ fn cmd_version() -> Result<()> {
         .ok()
         .and_then(|o| {
             if o.status.success() {
-                String::from_utf8(o.stdout).ok().map(|s| s.trim().to_string())
+                String::from_utf8(o.stdout)
+                    .ok()
+                    .map(|s| s.trim().to_string())
             } else {
                 None
             }

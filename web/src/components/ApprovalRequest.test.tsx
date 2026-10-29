@@ -61,7 +61,7 @@ describe('ApprovalRequest Component', () => {
       />
     );
 
-    const approveButton = screen.getByRole('button', { name: /approve|同意/i });
+    const approveButton = screen.getByRole('button', { name: /^(approve|同意)$/i });
     fireEvent.click(approveButton);
 
     expect(onApprove).toHaveBeenCalledWith(mockRequest.id);
@@ -80,7 +80,7 @@ describe('ApprovalRequest Component', () => {
       />
     );
 
-    const rejectButton = screen.getByRole('button', { name: /reject|拒绝/i });
+    const rejectButton = screen.getByRole('button', { name: /^(reject|拒绝|不同意)$/i });
     fireEvent.click(rejectButton);
 
     expect(onReject).toHaveBeenCalledWith(mockRequest.id);
@@ -101,8 +101,8 @@ describe('ApprovalRequest Component', () => {
     );
 
     // Buttons should not be present when result is shown
-    expect(screen.queryByRole('button', { name: /approve|同意/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /reject|拒绝/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^(approve|同意)$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^(reject|拒绝|不同意)$/i })).not.toBeInTheDocument();
   });
 
   it('displays approval result feedback when provided', () => {
@@ -147,7 +147,7 @@ describe('ApprovalRequest Component', () => {
       />
     );
 
-    const approveButton = screen.getByRole('button', { name: /approve|同意/i });
+    const approveButton = screen.getByRole('button', { name: /^(approve|同意)$/i });
     
     // Click multiple times rapidly
     fireEvent.click(approveButton);

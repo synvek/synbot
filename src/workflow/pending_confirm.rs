@@ -22,7 +22,10 @@ impl PendingConfirmStore {
     }
 
     pub async fn set(&self, session_key: &str, def: WorkflowDef) {
-        self.inner.write().await.insert(session_key.to_string(), def);
+        self.inner
+            .write()
+            .await
+            .insert(session_key.to_string(), def);
     }
 
     /// Take the pending definition if the user's message is classified as approval (agree/confirm).

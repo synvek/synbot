@@ -309,8 +309,7 @@ impl SessionStore {
                 meta: meta.clone(),
                 messages: session_messages,
             };
-            serde_json::to_string_pretty(&data)
-                .context("failed to serialize session data")?
+            serde_json::to_string_pretty(&data).context("failed to serialize session data")?
         } else {
             // Fallback: save as plain messages array (legacy format) when no
             // meta is provided.
@@ -356,8 +355,8 @@ impl SessionStore {
             .await
             .context("failed to read session file")?;
 
-        let session_data = Self::parse_session_json(&data, key)
-            .context("failed to deserialize session")?;
+        let session_data =
+            Self::parse_session_json(&data, key).context("failed to deserialize session")?;
 
         Ok(Some(session_data))
     }
@@ -385,8 +384,8 @@ impl SessionStore {
         }
 
         // Fall back to legacy format: plain Vec<SessionMessage>
-        let messages: Vec<SessionMessage> = serde_json::from_str(json_str)
-            .context("failed to parse as legacy session format")?;
+        let messages: Vec<SessionMessage> =
+            serde_json::from_str(json_str).context("failed to parse as legacy session format")?;
 
         // Build a default SessionMeta from the key
         let id = SessionId::parse(key).unwrap_or_else(|_| {
@@ -596,8 +595,7 @@ mod tests {
 
     /// Helper: build a SessionMeta for testing.
     fn test_meta(key: &str) -> SessionMeta {
-        let id = SessionId::parse(key)
-            .unwrap_or_else(|_| SessionId::simple("main", key));
+        let id = SessionId::parse(key).unwrap_or_else(|_| SessionId::simple("main", key));
         let now = Utc::now();
         SessionMeta {
             id,
@@ -611,10 +609,7 @@ mod tests {
     async fn save_and_load_roundtrip() {
         let (_dir, store) = temp_store();
 
-        let messages = vec![
-            Message::user("hello"),
-            Message::assistant("hi there!"),
-        ];
+        let messages = vec![Message::user("hello"), Message::assistant("hi there!")];
         let meta = test_meta("agent:main:telegram");
 
         store
@@ -866,7 +861,11 @@ mod tests {
             .await
             .unwrap();
 
-        let loaded = store.load_session("agent:main:keyx").await.unwrap().unwrap();
+        let loaded = store
+            .load_session("agent:main:keyx")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(loaded.messages.len(), 2);
         assert_eq!(loaded.messages[0].content, "version 2");
         assert_eq!(loaded.messages[1].content, "updated");
@@ -887,11 +886,7 @@ mod tests {
         };
 
         store
-            .save_session(
-                "agent:main:telegram:dm:12345",
-                &messages,
-                Some(&meta),
-            )
+            .save_session("agent:main:telegram:dm:12345", &messages, Some(&meta))
             .await
             .unwrap();
 
@@ -954,12 +949,7 @@ mod tests {
 
         let messages = vec![Message::user("design request")];
         let meta = SessionMeta {
-            id: SessionId::full(
-                "ui_designer",
-                "telegram",
-                SessionScope::Dm,
-                "user_1",
-            ),
+            id: SessionId::full("ui_designer", "telegram", SessionScope::Dm, "user_1"),
             participants: vec!["user:user_1".into(), "agent:ui_designer".into()],
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -975,10 +965,7 @@ mod tests {
         let expected_dir = store.sessions_root().join("ui_designer");
         assert!(expected_dir.exists());
 
-        let expected_file = expected_dir.join(format!(
-            "{}.json",
-            SessionStore::safe_filename(key)
-        ));
+        let expected_file = expected_dir.join(format!("{}.json", SessionStore::safe_filename(key)));
         assert!(expected_file.exists());
 
         // Load should still work
@@ -997,10 +984,10 @@ mod tests {
         store.save_session(key, &messages, None).await.unwrap();
 
         // Verify the file is stored under sessions_root/main/
-        let expected_file = store.sessions_root().join("main").join(format!(
-            "{}.json",
-            SessionStore::safe_filename(key)
-        ));
+        let expected_file = store
+            .sessions_root()
+            .join("main")
+            .join(format!("{}.json", SessionStore::safe_filename(key)));
         assert!(expected_file.exists());
     }
 

@@ -6,7 +6,7 @@ use chrono::NaiveDate;
 
 use crate::agent::memory::MemoryStore;
 use crate::agent::memory_index::{hybrid_search_with_config, reindex_agent_blocking, IndexedChunk};
-use crate::config::{memory_dir, MemoryConfig, Config};
+use crate::config::{memory_dir, Config, MemoryConfig};
 
 /// Options for building memory context (e.g. recent days, use search).
 #[derive(Debug, Clone)]
@@ -55,8 +55,7 @@ pub trait MemoryBackend: Send + Sync {
 
 /// Returns true if compression is enabled and message count exceeds threshold.
 pub fn should_compress(config: &MemoryConfig, message_count: usize) -> bool {
-    config.compression.enabled
-        && message_count > config.compression.max_conversation_turns as usize
+    config.compression.enabled && message_count > config.compression.max_conversation_turns as usize
 }
 
 fn truncate_long_term_text(s: &str, max_chars: u32) -> String {
@@ -116,25 +115,17 @@ impl MemoryBackend for FileSqliteMemoryBackend {
             if !q.trim().is_empty() {
                 let limit = options.search_limit.min(10);
                 let dim = self.config.memory.embedding_dimensions;
-                if let Ok(conn) =
-                    crate::agent::memory_index::open_index(agent_id, dim)
-                {
-                    if let Ok(hits) = hybrid_search_with_config(
-                        &conn,
-                        q.trim(),
-                        limit,
-                        &self.config,
-                    ) {
+                if let Ok(conn) = crate::agent::memory_index::open_index(agent_id, dim) {
+                    if let Ok(hits) =
+                        hybrid_search_with_config(&conn, q.trim(), limit, &self.config)
+                    {
                         if !hits.is_empty() {
                             let search_block: String = hits
                                 .into_iter()
                                 .map(|c| format!("- [{}] {}", c.source, c.content))
                                 .collect::<Vec<_>>()
                                 .join("\n\n");
-                            parts.push(format!(
-                                "## Relevant memory (search)\n\n{}",
-                                search_block
-                            ));
+                            parts.push(format!("## Relevant memory (search)\n\n{}", search_block));
                         }
                     }
                 }

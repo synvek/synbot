@@ -117,7 +117,12 @@ impl TelegramChannel {
     }
 
     /// Register a user's pending approval request.
-    async fn register_pending_approval(&self, user_id: String, request_id: String, chat_id: String) {
+    async fn register_pending_approval(
+        &self,
+        user_id: String,
+        request_id: String,
+        chat_id: String,
+    ) {
         let mut pending = self.pending_approvals.write().await;
         pending.insert(user_id, (request_id, chat_id));
     }
@@ -290,7 +295,13 @@ impl Channel for TelegramChannel {
                             let preview = if result_preview.is_empty() {
                                 String::new()
                             } else if result_preview.len() > tool_result_preview_chars {
-                                format!("{}...", result_preview.chars().take(tool_result_preview_chars).collect::<String>())
+                                format!(
+                                    "{}...",
+                                    result_preview
+                                        .chars()
+                                        .take(tool_result_preview_chars)
+                                        .collect::<String>()
+                                )
                             } else {
                                 result_preview.clone()
                             };
@@ -303,7 +314,12 @@ impl Channel for TelegramChannel {
                         crate::bus::OutboundMessageType::ApprovalRequest { request } => {
                             // Register the pending approval request
                             // Extract user_id from session_id (format: agent:role:channel:type:user_id)
-                            let user_id = request.session_id.split(':').last().unwrap_or("").to_string();
+                            let user_id = request
+                                .session_id
+                                .split(':')
+                                .last()
+                                .unwrap_or("")
+                                .to_string();
                             if !user_id.is_empty() {
                                 let mut pending = pending_approvals.write().await;
                                 pending.insert(user_id, (request.id.clone(), msg.chat_id.clone()));
@@ -336,7 +352,8 @@ impl Channel for TelegramChannel {
                             }
                             Ok(response) => {
                                 let status = response.status();
-                                runtime_status.record_error(format!("Telegram send failed: {status}"));
+                                runtime_status
+                                    .record_error(format!("Telegram send failed: {status}"));
                                 error!("Telegram outbound send failed: {status}");
                             }
                             Err(e) => {
@@ -366,8 +383,7 @@ impl Channel for TelegramChannel {
                     for u in updates {
                         offset = u.update_id + 1;
                         if let Some(m) = u.message {
-                            let sender =
-                                m.from.map(|u| u.id.to_string()).unwrap_or_default();
+                            let sender = m.from.map(|u| u.id.to_string()).unwrap_or_default();
                             if let Some(text) = m.text {
                                 self.runtime_status.record_received();
                                 let chat_id_str = m.chat.id.to_string();
@@ -376,7 +392,10 @@ impl Channel for TelegramChannel {
                                     .type_
                                     .as_deref()
                                     .map_or(false, |t| t == "group" || t == "supergroup");
-                                let (trigger_agent, content, is_group_meta) = if !self.config.enable_allowlist {
+                                let (trigger_agent, content, is_group_meta) = if !self
+                                    .config
+                                    .enable_allowlist
+                                {
                                     // Allowlist disabled: allow all; for group still check @group_my_name if set
                                     if is_group {
                                         if let Some(ref my_name) = self.config.group_my_name {
@@ -411,7 +430,12 @@ impl Channel for TelegramChannel {
                                             let stripped = trimmed
                                                 .strip_prefix(&mention)
                                                 .map(str::trim_start)
-                                                .unwrap_or_else(|| trimmed.strip_prefix('@').map(str::trim_start).unwrap_or(trimmed));
+                                                .unwrap_or_else(|| {
+                                                    trimmed
+                                                        .strip_prefix('@')
+                                                        .map(str::trim_start)
+                                                        .unwrap_or(trimmed)
+                                                });
                                             (true, stripped.to_string(), true)
                                         } else {
                                             (true, text.clone(), true)
@@ -440,29 +464,35 @@ impl Channel for TelegramChannel {
                                             );
                                             let hint = pairing_message("telegram", &chat_id_str);
                                             let _ = self.send_text(m.chat.id, &hint).await;
-                                            let _ = self.inbound_tx.send(InboundMessage {
-                                                channel: self.config.name.clone(),
-                                                sender_id: sender.clone(),
-                                                chat_id: chat_id_str.clone(),
-                                                content: text.clone(),
-                                                timestamp: chrono::Utc::now(),
-                                                media: vec![],
-                                                metadata: serde_json::json!({
-                                                    "trigger_agent": false,
-                                                    "default_agent": self.config.default_agent,
-                                                }),
-                                            }).await;
+                                            let _ = self
+                                                .inbound_tx
+                                                .send(InboundMessage {
+                                                    channel: self.config.name.clone(),
+                                                    sender_id: sender.clone(),
+                                                    chat_id: chat_id_str.clone(),
+                                                    content: text.clone(),
+                                                    timestamp: chrono::Utc::now(),
+                                                    media: vec![],
+                                                    metadata: serde_json::json!({
+                                                        "trigger_agent": false,
+                                                        "default_agent": self.config.default_agent,
+                                                    }),
+                                                })
+                                                .await;
                                             continue;
                                         }
                                         None => {
                                             if is_group {
-                                                if let Some(ref my_name) = self.config.group_my_name {
+                                                if let Some(ref my_name) = self.config.group_my_name
+                                                {
                                                     let trimmed = text.trim_start();
                                                     let mention = format!("@{}", my_name);
                                                     let starts = trimmed.starts_with(&mention)
                                                         || trimmed
                                                             .strip_prefix('@')
-                                                            .map(|s| s.trim_start().starts_with(my_name))
+                                                            .map(|s| {
+                                                                s.trim_start().starts_with(my_name)
+                                                            })
                                                             .unwrap_or(false);
                                                     if !starts {
                                                         warn!(
@@ -517,7 +547,10 @@ impl Channel for TelegramChannel {
                                                     let starts = trimmed.starts_with(&mention)
                                                         || trimmed
                                                             .strip_prefix('@')
-                                                            .map(|s| s.trim_start().starts_with(my_name.as_str()))
+                                                            .map(|s| {
+                                                                s.trim_start()
+                                                                    .starts_with(my_name.as_str())
+                                                            })
                                                             .unwrap_or(false);
                                                     if !starts {
                                                         warn!(
@@ -557,7 +590,9 @@ impl Channel for TelegramChannel {
                                     }
                                 };
                                 // If user has pending approval, forward message to agent with metadata for LLM to interpret
-                                if let Some((request_id, _chat_id_str)) = self.take_pending_approval(&sender).await {
+                                if let Some((request_id, _chat_id_str)) =
+                                    self.take_pending_approval(&sender).await
+                                {
                                     let mut meta = serde_json::json!({
                                         "trigger_agent": true,
                                         "pending_approval_request_id": request_id,
@@ -566,15 +601,18 @@ impl Channel for TelegramChannel {
                                     if is_group_meta {
                                         meta["group"] = serde_json::json!(true);
                                     }
-                                    let _ = self.inbound_tx.send(InboundMessage {
-                                        channel: self.config.name.clone(),
-                                        sender_id: sender,
-                                        chat_id: m.chat.id.to_string(),
-                                        content: content.clone(),
-                                        timestamp: chrono::Utc::now(),
-                                        media: vec![],
-                                        metadata: meta,
-                                    }).await;
+                                    let _ = self
+                                        .inbound_tx
+                                        .send(InboundMessage {
+                                            channel: self.config.name.clone(),
+                                            sender_id: sender,
+                                            chat_id: m.chat.id.to_string(),
+                                            content: content.clone(),
+                                            timestamp: chrono::Utc::now(),
+                                            media: vec![],
+                                            metadata: meta,
+                                        })
+                                        .await;
                                     continue;
                                 }
                                 // Normal message
@@ -585,15 +623,18 @@ impl Channel for TelegramChannel {
                                 if is_group_meta {
                                     meta["group"] = serde_json::json!(true);
                                 }
-                                let _ = self.inbound_tx.send(InboundMessage {
-                                    channel: self.config.name.clone(),
-                                    sender_id: sender,
-                                    chat_id: m.chat.id.to_string(),
-                                    content,
-                                    timestamp: chrono::Utc::now(),
-                                    media: vec![],
-                                    metadata: meta,
-                                }).await;
+                                let _ = self
+                                    .inbound_tx
+                                    .send(InboundMessage {
+                                        channel: self.config.name.clone(),
+                                        sender_id: sender,
+                                        chat_id: m.chat.id.to_string(),
+                                        content,
+                                        timestamp: chrono::Utc::now(),
+                                        media: vec![],
+                                        metadata: meta,
+                                    })
+                                    .await;
                             }
                         }
                     }
@@ -612,8 +653,7 @@ impl Channel for TelegramChannel {
                 }
                 Err(TelegramPollError::Transient(msg)) => {
                     self.runtime_status.mark_reconnecting(Some(&msg));
-                    let should_retry =
-                        retry_state.record_failure(&retry_policy, msg.clone());
+                    let should_retry = retry_state.record_failure(&retry_policy, msg.clone());
 
                     if should_retry {
                         let delay = retry_state.next_delay(&retry_policy);
@@ -678,7 +718,13 @@ impl Channel for TelegramChannel {
                 let preview = if result_preview.is_empty() {
                     String::new()
                 } else if result_preview.len() > self.tool_result_preview_chars {
-                    format!("{}...", result_preview.chars().take(self.tool_result_preview_chars).collect::<String>())
+                    format!(
+                        "{}...",
+                        result_preview
+                            .chars()
+                            .take(self.tool_result_preview_chars)
+                            .collect::<String>()
+                    )
                 } else {
                     result_preview.clone()
                 };

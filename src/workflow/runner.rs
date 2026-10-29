@@ -30,7 +30,10 @@ fn truncate_preview(s: &str, max_chars: usize) -> String {
     while end > 0 && !s.is_char_boundary(end) {
         end -= 1;
     }
-    format!("{}\n\n… (truncated; see full content in chat history or workflow state)", &s[..end])
+    format!(
+        "{}\n\n… (truncated; see full content in chat history or workflow state)",
+        &s[..end]
+    )
 }
 
 /// Send a chat message to the user and append to session history when history_session_key is set.
@@ -143,14 +146,9 @@ pub async fn run_workflow(
         if step_type == "llm" {
             let context = format!(
                 "Inputs: {:?}\nPrevious step outputs: {:?}",
-                state.inputs,
-                state.step_outputs
+                state.inputs, state.step_outputs
             );
-            let user_msg = format!(
-                "Task: {}\n\nContext:\n{}",
-                step.description,
-                context
-            );
+            let user_msg = format!("Task: {}\n\nContext:\n{}", step.description, context);
             let request = CompletionRequest {
                 preamble: Some("You are a workflow step executor. Complete the task concisely. Reply with the result only, no meta commentary.".to_string()),
                 chat_history: OneOrMany::one(Message::user(&user_msg)),
@@ -206,10 +204,7 @@ pub async fn run_workflow(
             } else {
                 &step.description
             };
-            let input_key = step
-                .input_key
-                .as_deref()
-                .unwrap_or("user_input");
+            let input_key = step.input_key.as_deref().unwrap_or("user_input");
 
             // Send previous step output preview first so user can see what was generated before replying.
             if let Some(last_output) = state.step_outputs.last() {
@@ -282,7 +277,9 @@ pub async fn run_workflow(
                     let store = workflow_store.clone();
                     let key = session_key.to_string();
                     let state_save = state.clone();
-                    tokio::spawn(async move { let _ = store.save_state(&key, &state_save).await; });
+                    tokio::spawn(async move {
+                        let _ = store.save_state(&key, &state_save).await;
+                    });
                     info!(session_key = %session_key, step = %step.id, "Workflow user input received");
                 }
                 UserInputResult::Closed => {
@@ -292,7 +289,9 @@ pub async fn run_workflow(
                     let store = workflow_store.clone();
                     let key = session_key.to_string();
                     let state_save = state.clone();
-                    tokio::spawn(async move { let _ = store.save_state(&key, &state_save).await; });
+                    tokio::spawn(async move {
+                        let _ = store.save_state(&key, &state_save).await;
+                    });
                     warn!(session_key = %session_key, "Workflow user input channel closed");
                     break;
                 }
@@ -303,7 +302,9 @@ pub async fn run_workflow(
                     let store = workflow_store.clone();
                     let key = session_key.to_string();
                     let state_save = state.clone();
-                    tokio::spawn(async move { let _ = store.save_state(&key, &state_save).await; });
+                    tokio::spawn(async move {
+                        let _ = store.save_state(&key, &state_save).await;
+                    });
                     info!(session_key = %session_key, "Workflow cancelled via /stop during user input");
                     break;
                 }
@@ -314,7 +315,9 @@ pub async fn run_workflow(
                     let store = workflow_store.clone();
                     let key = session_key.to_string();
                     let state_save = state.clone();
-                    tokio::spawn(async move { let _ = store.save_state(&key, &state_save).await; });
+                    tokio::spawn(async move {
+                        let _ = store.save_state(&key, &state_save).await;
+                    });
                     send_workflow_message(
                         outbound_tx,
                         session_state,
@@ -336,7 +339,9 @@ pub async fn run_workflow(
             let store = workflow_store.clone();
             let key = session_key.to_string();
             let state_save = state.clone();
-            tokio::spawn(async move { let _ = store.save_state(&key, &state_save).await; });
+            tokio::spawn(async move {
+                let _ = store.save_state(&key, &state_save).await;
+            });
         }
     }
 

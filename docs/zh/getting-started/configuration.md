@@ -471,7 +471,8 @@ cargo run --example generate_config_schema --features schema -- -o templates/con
     "model": "claude-3-5-sonnet-20241022",
     "maxTokens": 8192,
     "temperature": 0.7,
-    "maxToolIterations": 20,
+    "maxToolIterations": 99,
+    "maxIdleIterations": 6,
     "maxConcurrentSubagents": 5,
     "agents": [
       { "name": "dev", "role": "dev" }
@@ -479,6 +480,11 @@ cargo run --example generate_config_schema --features schema -- -o templates/con
   }
 }
 ```
+
+- **maxToolIterations**（默认 **99**）：每轮对话可用的**有效迭代**额度，即真正推进任务的模型往返次数。等待子任务、重复调用同一工具（结果直接复用）**不**计入其中。
+- **maxIdleIterations**（默认 **6**）：连续多少轮没有新进展后提前结束本轮。只重复读取已读过的文件、反复轮询 `list_subagents` 而状态不变时计为「无进展」，避免在空转中消耗 token。
+- **maxConsecutiveToolErrors**（默认 **8**）：连续多少轮发生工具执行失败后停止。
+- **maxChatHistoryMessages**（默认 **20**）：每次请求携带的最近历史消息数；太小会让模型遗忘已读内容而重复读取（重复读取会计入「无进展」）。
 
 ### 角色（来自文件系统）
 
@@ -500,7 +506,8 @@ cargo run --example generate_config_schema --features schema -- -o templates/con
     "model": "claude-3-5-sonnet-20241022",
     "maxTokens": 8192,
     "temperature": 0.7,
-    "maxToolIterations": 20,
+    "maxToolIterations": 99,
+    "maxIdleIterations": 6,
     "maxConcurrentSubagents": 5,
     "agents": [
       { "name": "dev", "role": "dev" },
@@ -950,7 +957,8 @@ cargo run --example generate_config_schema --features schema -- -o templates/con
     "model": "claude-3-5-sonnet-20241022",
     "maxTokens": 8192,
     "temperature": 0.7,
-    "maxToolIterations": 20,
+    "maxToolIterations": 99,
+    "maxIdleIterations": 6,
     "maxConcurrentSubagents": 5,
     "agents": [
       { "name": "dev", "role": "dev" }

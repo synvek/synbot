@@ -9,6 +9,8 @@ import {
   CronIcon,
   RolesIcon,
   SkillsIcon,
+  PluginsIcon,
+  ShieldIcon,
   ConfigIcon,
   LogsIcon
 } from './icons'
@@ -24,6 +26,8 @@ const Sidebar: React.FC = () => {
     { path: '/cron', label: t('sidebar.cron'), icon: CronIcon },
     { path: '/roles', label: t('sidebar.roles'), icon: RolesIcon },
     { path: '/skills', label: t('sidebar.skills'), icon: SkillsIcon },
+    { path: '/plugins', label: t('sidebar.plugins'), icon: PluginsIcon },
+    { path: '/security', label: t('sidebar.security'), icon: ShieldIcon },
     { path: '/config', label: t('sidebar.config'), icon: ConfigIcon },
     { path: '/logs', label: t('sidebar.logs'), icon: LogsIcon },
   ]

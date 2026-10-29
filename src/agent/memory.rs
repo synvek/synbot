@@ -83,9 +83,7 @@ fn parse_tags_from_front_matter(fm: &str) -> Vec<String> {
 
             if after_key.starts_with('[') {
                 // Inline format: tags: [tag1, tag2]
-                let inner = after_key
-                    .trim_start_matches('[')
-                    .trim_end_matches(']');
+                let inner = after_key.trim_start_matches('[').trim_end_matches(']');
                 for tag in inner.split(',') {
                     let t = tag.trim().trim_matches('"').trim_matches('\'').to_string();
                     if !t.is_empty() {
@@ -300,9 +298,7 @@ impl MemoryStore {
                 // Filter by tags (entry must contain at least one of the requested tags)
                 if let Some(filter_tags) = tags {
                     if !filter_tags.is_empty()
-                        && !filter_tags
-                            .iter()
-                            .any(|ft| mem_entry.tags.contains(ft))
+                        && !filter_tags.iter().any(|ft| mem_entry.tags.contains(ft))
                     {
                         continue;
                     }

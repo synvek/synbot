@@ -273,7 +273,10 @@ mod tests {
 
         let sanitized = sanitize_provider_entry(&entry);
         assert_eq!(sanitized.api_key, MASK);
-        assert_eq!(sanitized.api_base, Some("https://api.example.com".to_string()));
+        assert_eq!(
+            sanitized.api_base,
+            Some("https://api.example.com".to_string())
+        );
     }
 
     #[test]

@@ -5,11 +5,9 @@ use std::time::Duration;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use mcp_client::client::{
-    ClientCapabilities, ClientInfo, McpClient, McpClientTrait,
-};
+use mcp_client::client::{ClientCapabilities, ClientInfo, McpClient, McpClientTrait};
 use mcp_client::service::McpService;
-use mcp_client::transport::{Transport, SseTransport, StdioTransport};
+use mcp_client::transport::{SseTransport, StdioTransport, Transport};
 use mcp_spec::content::Content;
 use serde_json::Value;
 use tracing::{debug, info, warn};
@@ -51,7 +49,11 @@ async fn load_one_mcp_server(server: &McpServerConfig, tools: &mut ToolRegistry)
                 server.env.clone(),
             );
             let handle = transport.start().await.map_err(|e| {
-                anyhow::anyhow!("MCP stdio transport start failed for '{}': {}", server.id, e)
+                anyhow::anyhow!(
+                    "MCP stdio transport start failed for '{}': {}",
+                    server.id,
+                    e
+                )
             })?;
             let service = McpService::with_timeout(handle, timeout);
             let mut client = McpClient::new(service);
@@ -125,10 +127,7 @@ fn register_mcp_tools(
     mcp_tools: Vec<mcp_spec::Tool>,
     client: Arc<dyn McpClientTrait + Send + Sync>,
 ) {
-    let prefix = server
-        .tool_name_prefix
-        .as_deref()
-        .unwrap_or("");
+    let prefix = server.tool_name_prefix.as_deref().unwrap_or("");
     for t in mcp_tools {
         let name = format!("{}{}", prefix, t.name);
         if tools.get(&name).is_some() {
@@ -195,10 +194,20 @@ impl DynTool for McpToolAdapter {
             .client
             .call_tool(&self.tool_name, args)
             .await
-            .map_err(|e| anyhow::anyhow!("MCP call_tool '{}' (server {}): {}", self.tool_name, self.server_id, e))?;
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "MCP call_tool '{}' (server {}): {}",
+                    self.tool_name,
+                    self.server_id,
+                    e
+                )
+            })?;
         if result.is_error == Some(true) {
             let text = content_to_string(&result.content);
-            anyhow::bail!("MCP tool error: {}", if text.is_empty() { "unknown" } else { &text });
+            anyhow::bail!(
+                "MCP tool error: {}",
+                if text.is_empty() { "unknown" } else { &text }
+            );
         }
         Ok(content_to_string(&result.content))
     }
@@ -234,4 +243,3 @@ fn content_to_string(content: &[Content]) -> String {
     }
     parts.join("\n")
 }
-

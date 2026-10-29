@@ -50,7 +50,10 @@ fn redact_secrets_in_value(v: &mut Value) {
 }
 
 /// When the client sends the same masked placeholder back, restore secrets from `old`.
-pub fn merge_incoming_preserving_secrets(old: &Config, mut incoming: Value) -> Result<Config, serde_json::Error> {
+pub fn merge_incoming_preserving_secrets(
+    old: &Config,
+    mut incoming: Value,
+) -> Result<Config, serde_json::Error> {
     let old_v = serde_json::to_value(old)?;
     patch_secret_masks_from_old(&old_v, &mut incoming);
     serde_json::from_value(incoming)

@@ -280,9 +280,9 @@ mod tests {
 
         // Test various malformed headers
         let test_cases = vec![
-            "Bearer token123",           // Wrong auth type
-            "Basic invalid-base64!@#",   // Invalid base64
-            "Basic YWRtaW4=",            // Valid base64 but no colon separator
+            "Bearer token123",         // Wrong auth type
+            "Basic invalid-base64!@#", // Invalid base64
+            "Basic YWRtaW4=",          // Valid base64 but no colon separator
         ];
 
         for auth_header in test_cases {

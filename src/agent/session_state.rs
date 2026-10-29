@@ -86,7 +86,11 @@ impl SharedSessionState {
         let mut sm = self.session_manager.write().await;
         for (key, mut data) in session_data {
             strip_stale_config_list_tool_results(&mut data.messages);
-            let messages: Vec<Message> = data.messages.iter().map(SessionMessage::to_message).collect();
+            let messages: Vec<Message> = data
+                .messages
+                .iter()
+                .map(SessionMessage::to_message)
+                .collect();
             sessions_guard
                 .entry(key.clone())
                 .or_insert_with(|| Arc::new(Mutex::new(Vec::new())))
@@ -99,7 +103,10 @@ impl SharedSessionState {
                 history.extend(data.messages);
             }
         }
-        info!(count = sm.session_count(), "Loaded sessions into session_manager");
+        info!(
+            count = sm.session_count(),
+            "Loaded sessions into session_manager"
+        );
         Ok(())
     }
 
@@ -247,8 +254,14 @@ mod tests {
         let (_dir, store) = temp_store();
         let state = SharedSessionState::new(store);
         let key = "agent:main:telegram";
-        state.append_user_message_and_save(key, "hello").await.unwrap();
-        state.append_assistant_message_and_save(key, "hi there").await.unwrap();
+        state
+            .append_user_message_and_save(key, "hello")
+            .await
+            .unwrap();
+        state
+            .append_assistant_message_and_save(key, "hi there")
+            .await
+            .unwrap();
         let messages = state.get_or_create_session_messages(key).await;
         let guard = messages.lock().await;
         assert_eq!(guard.len(), 2);

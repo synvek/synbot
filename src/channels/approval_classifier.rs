@@ -1,9 +1,9 @@
 //! LLM-based classification of user messages as approval (approve/reject) for command execution.
 //! Used by Feishu and other channels that receive free-text approval replies.
 
+use crate::rig_provider::SynbotCompletionModel;
 use rig::completion::CompletionRequest;
 use rig::message::{AssistantContent, Message};
-use crate::rig_provider::SynbotCompletionModel;
 use tracing::warn;
 
 const SYSTEM_PROMPT: &str = r#"You are a classifier. The user was asked to approve or reject running a command (e.g. "Run python script X?"). They replied with a short message.

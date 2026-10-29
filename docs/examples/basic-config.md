@@ -77,7 +77,8 @@ This example shows a minimal but functional Synbot configuration that you can us
     "model": "claude-3-5-sonnet-20241022",
     "maxTokens": 8192,
     "temperature": 0.7,
-    "maxToolIterations": 20,
+    "maxToolIterations": 99,
+    "maxIdleIterations": 6,
     "maxConcurrentSubagents": 5,
     "roles": []
   },
@@ -235,7 +236,8 @@ cat > ~/.synbot/config.json << 'EOF'
     "model": "claude-3-5-sonnet-20241022",
     "maxTokens": 8192,
     "temperature": 0.7,
-    "maxToolIterations": 20,
+    "maxToolIterations": 99,
+    "maxIdleIterations": 6,
     "maxConcurrentSubagents": 5,
     "roles": []
   },
@@ -399,7 +401,8 @@ synbot --root-dir ~/.synbot start
   "model": "claude-3-5-sonnet-20241022",
   "maxTokens": 8192,
   "temperature": 0.7,
-  "maxToolIterations": 20,
+  "maxToolIterations": 99,
+  "maxIdleIterations": 6,
   "maxConcurrentSubagents": 5,
   "roles": []
 }
@@ -408,7 +411,7 @@ synbot --root-dir ~/.synbot start
 - Uses Claude 3.5 Sonnet model
 - 8192 token limit
 - 0.7 temperature (creative but focused)
-- 20 maximum tool iterations
+- 99 maximum tool iterations (plus an idle-round cap of 6)
 - 5 concurrent subagents
 - No custom roles defined
 

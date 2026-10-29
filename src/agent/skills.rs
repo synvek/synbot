@@ -43,7 +43,11 @@ pub fn parse_skill_frontmatter(content: &str) -> Option<SkillFrontmatter> {
     while i < frontmatter_lines.len() {
         let line = frontmatter_lines[i];
         if line.starts_with("name:") {
-            name = line["name:".len()..].trim().trim_matches('"').trim_matches('\'').to_string();
+            name = line["name:".len()..]
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'')
+                .to_string();
         } else if line.starts_with("description:") {
             let value = line["description:".len()..].trim();
             if value == "|" || value == ">" || value == ">-" || value == "|-" {

@@ -4,14 +4,13 @@
 // - Configuration manager and sandbox manager integration
 // - Monitoring module and sandbox runtime integration
 
-use synbot::sandbox::{
-    SandboxManager, SandboxConfig, FilesystemConfig, NetworkConfig,
-    ResourceConfig, ProcessConfig, MonitoringConfig, ConfigurationManager,
-    MonitoringModule, LogOutput, AuditConfig,
-    MetricsConfig, PlatformDetector,
-};
 use std::sync::Arc;
 use std::time::Duration;
+use synbot::sandbox::{
+    AuditConfig, ConfigurationManager, FilesystemConfig, LogOutput, MetricsConfig,
+    MonitoringConfig, MonitoringModule, NetworkConfig, PlatformDetector, ProcessConfig,
+    ResourceConfig, SandboxConfig, SandboxManager,
+};
 use tokio::time::sleep;
 
 mod common;
@@ -23,37 +22,44 @@ async fn test_app_and_tool_sandbox_interaction() {
     // Create sandbox manager
     let config_manager = ConfigurationManager::new("test_config.json".to_string());
     let monitoring = MonitoringModule::new(create_test_monitoring_config());
-    
+
     let manager = SandboxManager::new(config_manager, monitoring);
-    
+
     // Create application sandbox
     let app_config = create_test_app_sandbox_config("app-sandbox-001");
     let app_sandbox_id = manager.create_app_sandbox(app_config).await;
-    
-    assert!(app_sandbox_id.is_ok(), "Failed to create app sandbox: {:?}", app_sandbox_id.err());
+
+    assert!(
+        app_sandbox_id.is_ok(),
+        "Failed to create app sandbox: {:?}",
+        app_sandbox_id.err()
+    );
     let app_sandbox_id = app_sandbox_id.unwrap();
-    
+
     // Note: Tool sandbox creation requires Docker/gVisor which may not be available in test environment
     // We test that the manager can handle tool sandbox requests gracefully
     let tool_config = create_test_tool_sandbox_config("tool-sandbox-001");
     let tool_sandbox_result = manager.create_tool_sandbox(tool_config).await;
-    
+
     // If Docker is available, verify sandbox was created
     // If not, verify error is handled gracefully
     if tool_sandbox_result.is_ok() {
         let tool_sandbox_id = tool_sandbox_result.unwrap();
-        
+
         // Verify both sandboxes exist
         let sandboxes = manager.list_sandboxes().await;
         assert_eq!(sandboxes.len(), 2, "Expected 2 sandboxes");
-        
+
         // Verify sandboxes are isolated (different IDs)
-        assert_ne!(app_sandbox_id, tool_sandbox_id, "Sandboxes should have different IDs");
-        
+        assert_ne!(
+            app_sandbox_id, tool_sandbox_id,
+            "Sandboxes should have different IDs"
+        );
+
         // Cleanup
         let _ = manager.destroy_sandbox(&tool_sandbox_id).await;
     }
-    
+
     // Cleanup app sandbox
     let _ = manager.destroy_sandbox(&app_sandbox_id).await;
 }
@@ -67,28 +73,29 @@ async fn test_config_manager_sandbox_manager_integration() {
     let initial_config = create_full_sandbox_config();
     std::fs::write(
         config_path,
-        serde_json::to_string_pretty(&initial_config).unwrap()
-    ).unwrap();
-    
+        serde_json::to_string_pretty(&initial_config).unwrap(),
+    )
+    .unwrap();
+
     // Create configuration manager
     let mut config_manager = ConfigurationManager::new(config_path.to_string());
     let loaded_config = config_manager.load();
     assert!(loaded_config.is_ok(), "Failed to load config");
-    
+
     // Create sandbox manager with config manager
     let monitoring = MonitoringModule::new(create_test_monitoring_config());
     let manager = SandboxManager::new(config_manager, monitoring);
-    
+
     // Create sandbox with loaded config
     let sandbox_config = loaded_config.unwrap();
     let sandbox_id = manager.create_app_sandbox(sandbox_config.clone()).await;
     assert!(sandbox_id.is_ok(), "Failed to create sandbox with config");
-    
+
     // Verify sandbox uses correct configuration
     let sandbox_id = sandbox_id.unwrap();
     let sandbox_info = manager.get_sandbox(&sandbox_id).await;
     assert!(sandbox_info.is_some(), "Sandbox should exist");
-    
+
     // Cleanup
     let _ = manager.destroy_sandbox(&sandbox_id).await;
     let _ = std::fs::remove_file(config_path);
@@ -102,13 +109,11 @@ async fn test_monitoring_sandbox_runtime_integration() {
     let log_path = "test_integration_audit.log";
     let monitoring_config = MonitoringConfig {
         log_level: "info".to_string(),
-        log_output: vec![
-            LogOutput {
-                output_type: "file".to_string(),
-                path: log_path.to_string(),
-                facility: "".to_string(),
-            }
-        ],
+        log_output: vec![LogOutput {
+            output_type: "file".to_string(),
+            path: log_path.to_string(),
+            facility: "".to_string(),
+        }],
         audit: AuditConfig {
             file_access: true,
             network_access: true,
@@ -121,31 +126,40 @@ async fn test_monitoring_sandbox_runtime_integration() {
             endpoint: "http://localhost:9090/metrics".to_string(),
         },
     };
-    
+
     let monitoring = Arc::new(MonitoringModule::new(monitoring_config));
-    
+
     // Create sandbox manager with monitoring
     let config_manager = ConfigurationManager::new("test_config.json".to_string());
-    let manager = SandboxManager::new(config_manager, MonitoringModule::new(create_test_monitoring_config()));
-    
+    let manager = SandboxManager::new(
+        config_manager,
+        MonitoringModule::new(create_test_monitoring_config()),
+    );
+
     // Create sandbox
     let sandbox_config = create_test_app_sandbox_config("monitored-sandbox-001");
     let sandbox_id = manager.create_app_sandbox(sandbox_config).await;
     assert!(sandbox_id.is_ok(), "Failed to create monitored sandbox");
     let sandbox_id = sandbox_id.unwrap();
-    
+
     // Simulate sandbox events using the monitoring reference
-    monitoring.log_file_access(&sandbox_id, "/tmp/test.txt", "read", true).await;
-    monitoring.log_network_access(&sandbox_id, "api.example.com", 443, true).await;
-    monitoring.log_process_creation(&sandbox_id, "echo", &["hello".to_string()]).await;
-    
+    monitoring
+        .log_file_access(&sandbox_id, "/tmp/test.txt", "read", true)
+        .await;
+    monitoring
+        .log_network_access(&sandbox_id, "api.example.com", 443, true)
+        .await;
+    monitoring
+        .log_process_creation(&sandbox_id, "echo", &["hello".to_string()])
+        .await;
+
     // Give time for logs to be written
     sleep(Duration::from_millis(100)).await;
-    
+
     // Verify logs were created
     let log_exists = std::path::Path::new(log_path).exists();
     assert!(log_exists, "Audit log file should exist");
-    
+
     // Cleanup
     let _ = manager.destroy_sandbox(&sandbox_id).await;
     let _ = std::fs::remove_file(log_path);
@@ -158,9 +172,9 @@ async fn test_cross_component_error_handling() {
     // Create sandbox manager with invalid config manager
     let config_manager = ConfigurationManager::new("nonexistent_config.json".to_string());
     let monitoring = MonitoringModule::new(create_test_monitoring_config());
-    
+
     let manager = SandboxManager::new(config_manager, monitoring);
-    
+
     // Try to create sandbox with invalid configuration
     let invalid_config = SandboxConfig {
         sandbox_id: "invalid-001".to_string(),
@@ -191,7 +205,7 @@ async fn test_cross_component_error_handling() {
         requested_tool_sandbox_type: None,
         image: None,
     };
-    
+
     let result = manager.create_app_sandbox(invalid_config).await;
     assert!(result.is_err(), "Should fail with invalid config");
 }
@@ -202,12 +216,12 @@ async fn test_cross_component_error_handling() {
 async fn test_concurrent_sandbox_operations() {
     let config_manager = ConfigurationManager::new("test_config.json".to_string());
     let monitoring = MonitoringModule::new(create_test_monitoring_config());
-    
+
     let manager = Arc::new(SandboxManager::new(config_manager, monitoring));
-    
+
     // Create multiple sandboxes concurrently
     let mut handles = vec![];
-    
+
     for i in 0..5 {
         let manager_clone = manager.clone();
         let handle = tokio::spawn(async move {
@@ -216,7 +230,7 @@ async fn test_concurrent_sandbox_operations() {
         });
         handles.push(handle);
     }
-    
+
     // Wait for all sandboxes to be created
     let mut sandbox_ids = vec![];
     for handle in handles {
@@ -224,11 +238,11 @@ async fn test_concurrent_sandbox_operations() {
         assert!(result.is_ok(), "Failed to create sandbox concurrently");
         sandbox_ids.push(result.unwrap());
     }
-    
+
     // Verify all sandboxes exist
     let sandboxes = manager.list_sandboxes().await;
     assert_eq!(sandboxes.len(), 5, "Expected 5 sandboxes");
-    
+
     // Cleanup all sandboxes
     for sandbox_id in sandbox_ids {
         let _ = manager.destroy_sandbox(&sandbox_id).await;
@@ -240,22 +254,25 @@ async fn test_concurrent_sandbox_operations() {
 #[tokio::test]
 async fn test_platform_detection_integration() {
     let platform_info = PlatformDetector::detect();
-    
+
     // Create sandbox config with auto platform detection
     let mut config = create_test_app_sandbox_config("platform-test-001");
     config.platform = "auto".to_string();
-    
+
     let config_manager = ConfigurationManager::new("test_config.json".to_string());
     let monitoring = MonitoringModule::new(create_test_monitoring_config());
-    
+
     let manager = SandboxManager::new(config_manager, monitoring);
-    
+
     // Create sandbox - should auto-detect platform
     let result = manager.create_app_sandbox(config).await;
-    
+
     // On supported platforms, this should succeed
     if platform_info.os == "linux" || platform_info.os == "windows" || platform_info.os == "macos" {
-        assert!(result.is_ok(), "Should create sandbox on supported platform");
+        assert!(
+            result.is_ok(),
+            "Should create sandbox on supported platform"
+        );
         if let Ok(sandbox_id) = result {
             let _ = manager.destroy_sandbox(&sandbox_id).await;
         }
@@ -270,36 +287,41 @@ async fn test_config_reload_with_active_sandboxes() {
     let initial_config = create_full_sandbox_config();
     std::fs::write(
         config_path,
-        serde_json::to_string_pretty(&initial_config).unwrap()
-    ).unwrap();
-    
+        serde_json::to_string_pretty(&initial_config).unwrap(),
+    )
+    .unwrap();
+
     let mut config_manager = ConfigurationManager::new(config_path.to_string());
     let _ = config_manager.load();
-    
+
     let monitoring = MonitoringModule::new(create_test_monitoring_config());
     let manager = SandboxManager::new(config_manager, monitoring);
-    
+
     // Create sandbox
     let sandbox_config = create_test_app_sandbox_config("reload-test-001");
     let sandbox_id = manager.create_app_sandbox(sandbox_config).await;
     assert!(sandbox_id.is_ok());
     let sandbox_id = sandbox_id.unwrap();
-    
+
     // Modify config file
     let mut modified_config = initial_config.clone();
     modified_config.resources.max_memory = 2 * 1024 * 1024 * 1024; // 2GB
     std::fs::write(
         config_path,
-        serde_json::to_string_pretty(&modified_config).unwrap()
-    ).unwrap();
-    
+        serde_json::to_string_pretty(&modified_config).unwrap(),
+    )
+    .unwrap();
+
     // Note: In a real scenario, we would need mutable access to config_manager to reload
     // For this test, we verify that the sandbox continues to work with the original config
-    
+
     // Verify existing sandbox still exists
     let sandbox_info = manager.get_sandbox(&sandbox_id).await;
-    assert!(sandbox_info.is_some(), "Existing sandbox should still exist after config file change");
-    
+    assert!(
+        sandbox_info.is_some(),
+        "Existing sandbox should still exist after config file change"
+    );
+
     // Cleanup
     let _ = manager.destroy_sandbox(&sandbox_id).await;
     let _ = std::fs::remove_file(config_path);

@@ -9,9 +9,9 @@ use anyhow::{Context, Result};
 use rusqlite::Connection;
 use std::sync::Once;
 
-use crate::config::Config;
-use crate::config;
 use crate::agent::embeddings;
+use crate::config;
+use crate::config::Config;
 
 /// Default embedding dimension when using stub provider (no real embedding).
 pub const DEFAULT_EMBED_DIM: u32 = 768;
@@ -19,11 +19,9 @@ pub const DEFAULT_EMBED_DIM: u32 = 768;
 static VEC_EXTENSION_REGISTERED: Once = Once::new();
 
 fn ensure_vec_extension() {
-    VEC_EXTENSION_REGISTERED.call_once(|| {
-        unsafe {
-            let init = sqlite_vec::sqlite3_vec_init;
-            rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute(init as *const ())));
-        }
+    VEC_EXTENSION_REGISTERED.call_once(|| unsafe {
+        let init = sqlite_vec::sqlite3_vec_init;
+        rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute(init as *const ())));
     });
 }
 
@@ -33,7 +31,14 @@ fn stub_embedding(dim: u32) -> Vec<f32> {
 
 fn db_path(agent_id: &str) -> std::path::PathBuf {
     let dir = config::memory_dir(agent_id);
-    dir.join(format!("{}.sqlite", if agent_id.is_empty() { "main" } else { agent_id }))
+    dir.join(format!(
+        "{}.sqlite",
+        if agent_id.is_empty() {
+            "main"
+        } else {
+            agent_id
+        }
+    ))
 }
 
 fn dim_marker_path(agent_id: &str) -> std::path::PathBuf {
@@ -215,7 +220,11 @@ pub async fn reindex_agent_async(agent_id: &str, config: &Config) -> Result<usiz
             let entry = entry?;
             let path = entry.path();
             if path.extension().map_or(false, |e| e == "md") {
-                let source = path.file_name().and_then(|p| p.to_str()).unwrap_or("").to_string();
+                let source = path
+                    .file_name()
+                    .and_then(|p| p.to_str())
+                    .unwrap_or("")
+                    .to_string();
                 let content = std::fs::read_to_string(&path).unwrap_or_default();
                 for c in chunk_text(&content, 2000) {
                     let emb = embeddings::embed_text(config, &c).await?;
@@ -278,7 +287,10 @@ fn write_last_index_mtime(agent_id: &str, t: std::time::SystemTime) -> Result<()
     let dir = config::memory_dir(agent_id);
     std::fs::create_dir_all(&dir)?;
     let stamp_path = dir.join(".last_index");
-    let nanos = t.duration_since(std::time::UNIX_EPOCH).context("time")?.as_nanos() as u64;
+    let nanos = t
+        .duration_since(std::time::UNIX_EPOCH)
+        .context("time")?
+        .as_nanos() as u64;
     std::fs::write(stamp_path, format!("{}", nanos))?;
     Ok(())
 }
@@ -338,11 +350,7 @@ pub fn hybrid_search(
     let embedding: Vec<f32> = match query_embedding {
         Some(e) => {
             if e.len() != embed_dim as usize {
-                anyhow::bail!(
-                    "query embedding dim {} != {}",
-                    e.len(),
-                    embed_dim
-                );
+                anyhow::bail!("query embedding dim {} != {}", e.len(), embed_dim);
             }
             e.to_vec()
         }
@@ -379,7 +387,8 @@ pub fn hybrid_search(
     }
 
     // 2) FTS5
-    let mut chunk_text_score: std::collections::HashMap<i64, f64> = std::collections::HashMap::new();
+    let mut chunk_text_score: std::collections::HashMap<i64, f64> =
+        std::collections::HashMap::new();
     let fts_query = query.replace('"', "\"\"");
     if !fts_query.trim().is_empty() {
         if let Ok(mut stmt) = conn.prepare(

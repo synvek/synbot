@@ -70,16 +70,16 @@ pub async fn create_test_app_state_with_approval(
     outbound_tx: tokio::sync::broadcast::Sender<synbot::bus::OutboundMessage>,
     approval_manager: std::sync::Arc<synbot::tools::approval::ApprovalManager>,
 ) -> synbot::web::state::AppState {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::time::{SystemTime, UNIX_EPOCH};
     use synbot::agent::agent_registry::AgentRegistry;
     use synbot::agent::session_manager::SessionManager;
     use synbot::agent::skills::SkillsLoader;
     use synbot::config::Config;
     use synbot::cron::service::CronService;
     use synbot::web::log_buffer::LogBuffer;
-    use std::sync::Arc;
     use tokio::sync::RwLock;
-    use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     let config_path = std::env::temp_dir().join(format!(
         "synbot_web_test_config_{}.json",
@@ -90,7 +90,9 @@ pub async fn create_test_app_state_with_approval(
     ));
     let config = Arc::new(RwLock::new(Config::default()));
     let session_manager = Arc::new(RwLock::new(SessionManager::new()));
-    let cron_service = Arc::new(RwLock::new(CronService::new(PathBuf::from("test_cron.json"))));
+    let cron_service = Arc::new(RwLock::new(CronService::new(PathBuf::from(
+        "test_cron.json",
+    ))));
     let agent_registry = Arc::new(AgentRegistry::new());
     let skills_loader = Arc::new(SkillsLoader::new(&PathBuf::from(".")));
     let log_buffer = Arc::new(RwLock::new(LogBuffer::new(1000)));
@@ -104,10 +106,31 @@ pub async fn create_test_app_state_with_approval(
         skills_loader,
         inbound_tx,
         outbound_tx,
+        synbot::agent::events::EventBus::new(),
         log_buffer,
         approval_manager,
         None,
         Arc::new(synbot::channels::ChannelStatusRegistry::new()),
+        Arc::new(RwLock::new(synbot::project::ProjectStore::load(
+            // Unique per state: project tests run in parallel and must not share a registry.
+            std::env::temp_dir().join(format!(
+                "synbot_test_projects_{}.json",
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0)
+            )),
+        ))),
+        Arc::new(synbot::checkpoint::CheckpointStore::new(
+            // Same idea: every state gets its own checkpoint directory.
+            std::env::temp_dir().join(format!(
+                "synbot_test_checkpoints_{}",
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0)
+            )),
+        )),
     )
 }
 

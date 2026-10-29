@@ -105,6 +105,7 @@
         "maxChatHistoryMessages": 20,
         "maxConcurrentSubagents": 5,
         "maxConsecutiveToolErrors": 8,
+        "maxIdleIterations": 6,
         "maxTokens": 8192,
         "maxToolIterations": 99,
         "model": "claude-sonnet-4-5",
@@ -1343,6 +1344,13 @@
           "format": "uint32",
           "minimum": 0.0
         },
+        "maxIdleIterations": {
+          "description": "Consecutive rounds that make no new progress before the turn stops. Default 6.",
+          "default": 6,
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        },
         "maxTokens": {
           "default": 8192,
           "type": "integer",
@@ -1350,6 +1358,7 @@
           "minimum": 0.0
         },
         "maxToolIterations": {
+          "description": "Productive model rounds per turn. Rounds that only repeat a call already made in the turn, or re-poll unchanged status, are counted by `max_idle_iterations` instead. Default 99.",
           "default": 99,
           "type": "integer",
           "format": "uint32",

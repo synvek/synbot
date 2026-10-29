@@ -146,7 +146,10 @@ impl MessageBus {
 
     /// Get a sender handle that channels use to push inbound messages.
     pub fn inbound_sender(&self) -> mpsc::Sender<InboundMessage> {
-        self.inbound_tx.as_ref().expect("inbound channel already closed").clone()
+        self.inbound_tx
+            .as_ref()
+            .expect("inbound channel already closed")
+            .clone()
     }
 
     /// Take and drop the bus's inbound sender so the channel closes when all other senders are dropped.

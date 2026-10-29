@@ -11,11 +11,12 @@ use std::time::Duration;
 use tokio::sync::{broadcast, mpsc, Mutex, RwLock};
 
 use synbot::agent::agent_registry::AgentRegistry;
+use synbot::agent::events::EventBus;
 use synbot::agent::r#loop::AgentLoop;
 use synbot::agent::role_registry::RoleRegistry;
-use synbot::agent::skills::CompositeSkillProvider;
 use synbot::agent::session::SessionStore;
 use synbot::agent::session_state::SharedSessionState;
+use synbot::agent::skills::CompositeSkillProvider;
 use synbot::bus::{InboundMessage, OutboundMessage, OutboundMessageType};
 use synbot::config::{Config, MainAgent};
 use synbot::tools::ToolRegistry;
@@ -80,7 +81,9 @@ async fn build_agent_loop(
     // Create a minimal "main" role directory so load_from_config succeeds
     std::fs::create_dir_all(roles_path.join("main")).expect("create main role dir");
     let mut role_registry = RoleRegistry::new();
-    role_registry.load_from_dirs(&roles_path).expect("load roles");
+    role_registry
+        .load_from_dirs(&roles_path)
+        .expect("load roles");
     let main_agent = MainAgent {
         workspace: workspace.to_string_lossy().to_string(),
         provider: "mock".to_string(),
@@ -88,6 +91,7 @@ async fn build_agent_loop(
         max_tokens: 1024,
         temperature: 0.7,
         max_tool_iterations: 3,
+        max_idle_iterations: 3,
         max_consecutive_tool_errors: 3,
         max_chat_history_messages: 20,
         max_concurrent_subagents: 1,
@@ -109,11 +113,12 @@ async fn build_agent_loop(
         tools,
         3, // max_iterations
         outbound_tx,
+        EventBus::new(),
         config,
         session_state,
         agent_registry,
         None, // tool_sandbox_exec_kind
-        None,  // hooks
+        None, // hooks
         shared_config,
     )
     .await;
@@ -214,17 +219,31 @@ async fn test_concurrent_sessions_are_isolated() {
     let msgs = collect_outbound(&mut outbound_rx, 5000).await;
 
     // Each session should receive its own response
-    let has_a = msgs.iter().any(|m| m.channel == "telegram" && m.chat_id == "session-A");
-    let has_b = msgs.iter().any(|m| m.channel == "discord" && m.chat_id == "session-B");
+    let has_a = msgs
+        .iter()
+        .any(|m| m.channel == "telegram" && m.chat_id == "session-A");
+    let has_b = msgs
+        .iter()
+        .any(|m| m.channel == "discord" && m.chat_id == "session-B");
 
     assert!(has_a, "Session A should receive a response");
     assert!(has_b, "Session B should receive a response");
 
     // Verify no cross-contamination: session-A responses should not go to session-B
-    let a_to_b = msgs.iter().any(|m| m.channel == "discord" && m.chat_id == "session-A");
-    let b_to_a = msgs.iter().any(|m| m.channel == "telegram" && m.chat_id == "session-B");
-    assert!(!a_to_b, "Session A messages should not appear in session B's channel");
-    assert!(!b_to_a, "Session B messages should not appear in session A's channel");
+    let a_to_b = msgs
+        .iter()
+        .any(|m| m.channel == "discord" && m.chat_id == "session-A");
+    let b_to_a = msgs
+        .iter()
+        .any(|m| m.channel == "telegram" && m.chat_id == "session-B");
+    assert!(
+        !a_to_b,
+        "Session A messages should not appear in session B's channel"
+    );
+    assert!(
+        !b_to_a,
+        "Session B messages should not appear in session A's channel"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -249,7 +268,10 @@ async fn test_control_command_stop_returns_response() {
             && matches!(&m.message_type, OutboundMessageType::Chat { content, .. }
                 if content.contains("[Control]"))
     });
-    assert!(stop_response, "Should receive a [Control] response to /stop");
+    assert!(
+        stop_response,
+        "Should receive a [Control] response to /stop"
+    );
 }
 
 #[tokio::test]
@@ -263,8 +285,8 @@ async fn test_control_command_status_returns_response() {
         .expect("send /status");
 
     let msgs = collect_outbound(&mut outbound_rx, 2000).await;
-    let status_response = msgs.iter().any(|m| {
-        m.channel == "telegram" && m.chat_id == "chat-status"
-    });
+    let status_response = msgs
+        .iter()
+        .any(|m| m.channel == "telegram" && m.chat_id == "chat-status");
     assert!(status_response, "Should receive a response to /status");
 }

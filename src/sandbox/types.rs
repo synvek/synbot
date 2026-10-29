@@ -1,9 +1,9 @@
 // Core data structures for the sandbox security solution
 
-use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
-use std::time::Duration;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::time::Duration;
 
 /// How the exec tool should invoke the shell when `toolSandbox` is enabled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -64,9 +64,9 @@ pub struct NetworkConfig {
 /// Resource limits configuration
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ResourceConfig {
-    pub max_memory: u64,  // bytes
-    pub max_cpu: f64,     // CPU cores
-    pub max_disk: u64,    // bytes
+    pub max_memory: u64, // bytes
+    pub max_cpu: f64,    // CPU cores
+    pub max_disk: u64,   // bytes
 }
 
 /// Process control configuration
@@ -187,10 +187,10 @@ pub struct HealthStatus {
 /// Sandbox metrics
 #[derive(Debug, Clone)]
 pub struct SandboxMetrics {
-    pub cpu_usage: f64,      // percentage
-    pub memory_usage: u64,   // bytes
-    pub disk_usage: u64,     // bytes
-    pub network_io: HashMap<String, u64>,  // {'rx_bytes': ..., 'tx_bytes': ...}
+    pub cpu_usage: f64,                   // percentage
+    pub memory_usage: u64,                // bytes
+    pub disk_usage: u64,                  // bytes
+    pub network_io: HashMap<String, u64>, // {'rx_bytes': ..., 'tx_bytes': ...}
 }
 
 /// Sandbox information
@@ -206,7 +206,7 @@ pub struct SandboxInfo {
 pub struct AuditEvent {
     pub timestamp: DateTime<Utc>,
     pub sandbox_id: String,
-    pub event_type: String,  // file_access | network_access | process_creation | violation
+    pub event_type: String, // file_access | network_access | process_creation | violation
     pub details: serde_json::Value,
 }
 
@@ -215,7 +215,7 @@ impl AuditEvent {
     pub fn to_json(&self) -> String {
         serde_json::to_string(&self).unwrap_or_default()
     }
-    
+
     /// Convert to syslog format
     pub fn to_syslog(&self) -> String {
         format!(
@@ -226,13 +226,13 @@ impl AuditEvent {
             serde_json::to_string(&self.details).unwrap_or_default()
         )
     }
-    
+
     fn get_priority(&self) -> u8 {
         // Return syslog priority based on event type
         match self.event_type.as_str() {
-            "violation" => 3,  // Error
-            "file_access" | "network_access" | "process_creation" => 6,  // Info
-            _ => 7,  // Debug
+            "violation" => 3,                                           // Error
+            "file_access" | "network_access" | "process_creation" => 6, // Info
+            _ => 7,                                                     // Debug
         }
     }
 }

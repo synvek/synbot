@@ -9,18 +9,18 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::channels::feishu_ws::Frame;
 use anyhow::Result;
 use async_trait::async_trait;
-use crate::channels::feishu_ws::Frame;
 use serde::Deserialize;
 use tokio::sync::{broadcast, mpsc, RwLock};
 use tracing::{debug, error, info, warn};
 
 use crate::bus::{InboundMessage, OutboundMessage};
-use crate::channels::file_handler;
 use crate::channels::approval_classifier;
 use crate::channels::feishu_api::FeishuApiClient;
 use crate::channels::feishu_ws::{build_event_response_frame, get_ws_endpoint, run_ws_loop};
+use crate::channels::file_handler;
 use crate::channels::{approval_formatter, Channel, ChannelStatusHandle, RetryPolicy, RetryState};
 use crate::config::{
     pairing_allows, pairing_message, pairings_from_config_file_cached, AllowlistEntry, FeishuConfig,
@@ -273,7 +273,9 @@ fn feishu_resolve_group_mention(
         }
     }
     if let Some(list) = mentions.filter(|l| !l.is_empty()) {
-        if let Some(s) = strip_leading_feishu_placeholder_for_bot(trimmed, list, bot_open_id, expect_name) {
+        if let Some(s) =
+            strip_leading_feishu_placeholder_for_bot(trimmed, list, bot_open_id, expect_name)
+        {
             return Some(s);
         }
     }
@@ -348,7 +350,10 @@ async fn feishu_fetch_message_resource(
         let body = resp.text().await.unwrap_or_default();
         return Err(format!("HTTP {}: {}", status, body));
     }
-    let bytes = resp.bytes().await.map_err(|e: reqwest::Error| e.to_string())?;
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e: reqwest::Error| e.to_string())?;
     Ok(bytes.to_vec())
 }
 
@@ -448,14 +453,22 @@ fn parse_approval_response_keywords(text: &str) -> Option<bool> {
     }
     let t_lower = t.to_lowercase();
     let reject_exact = ["no", "n", "reject", "拒绝", "否", "deny", "不同意"];
-    if reject_exact.iter().any(|s| t_lower == *s || t_lower.starts_with(&format!("{} ", s)) || t_lower.ends_with(&format!(" {}", s))) {
+    if reject_exact.iter().any(|s| {
+        t_lower == *s
+            || t_lower.starts_with(&format!("{} ", s))
+            || t_lower.ends_with(&format!(" {}", s))
+    }) {
         return Some(false);
     }
     if t.contains("不同意") || t.contains("拒绝") {
         return Some(false);
     }
     let approve_exact = ["yes", "y", "approve", "批准", "是", "ok", "同意", "好", "1"];
-    if approve_exact.iter().any(|s| t_lower == *s || t_lower.starts_with(&format!("{} ", s)) || t_lower.ends_with(&format!(" {}", s))) {
+    if approve_exact.iter().any(|s| {
+        t_lower == *s
+            || t_lower.starts_with(&format!("{} ", s))
+            || t_lower.ends_with(&format!(" {}", s))
+    }) {
         return Some(true);
     }
     if (t.contains("同意") || t.contains("批准") || t.contains("好")) && !t.contains("不") {
@@ -622,10 +635,9 @@ async fn attempt_ws_connection(
         reqwest::Client::new()
     };
 
-    let (ws_url, client_config) =
-        get_ws_endpoint(&http_client, &app_id, &app_secret)
-            .await
-            .map_err(|e| FeishuWsError::Transient(e))?;
+    let (ws_url, client_config) = get_ws_endpoint(&http_client, &app_id, &app_secret)
+        .await
+        .map_err(|e| FeishuWsError::Transient(e))?;
 
     let event_state = FeishuChannelEventState {
         pending_approvals: pending_approvals.clone(),
@@ -658,9 +670,10 @@ async fn attempt_ws_connection(
         let config_path_ev = config_path_cb.clone();
         async move {
             let start = Instant::now();
-            let payload = frame.payload.as_ref().and_then(|p| {
-                serde_json::from_slice::<WsEventPayload>(p).ok()
-            });
+            let payload = frame
+                .payload
+                .as_ref()
+                .and_then(|p| serde_json::from_slice::<WsEventPayload>(p).ok());
             let event = match payload.as_ref() {
                 Some(p) if p.header.event_type.as_deref() == Some("im.message.receive_v1") => {
                     p.event.clone()
@@ -750,7 +763,11 @@ async fn process_im_message_receive(
                 let file_name = content_json
                     .get("file_name")
                     .and_then(|v| v.as_str())
-                    .unwrap_or(if message_type == "image" { "image.png" } else { "file" });
+                    .unwrap_or(if message_type == "image" {
+                        "image.png"
+                    } else {
+                        "file"
+                    });
                 let (key, use_image_api) = if let Some(fk) = file_key {
                     (fk.to_string(), false)
                 } else if let Some(ik) = image_key {
@@ -767,7 +784,9 @@ async fn process_im_message_receive(
                     let data_result = match data_result {
                         Ok(d) => Ok(d),
                         Err(e) => {
-                            warn!("Feishu file/image get failed, trying message resource API: {e:#}");
+                            warn!(
+                                "Feishu file/image get failed, trying message resource API: {e:#}"
+                            );
                             let resource_type = if use_image_api { "image" } else { "file" };
                             feishu_fetch_message_resource(
                                 &config.app_id,
@@ -782,7 +801,8 @@ async fn process_im_message_receive(
                     };
                     match data_result {
                         Ok(data) => {
-                            if let Ok(path) = file_handler::save_incoming_file(ws, file_name, &data) {
+                            if let Ok(path) = file_handler::save_incoming_file(ws, file_name, &data)
+                            {
                                 let media_path = path.to_string_lossy().into_owned();
                                 let _ = inbound_tx
                                     .send(InboundMessage {
@@ -806,7 +826,10 @@ async fn process_im_message_receive(
                                         channel: channel_name.to_string(),
                                         sender_id: sender_open_id.clone(),
                                         chat_id: chat_id.clone(),
-                                        content: format!("[File] {} failed to save to workspace", file_name),
+                                        content: format!(
+                                            "[File] {} failed to save to workspace",
+                                            file_name
+                                        ),
                                         timestamp: chrono::Utc::now(),
                                         media: vec![],
                                         metadata: serde_json::json!({
@@ -825,7 +848,10 @@ async fn process_im_message_receive(
                                     channel: channel_name.to_string(),
                                     sender_id: sender_open_id.clone(),
                                     chat_id: chat_id.clone(),
-                                    content: format!("[File] {} download failed ({})", file_name, e),
+                                    content: format!(
+                                        "[File] {} download failed ({})",
+                                        file_name, e
+                                    ),
                                     timestamp: chrono::Utc::now(),
                                     media: vec![],
                                     metadata: serde_json::json!({
@@ -874,10 +900,7 @@ async fn process_im_message_receive(
     let enable_allowlist = config.enable_allowlist;
     let group_my_name = &config.group_my_name;
 
-    let mentions_slice = msg
-        .mentions
-        .as_deref()
-        .or(event.mentions.as_deref());
+    let mentions_slice = msg.mentions.as_deref().or(event.mentions.as_deref());
     if is_group && feishu_group_other_bot_mentioned_exclusively(mentions_slice, bot_open_id) {
         debug!(
             chat_id = %chat_id,
@@ -914,23 +937,22 @@ async fn process_im_message_receive(
                         mention_count = msg.mentions.as_ref().map(|m| m.len()).unwrap_or(0),
                         "Feishu group message skipped: no @bot match (Feishu uses @_user_N in text; ensure group_my_name matches mention name or bot open_id is known)"
                     );
-                    let _ = inbound_tx
-                        .try_send(InboundMessage {
-                            channel: channel_name.to_string(),
-                            sender_id: sender_open_id.clone(),
-                            chat_id: chat_id.clone(),
-                            content: text.clone(),
-                            timestamp: chrono::Utc::now(),
-                            media: vec![],
-                            metadata: serde_json::json!({
-                                "message_id": message_id,
-                                "message_type": message_type,
-                                "chat_type": chat_type,
-                                "trigger_agent": false,
-                                "group": true,
-                                "default_agent": config.default_agent,
-                            }),
-                        });
+                    let _ = inbound_tx.try_send(InboundMessage {
+                        channel: channel_name.to_string(),
+                        sender_id: sender_open_id.clone(),
+                        chat_id: chat_id.clone(),
+                        content: text.clone(),
+                        timestamp: chrono::Utc::now(),
+                        media: vec![],
+                        metadata: serde_json::json!({
+                            "message_id": message_id,
+                            "message_type": message_type,
+                            "chat_type": chat_type,
+                            "trigger_agent": false,
+                            "group": true,
+                            "default_agent": config.default_agent,
+                        }),
+                    });
                     return;
                 }
             } else {
@@ -977,9 +999,12 @@ async fn process_im_message_receive(
             None => {
                 if is_group {
                     if let Some(ref my_name) = group_my_name {
-                        if let Some(stripped) =
-                            feishu_resolve_group_mention(&text, my_name, bot_open_id, mentions_slice)
-                        {
+                        if let Some(stripped) = feishu_resolve_group_mention(
+                            &text,
+                            my_name,
+                            bot_open_id,
+                            mentions_slice,
+                        ) {
                             (true, stripped, true)
                         } else {
                             debug!(
@@ -1015,9 +1040,12 @@ async fn process_im_message_receive(
             Some(e) => {
                 if let Some(ref my_name) = e.my_name {
                     if is_group {
-                        if let Some(stripped) =
-                            feishu_resolve_group_mention(&text, my_name, bot_open_id, mentions_slice)
-                        {
+                        if let Some(stripped) = feishu_resolve_group_mention(
+                            &text,
+                            my_name,
+                            bot_open_id,
+                            mentions_slice,
+                        ) {
                             (true, stripped, true)
                         } else {
                             debug!(
@@ -1073,7 +1101,8 @@ async fn process_im_message_receive(
         if let Some((request_id, _)) = removed {
             let mut approved_opt: Option<bool> = None;
             if let Some(ref model) = approval_classifier {
-                approved_opt = approval_classifier::classify_approval_response(model.as_ref(), &content).await;
+                approved_opt =
+                    approval_classifier::classify_approval_response(model.as_ref(), &content).await;
             }
             if approved_opt.is_none() {
                 approved_opt = parse_approval_response_keywords(&content);
@@ -1219,7 +1248,10 @@ impl Channel for FeishuChannel {
                         } else if result_preview.len() > tool_result_preview_chars {
                             format!(
                                 "{}...",
-                                result_preview.chars().take(tool_result_preview_chars).collect::<String>()
+                                result_preview
+                                    .chars()
+                                    .take(tool_result_preview_chars)
+                                    .collect::<String>()
                             )
                         } else {
                             result_preview.clone()
@@ -1232,7 +1264,12 @@ impl Channel for FeishuChannel {
                         (content, vec![])
                     }
                     crate::bus::OutboundMessageType::ApprovalRequest { request } => {
-                        let user_id = request.session_id.split(':').last().unwrap_or("").to_string();
+                        let user_id = request
+                            .session_id
+                            .split(':')
+                            .last()
+                            .unwrap_or("")
+                            .to_string();
                         if !user_id.is_empty() {
                             let mut pending = pending_approvals_clone.write().await;
                             pending.insert(user_id, (request.id.clone(), msg.chat_id.clone()));
@@ -1248,7 +1285,8 @@ impl Channel for FeishuChannel {
                 };
                 if !content.is_empty() {
                     let started = Instant::now();
-                    if let Err(e) = FeishuChannel::send_text(&outbound_client, &msg.chat_id, &content).await
+                    if let Err(e) =
+                        FeishuChannel::send_text(&outbound_client, &msg.chat_id, &content).await
                     {
                         runtime_status.record_error(format!("Feishu outbound send failed: {e:#}"));
                         error!("Feishu outbound send error: {e:#}");
@@ -1286,7 +1324,11 @@ impl Channel for FeishuChannel {
                                     )
                                     .await
                                     .map(|image_key| {
-                                        ("image", serde_json::json!({ "image_key": image_key }).to_string())
+                                        (
+                                            "image",
+                                            serde_json::json!({ "image_key": image_key })
+                                                .to_string(),
+                                        )
                                     })
                                 } else {
                                     feishu_upload_file(
@@ -1298,16 +1340,26 @@ impl Channel for FeishuChannel {
                                     )
                                     .await
                                     .map(|file_key| {
-                                        ("file", serde_json::json!({ "file_key": file_key }).to_string())
+                                        (
+                                            "file",
+                                            serde_json::json!({ "file_key": file_key }).to_string(),
+                                        )
                                     })
                                 };
                                 match upload_result {
                                     Ok((msg_type, content_str)) => {
                                         if let Err(e) = outbound_client
-                                            .send_message("chat_id", &msg.chat_id, msg_type, &content_str)
+                                            .send_message(
+                                                "chat_id",
+                                                &msg.chat_id,
+                                                msg_type,
+                                                &content_str,
+                                            )
                                             .await
                                         {
-                                            runtime_status.record_error(format!("Feishu file send failed: {e:#}"));
+                                            runtime_status.record_error(format!(
+                                                "Feishu file send failed: {e:#}"
+                                            ));
                                             error!("Feishu send file message error: {e:#}");
                                         } else {
                                             runtime_status.record_sent();
@@ -1501,7 +1553,10 @@ impl Channel for FeishuChannel {
                             )
                             .await
                             .map(|image_key| {
-                                ("image", serde_json::json!({ "image_key": image_key }).to_string())
+                                (
+                                    "image",
+                                    serde_json::json!({ "image_key": image_key }).to_string(),
+                                )
                             })
                         } else {
                             feishu_upload_file(
@@ -1513,7 +1568,10 @@ impl Channel for FeishuChannel {
                             )
                             .await
                             .map(|file_key| {
-                                ("file", serde_json::json!({ "file_key": file_key }).to_string())
+                                (
+                                    "file",
+                                    serde_json::json!({ "file_key": file_key }).to_string(),
+                                )
                             })
                         };
                         if let Ok((msg_type, content_str)) = send_result {
@@ -1549,10 +1607,7 @@ mod feishu_parse_tests {
 
     #[test]
     fn strip_leading_placeholders_for_agent() {
-        assert_eq!(
-            strip_feishu_leading_user_placeholders("@_user_1 hi"),
-            "hi"
-        );
+        assert_eq!(strip_feishu_leading_user_placeholders("@_user_1 hi"), "hi");
         assert_eq!(
             strip_feishu_leading_user_placeholders("@_user_1 @_user_2 hello"),
             "hello"

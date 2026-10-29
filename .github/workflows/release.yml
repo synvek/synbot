@@ -1,5 +1,7 @@
 # Manual release: provide a tag, workflow builds, then creates the tag (if missing) and publishes artifacts to that tag.
 # Trigger: Actions → Release → Run workflow → enter tag (e.g. v0.1.0).
+#
+# Automated dist release (all targets + GitHub Release + Homebrew + npm): push git tag vX.Y.Z → v-release.yml.
 
 name: Release
 

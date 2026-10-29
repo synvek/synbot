@@ -50,7 +50,7 @@ impl LogBuffer {
             self.entries.pop_front();
         }
         self.entries.push_back(entry.clone());
-        
+
         // Broadcast to subscribers (ignore errors if no subscribers)
         let _ = self.broadcast_tx.send(entry);
     }
@@ -78,14 +78,14 @@ impl LogBuffer {
                         return false;
                     }
                 }
-                
+
                 // Filter by keyword if specified
                 if let Some(kw) = keyword {
                     if !entry.message.contains(kw) {
                         return false;
                     }
                 }
-                
+
                 true
             })
             .cloned()
@@ -138,16 +138,32 @@ mod tests {
     #[test]
     fn test_log_buffer_capacity() {
         let mut buffer = LogBuffer::new(3);
-        
-        buffer.push(LogEntry::new(Level::INFO, "test".to_string(), "msg1".to_string()));
-        buffer.push(LogEntry::new(Level::INFO, "test".to_string(), "msg2".to_string()));
-        buffer.push(LogEntry::new(Level::INFO, "test".to_string(), "msg3".to_string()));
-        
+
+        buffer.push(LogEntry::new(
+            Level::INFO,
+            "test".to_string(),
+            "msg1".to_string(),
+        ));
+        buffer.push(LogEntry::new(
+            Level::INFO,
+            "test".to_string(),
+            "msg2".to_string(),
+        ));
+        buffer.push(LogEntry::new(
+            Level::INFO,
+            "test".to_string(),
+            "msg3".to_string(),
+        ));
+
         assert_eq!(buffer.len(), 3);
-        
+
         // Adding one more should remove the oldest
-        buffer.push(LogEntry::new(Level::INFO, "test".to_string(), "msg4".to_string()));
-        
+        buffer.push(LogEntry::new(
+            Level::INFO,
+            "test".to_string(),
+            "msg4".to_string(),
+        ));
+
         assert_eq!(buffer.len(), 3);
         let entries = buffer.get_all();
         assert_eq!(entries[0].message, "msg4");
@@ -157,11 +173,23 @@ mod tests {
     #[test]
     fn test_log_buffer_reverse_order() {
         let mut buffer = LogBuffer::new(10);
-        
-        buffer.push(LogEntry::new(Level::INFO, "test".to_string(), "first".to_string()));
-        buffer.push(LogEntry::new(Level::INFO, "test".to_string(), "second".to_string()));
-        buffer.push(LogEntry::new(Level::INFO, "test".to_string(), "third".to_string()));
-        
+
+        buffer.push(LogEntry::new(
+            Level::INFO,
+            "test".to_string(),
+            "first".to_string(),
+        ));
+        buffer.push(LogEntry::new(
+            Level::INFO,
+            "test".to_string(),
+            "second".to_string(),
+        ));
+        buffer.push(LogEntry::new(
+            Level::INFO,
+            "test".to_string(),
+            "third".to_string(),
+        ));
+
         let entries = buffer.get_all();
         assert_eq!(entries[0].message, "third");
         assert_eq!(entries[1].message, "second");
@@ -171,25 +199,55 @@ mod tests {
     #[test]
     fn test_log_level_filtering() {
         let mut buffer = LogBuffer::new(10);
-        
-        buffer.push(LogEntry::new(Level::DEBUG, "test".to_string(), "debug msg".to_string()));
-        buffer.push(LogEntry::new(Level::INFO, "test".to_string(), "info msg".to_string()));
-        buffer.push(LogEntry::new(Level::WARN, "test".to_string(), "warn msg".to_string()));
-        buffer.push(LogEntry::new(Level::ERROR, "test".to_string(), "error msg".to_string()));
-        
+
+        buffer.push(LogEntry::new(
+            Level::DEBUG,
+            "test".to_string(),
+            "debug msg".to_string(),
+        ));
+        buffer.push(LogEntry::new(
+            Level::INFO,
+            "test".to_string(),
+            "info msg".to_string(),
+        ));
+        buffer.push(LogEntry::new(
+            Level::WARN,
+            "test".to_string(),
+            "warn msg".to_string(),
+        ));
+        buffer.push(LogEntry::new(
+            Level::ERROR,
+            "test".to_string(),
+            "error msg".to_string(),
+        ));
+
         let filtered = buffer.get_filtered(Some("WARN"), None);
         assert_eq!(filtered.len(), 2);
-        assert!(filtered.iter().all(|e| e.level == "WARN" || e.level == "ERROR"));
+        assert!(filtered
+            .iter()
+            .all(|e| e.level == "WARN" || e.level == "ERROR"));
     }
 
     #[test]
     fn test_keyword_filtering() {
         let mut buffer = LogBuffer::new(10);
-        
-        buffer.push(LogEntry::new(Level::INFO, "test".to_string(), "hello world".to_string()));
-        buffer.push(LogEntry::new(Level::INFO, "test".to_string(), "goodbye world".to_string()));
-        buffer.push(LogEntry::new(Level::INFO, "test".to_string(), "hello universe".to_string()));
-        
+
+        buffer.push(LogEntry::new(
+            Level::INFO,
+            "test".to_string(),
+            "hello world".to_string(),
+        ));
+        buffer.push(LogEntry::new(
+            Level::INFO,
+            "test".to_string(),
+            "goodbye world".to_string(),
+        ));
+        buffer.push(LogEntry::new(
+            Level::INFO,
+            "test".to_string(),
+            "hello universe".to_string(),
+        ));
+
         let filtered = buffer.get_filtered(None, Some("hello"));
         assert_eq!(filtered.len(), 2);
         assert!(filtered.iter().all(|e| e.message.contains("hello")));
@@ -198,11 +256,23 @@ mod tests {
     #[test]
     fn test_combined_filtering() {
         let mut buffer = LogBuffer::new(10);
-        
-        buffer.push(LogEntry::new(Level::INFO, "test".to_string(), "info hello".to_string()));
-        buffer.push(LogEntry::new(Level::WARN, "test".to_string(), "warn hello".to_string()));
-        buffer.push(LogEntry::new(Level::ERROR, "test".to_string(), "error goodbye".to_string()));
-        
+
+        buffer.push(LogEntry::new(
+            Level::INFO,
+            "test".to_string(),
+            "info hello".to_string(),
+        ));
+        buffer.push(LogEntry::new(
+            Level::WARN,
+            "test".to_string(),
+            "warn hello".to_string(),
+        ));
+        buffer.push(LogEntry::new(
+            Level::ERROR,
+            "test".to_string(),
+            "error goodbye".to_string(),
+        ));
+
         let filtered = buffer.get_filtered(Some("WARN"), Some("hello"));
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].message, "warn hello");

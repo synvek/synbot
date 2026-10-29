@@ -9,7 +9,7 @@ use tokio::sync::{Mutex, RwLock};
 
 use tokio::sync::broadcast;
 
-use crate::agent::subagent::SubagentManager;
+use crate::agent::subagent::{Completion, SubagentManager, SubagentScope};
 use crate::bus::OutboundMessage;
 use crate::rig_provider::SynbotCompletionModel;
 use crate::tools::{DynTool, ToolRegistry};
@@ -47,53 +47,70 @@ impl DynTool for SpawnTool {
         "spawn"
     }
     fn description(&self) -> &str {
-        "Spawn a subagent to handle a task in the background."
+        "Spawn one background subagent (a teammate) to handle a task while you keep working. \
+         Optional `role` picks a role prompt from the roles directory. Use `run_team` to fan out \
+         several tasks in parallel and wait for all of them, `list_subagents` to check progress and \
+         `cancel_subagent` to stop one."
     }
     fn parameters_schema(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "task": { "type": "string", "description": "Task description" },
-                "label": { "type": "string", "description": "Human-readable label" }
+                "task": { "type": "string", "description": "Task description, including enough context for a teammate that does not see this conversation" },
+                "label": { "type": "string", "description": "Human-readable label" },
+                "role": { "type": "string", "description": "Optional role name (subdirectory of the roles directory) whose prompt frames the subagent" }
             },
             "required": ["task"]
         })
     }
     async fn call(&self, args: Value) -> Result<String> {
-        let task = args["task"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
+        let task = args["task"].as_str().unwrap_or("").to_string();
         let label = args["label"]
             .as_str()
             .map(|s| s.to_string())
             .unwrap_or_else(|| task.chars().take(30).collect());
+        let role = args["role"]
+            .as_str()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
 
         let channel = args["_channel"].as_str().map(String::from);
         let chat_id = args["_chat_id"].as_str().map(String::from);
+        // Events and approvals for this subagent go back to the conversation that spawned it.
+        let scope = SubagentScope {
+            channel: channel.clone().unwrap_or_default(),
+            chat_id: chat_id.clone().unwrap_or_default(),
+            session_id: args["_session_id"].as_str().unwrap_or_default().to_string(),
+        };
         let ctx_guard = self.context.read().await;
         let id = if let Some(ref ctx) = *ctx_guard {
             // Real subagent: run task with model and tools in the background.
-            let on_complete: Option<Box<dyn FnOnce(String, Result<String>) + Send>> =
-                if let (Some(ch), Some(cid)) = (channel.clone(), chat_id.clone()) {
-                    let tx = ctx.outbound_tx.clone();
-                    Some(Box::new(move |completed_label, result| {
-                        let (status, body) = match result {
-                            Ok(out) => ("Result", out),
-                            Err(e) => ("Failed", e.to_string()),
-                        };
-                        let content = format!("[Subagent {}] {}:\n\n{}", completed_label, status, body);
-                        let _ = tx.send(OutboundMessage::chat(ch, cid, content, vec![], None));
-                    }))
-                } else {
-                    None
-                };
+            let on_complete: Option<Completion> = if let (Some(ch), Some(cid)) =
+                (channel.clone(), chat_id.clone())
+            {
+                let tx = ctx.outbound_tx.clone();
+                Some(Box::new(move |completed_label, result| {
+                    let (status, body) = match result {
+                        Ok(out) => ("Result", out),
+                        Err(e) => ("Failed", e.to_string()),
+                    };
+                    let content = format!("[Subagent {}] {}:\n\n{}", completed_label, status, body);
+                    let _ = tx.send(OutboundMessage::chat(ch, cid, content, vec![], None));
+                }))
+            } else {
+                None
+            };
             let mut mgr = self.manager.lock().await;
+            // The turn's workspace (project-bound chats included), not the startup default.
+            let workspace = crate::tools::context::current_allowed_roots()
+                .unwrap_or_else(|| ctx.workspace.clone());
             mgr.spawn(
                 label.clone(),
+                role.clone(),
+                scope.clone(),
                 task,
                 ctx.model.clone(),
-                ctx.workspace.clone(),
+                workspace,
                 ctx.tools.clone(),
                 &ctx.agent_id,
                 ctx.max_tokens,
@@ -107,12 +124,11 @@ impl DynTool for SpawnTool {
             let mut mgr = self.manager.lock().await;
             mgr.spawn_fn(
                 label.clone(),
-                Box::pin(async move {
-                    Ok(format!(
-                        "Subagent completed task: {}",
-                        task_description
-                    ))
-                }),
+                role.clone(),
+                scope.clone(),
+                Box::pin(
+                    async move { Ok(format!("Subagent completed task: {}", task_description)) },
+                ),
                 None,
             )
             .await?
@@ -199,6 +215,8 @@ mod tests {
             mgr_lock
                 .spawn_fn(
                     "blocker".to_string(),
+                    None,
+                    SubagentScope::default(),
                     Box::pin(async move {
                         let _ = rx.await;
                         Ok("done".to_string())

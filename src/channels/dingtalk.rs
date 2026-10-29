@@ -195,13 +195,22 @@ impl DingTalkChannel {
             .to_lowercase();
         let mut obj = match msgtype.as_str() {
             "file" => v.get("file").or_else(|| v.get("content")).cloned(),
-            "picture" | "image" | "png" => v.get("content").or_else(|| v.get("picture")).or_else(|| v.get("image")).cloned(),
+            "picture" | "image" | "png" => v
+                .get("content")
+                .or_else(|| v.get("picture"))
+                .or_else(|| v.get("image"))
+                .cloned(),
             "video" => v.get("content").or_else(|| v.get("video")).cloned(),
             "audio" | "voice" => v.get("content").or_else(|| v.get("audio")).cloned(),
             "" => None,
             _ => v.get("content").cloned(),
         };
-        if obj.is_none() && matches!(msgtype.as_str(), "file" | "picture" | "image" | "video" | "audio" | "voice") {
+        if obj.is_none()
+            && matches!(
+                msgtype.as_str(),
+                "file" | "picture" | "image" | "video" | "audio" | "voice"
+            )
+        {
             obj = v.get("content").cloned();
         }
         let mut content = obj.unwrap_or_else(|| serde_json::json!({}));
@@ -849,8 +858,12 @@ async fn run_outbound_dingtalk(
                     })
                 };
                 match post_session_json(&http, &webhook, &body).await {
-                    Ok(()) => info!(file = %file_name, "DingTalk file message sent (sessionWebhook may not display file/image per DingTalk docs)"),
-                    Err(e) => warn!(error = %e, file = %file_name, "DingTalk sessionWebhook file send failed"),
+                    Ok(()) => {
+                        info!(file = %file_name, "DingTalk file message sent (sessionWebhook may not display file/image per DingTalk docs)")
+                    }
+                    Err(e) => {
+                        warn!(error = %e, file = %file_name, "DingTalk sessionWebhook file send failed")
+                    }
                 }
             }
             // Per DingTalk: "Webhook 支持简单的文本、Markdown类型消息发送" — sessionWebhook does NOT
@@ -901,7 +914,11 @@ async fn dingtalk_media_upload(
         serde_json::from_str(&txt).map_err(|e| format!("media JSON: {e}"))?;
     let err = v.get("errcode").and_then(|x| x.as_i64()).unwrap_or(0);
     if err != 0 {
-        return Err(v.get("errmsg").and_then(|x| x.as_str()).unwrap_or(&txt).to_string());
+        return Err(v
+            .get("errmsg")
+            .and_then(|x| x.as_str())
+            .unwrap_or(&txt)
+            .to_string());
     }
     v.get("media_id")
         .and_then(|x| x.as_str())

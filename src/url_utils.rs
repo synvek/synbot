@@ -19,9 +19,8 @@ pub fn normalize_http_url(s: &str) -> Result<String> {
                 return Ok(u.to_string());
             }
             // Host has non-ASCII: convert to punycode and rebuild
-            let ascii_host = idna::domain_to_ascii(h).map_err(|e| {
-                anyhow::anyhow!("invalid international domain name: {}", e)
-            })?;
+            let ascii_host = idna::domain_to_ascii(h)
+                .map_err(|e| anyhow::anyhow!("invalid international domain name: {}", e))?;
             let mut new = u.clone();
             if new.set_host(Some(&ascii_host)).is_ok() {
                 return Ok(new.to_string());
@@ -44,7 +43,9 @@ pub fn normalize_http_url(s: &str) -> Result<String> {
         Some(_) => {
             // IPv6 [::1] or [::1]:port
             let bracket_end = authority.find(']').unwrap_or(0) + 1;
-            let host = authority[..bracket_end].trim_start_matches('[').trim_end_matches(']');
+            let host = authority[..bracket_end]
+                .trim_start_matches('[')
+                .trim_end_matches(']');
             let port_part = authority[bracket_end..].trim_start_matches(':');
             (host, port_part)
         }
@@ -66,9 +67,8 @@ pub fn normalize_http_url(s: &str) -> Result<String> {
     let ascii_host = if host.chars().all(|c| c.is_ascii()) {
         host.to_string()
     } else {
-        idna::domain_to_ascii(host).map_err(|e| {
-            anyhow::anyhow!("invalid international domain name: {}", e)
-        })?
+        idna::domain_to_ascii(host)
+            .map_err(|e| anyhow::anyhow!("invalid international domain name: {}", e))?
     };
 
     let authority_new = if port_part.is_empty() {

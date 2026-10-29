@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
 use crate::config;
+use crate::security::audit::{self, SecurityKind, SecurityOutcome};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::process::Command;
@@ -119,9 +120,7 @@ impl CommandPolicy {
 
         // 2. Check allow patterns – if set, command must match at least one
         if let Some(ref allow) = self.allow_patterns {
-            let allowed = allow
-                .iter()
-                .any(|pat| lower.contains(&pat.to_lowercase()));
+            let allowed = allow.iter().any(|pat| lower.contains(&pat.to_lowercase()));
             if !allowed {
                 return Err(format!(
                     "Command rejected: does not match any allow pattern. Command: {}",
@@ -184,10 +183,7 @@ impl ExecResult {
         }
         if self.truncated {
             if let Some(orig) = self.original_size {
-                result.push_str(&format!(
-                    "\n...[truncated, original size: {} bytes]",
-                    orig
-                ));
+                result.push_str(&format!("\n...[truncated, original size: {} bytes]", orig));
             } else {
                 result.push_str("\n...[truncated]");
             }
@@ -212,16 +208,14 @@ fn validate_workspace_path(
         .canonicalize()
         .unwrap_or_else(|_| workspace.to_path_buf());
 
-    let target_canon = target
-        .canonicalize()
-        .unwrap_or_else(|_| {
-            // For non-existent paths, do a best-effort absolute resolution
-            if target.is_absolute() {
-                target.to_path_buf()
-            } else {
-                ws_canon.join(target)
-            }
-        });
+    let target_canon = target.canonicalize().unwrap_or_else(|_| {
+        // For non-existent paths, do a best-effort absolute resolution
+        if target.is_absolute() {
+            target.to_path_buf()
+        } else {
+            ws_canon.join(target)
+        }
+    });
 
     if target_canon.starts_with(&ws_canon) {
         Ok(target_canon)
@@ -282,22 +276,32 @@ impl DynTool for ExecTool {
         let cmd_str = normalize_command_input(args["command"].as_str().unwrap_or(""));
 
         // Validate command against policy
-        self.policy
-            .validate(&cmd_str)
-            .map_err(|e| anyhow::anyhow!(e))?;
+        if let Err(reason) = self.policy.validate(&cmd_str) {
+            audit::record(
+                SecurityKind::CommandBlocked,
+                SecurityOutcome::Blocked,
+                &cmd_str,
+                &reason,
+            );
+            return Err(anyhow::anyhow!(reason));
+        }
 
+        // The active project (or role workspace) wins over the workspace this tool was built with,
+        // so `exec` runs inside the same folder as the filesystem tools of this turn.
+        let workspace = crate::tools::context::current_allowed_roots()
+            .unwrap_or_else(|| self.workspace.clone());
         let cwd: PathBuf = args["working_dir"]
             .as_str()
             .map(PathBuf::from)
-            .unwrap_or_else(|| self.workspace.clone());
+            .unwrap_or_else(|| workspace.clone());
 
         let cwd = if self.restrict_to_workspace {
-            validate_workspace_path(&self.workspace, &cwd).map_err(|e| anyhow::anyhow!(e))?
+            validate_workspace_path(&workspace, &cwd).map_err(|e| anyhow::anyhow!(e))?
         } else {
             let resolved = if cwd.is_absolute() {
                 cwd
             } else {
-                self.workspace.join(&cwd)
+                workspace.join(&cwd)
             };
             config::normalize_workspace_path(&resolved)
         };
@@ -313,13 +317,16 @@ impl DynTool for ExecTool {
         // Check permission level if permission policy is enabled
         if let Some(permission_policy) = &self.permission_policy {
             let permission = permission_policy.check_permission(&cmd_str);
-            
+
             match permission {
                 crate::tools::permission::PermissionLevel::Deny => {
-                    return Err(anyhow::anyhow!(
-                        "Command denied by policy: {}",
-                        cmd_str
-                    ));
+                    audit::record(
+                        SecurityKind::CommandDenied,
+                        SecurityOutcome::Blocked,
+                        &cmd_str,
+                        "permission policy returned `deny`",
+                    );
+                    return Err(anyhow::anyhow!("Command denied by policy: {}", cmd_str));
                 }
                 crate::tools::permission::PermissionLevel::RequireApproval => {
                     // Prefer session/channel/chat_id injected by the agent loop (current conversation); otherwise use tool-level values.
@@ -335,21 +342,34 @@ impl DynTool for ExecTool {
                         .as_str()
                         .map(String::from)
                         .or_else(|| self.chat_id.clone());
-                    if let (Some(approval_manager), Some(session_id), Some(channel), Some(chat_id)) =
-                        (&self.approval_manager, session_id, channel, chat_id)
+                    if let (
+                        Some(approval_manager),
+                        Some(session_id),
+                        Some(channel),
+                        Some(chat_id),
+                    ) = (&self.approval_manager, session_id, channel, chat_id)
                     {
                         let cwd = approval_cwd.clone();
-                        
-                        let context = format!(
-                            "session: {} channel: {}",
-                            session_id, channel
-                        );
-                        
+
+                        let context = format!("session: {} channel: {}", session_id, channel);
+
                         let approval_message = args["approval_message"]
                             .as_str()
                             .map(|s| s.trim().to_string())
                             .filter(|s| !s.is_empty());
-                        
+
+                        // Recorded before the await: the escalation itself is the event worth showing,
+                        // even when the answer arrives immediately.
+                        audit::record(
+                            SecurityKind::ApprovalRequested,
+                            SecurityOutcome::NeedsUser,
+                            cmd_str.clone(),
+                            format!(
+                                "waiting for approval in session {session_id} ({}s)",
+                                self.approval_timeout_secs
+                            ),
+                        );
+
                         let outcome = approval_manager
                             .request_approval(
                                 session_id.clone(),
@@ -362,16 +382,35 @@ impl DynTool for ExecTool {
                                 approval_message,
                             )
                             .await?;
-                        
+
                         match outcome {
-                            ApprovalOutcome::Approved => { /* continue to execute */ }
+                            ApprovalOutcome::Approved => {
+                                audit::record(
+                                    SecurityKind::ApprovalApproved,
+                                    SecurityOutcome::Allowed,
+                                    &cmd_str,
+                                    format!("approved in session {session_id}"),
+                                );
+                            }
                             ApprovalOutcome::Rejected => {
+                                audit::record(
+                                    SecurityKind::ApprovalRejected,
+                                    SecurityOutcome::Blocked,
+                                    &cmd_str,
+                                    "user declined the approval request",
+                                );
                                 return Err(anyhow::anyhow!(
                                     "Execution rejected by user: {} (user declined approval; do not retry this command)",
                                     cmd_str
                                 ));
                             }
                             ApprovalOutcome::Timeout => {
+                                audit::record(
+                                    SecurityKind::ApprovalTimeout,
+                                    SecurityOutcome::Blocked,
+                                    &cmd_str,
+                                    "nobody answered the approval request in time",
+                                );
                                 return Err(anyhow::anyhow!(
                                     "Execution not run: {} (approval timed out; you may ask the user to approve and try again)",
                                     cmd_str
@@ -380,6 +419,12 @@ impl DynTool for ExecTool {
                         }
                     } else {
                         // If approval manager or session info is not available, deny by default
+                        audit::record(
+                            SecurityKind::ApprovalUnavailable,
+                            SecurityOutcome::Blocked,
+                            &cmd_str,
+                            "approval is required but no approval channel is configured",
+                        );
                         return Err(anyhow::anyhow!(
                             "Approval required but approval system not configured: {}",
                             cmd_str
@@ -393,6 +438,12 @@ impl DynTool for ExecTool {
         }
 
         if self.require_sandbox && self.sandbox_context.is_none() {
+            audit::record(
+                SecurityKind::SandboxRequired,
+                SecurityOutcome::Blocked,
+                &cmd_str,
+                "the active security profile requires a tool sandbox and none is available",
+            );
             return Err(anyhow::anyhow!(
                 "Safe security profile requires a tool sandbox, but no sandbox backend is active; command was not executed"
             ));
@@ -565,8 +616,7 @@ impl DynTool for ExecTool {
         // smart_truncate_streams handles proportional budget allocation and
         // preserves the head + tail of each stream.
         let (truncated_stdout, truncated_stderr, original_size) = if needs_truncation {
-            let (out_r, err_r) =
-                smart_truncate_streams(&stdout, &stderr, MAX_OUTPUT);
+            let (out_r, err_r) = smart_truncate_streams(&stdout, &stderr, MAX_OUTPUT);
             (out_r.content, err_r.content, Some(total_size))
         } else {
             (stdout, stderr, None)
@@ -629,11 +679,13 @@ impl DynTool for ExecTool {
 /// Mask sensitive information in log output
 fn mask_sensitive_info(text: &str) -> String {
     let mut masked = text.to_string();
-    
+
     // Simple pattern matching for common sensitive data
     // Replace common patterns with masked versions
-    let keywords = ["api_key", "apikey", "api-key", "token", "password", "secret", "Bearer", "Basic"];
-    
+    let keywords = [
+        "api_key", "apikey", "api-key", "token", "password", "secret", "Bearer", "Basic",
+    ];
+
     for keyword in &keywords {
         if let Some(pos) = masked.to_lowercase().find(&keyword.to_lowercase()) {
             // Find the end of the value (next space or end of string)
@@ -655,7 +707,7 @@ fn mask_sensitive_info(text: &str) -> String {
             }
         }
     }
-    
+
     masked
 }
 
@@ -706,10 +758,7 @@ mod tests {
 
     #[test]
     fn policy_allow_patterns_restrict_commands() {
-        let policy = CommandPolicy::new(
-            vec![],
-            Some(vec!["cargo".to_string(), "git".to_string()]),
-        );
+        let policy = CommandPolicy::new(vec![], Some(vec!["cargo".to_string(), "git".to_string()]));
         assert!(policy.validate("cargo build").is_ok());
         assert!(policy.validate("git status").is_ok());
         assert!(policy.validate("rm -rf /tmp").is_err());
@@ -881,15 +930,13 @@ mod tests {
     #[tokio::test]
     async fn permission_deny_blocks_command() {
         use crate::tools::permission::{CommandPermissionPolicy, PermissionLevel, PermissionRule};
-        
+
         let policy = CommandPermissionPolicy::new(
-            vec![
-                PermissionRule {
-                    pattern: "rm*".to_string(),
-                    level: PermissionLevel::Deny,
-                    description: None,
-                },
-            ],
+            vec![PermissionRule {
+                pattern: "rm*".to_string(),
+                level: PermissionLevel::Deny,
+                description: None,
+            }],
             PermissionLevel::Allow,
         );
 
@@ -914,21 +961,22 @@ mod tests {
 
         let result = tool.call(args).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Command denied by policy"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Command denied by policy"));
     }
 
     #[tokio::test]
     async fn permission_allow_executes_command() {
         use crate::tools::permission::{CommandPermissionPolicy, PermissionLevel, PermissionRule};
-        
+
         let policy = CommandPermissionPolicy::new(
-            vec![
-                PermissionRule {
-                    pattern: "echo*".to_string(),
-                    level: PermissionLevel::Allow,
-                    description: None,
-                },
-            ],
+            vec![PermissionRule {
+                pattern: "echo*".to_string(),
+                level: PermissionLevel::Allow,
+                description: None,
+            }],
             PermissionLevel::Deny,
         );
 
@@ -958,15 +1006,13 @@ mod tests {
     #[tokio::test]
     async fn permission_require_approval_without_manager_fails() {
         use crate::tools::permission::{CommandPermissionPolicy, PermissionLevel, PermissionRule};
-        
+
         let policy = CommandPermissionPolicy::new(
-            vec![
-                PermissionRule {
-                    pattern: "git push*".to_string(),
-                    level: PermissionLevel::RequireApproval,
-                    description: None,
-                },
-            ],
+            vec![PermissionRule {
+                pattern: "git push*".to_string(),
+                level: PermissionLevel::RequireApproval,
+                description: None,
+            }],
             PermissionLevel::Allow,
         );
 
@@ -991,27 +1037,28 @@ mod tests {
 
         let result = tool.call(args).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("approval system not configured"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("approval system not configured"));
     }
 
     #[tokio::test]
     async fn permission_require_approval_with_manager_configured() {
         use crate::tools::approval::ApprovalManager;
         use crate::tools::permission::{CommandPermissionPolicy, PermissionLevel, PermissionRule};
-        
+
         let policy = CommandPermissionPolicy::new(
-            vec![
-                PermissionRule {
-                    pattern: "curl*".to_string(),
-                    level: PermissionLevel::RequireApproval,
-                    description: None,
-                },
-            ],
+            vec![PermissionRule {
+                pattern: "curl*".to_string(),
+                level: PermissionLevel::RequireApproval,
+                description: None,
+            }],
             PermissionLevel::Allow,
         );
 
         let approval_manager = Arc::new(ApprovalManager::new());
-        
+
         let tool = ExecTool {
             workspace: PathBuf::from("."),
             timeout_secs: 10,
@@ -1060,11 +1107,8 @@ mod tests {
     #[tokio::test]
     async fn permission_default_level_applied() {
         use crate::tools::permission::{CommandPermissionPolicy, PermissionLevel};
-        
-        let policy = CommandPermissionPolicy::new(
-            vec![],
-            PermissionLevel::Deny,
-        );
+
+        let policy = CommandPermissionPolicy::new(vec![], PermissionLevel::Deny);
 
         let tool = ExecTool {
             workspace: PathBuf::from("."),
@@ -1087,6 +1131,9 @@ mod tests {
 
         let result = tool.call(args).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Command denied by policy"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Command denied by policy"));
     }
 }

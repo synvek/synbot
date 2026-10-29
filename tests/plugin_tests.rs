@@ -184,9 +184,9 @@ fn various_invalid_wasm_patterns_never_panic() {
     let test_cases: &[&[u8]] = &[
         b"",
         b"\x00",
-        b"\x00\x61\x73",                   // truncated magic
-        b"\x00\x61\x73\x6D",               // magic only, no version
-        b"\x00\x61\x73\x6D\x01",           // magic + partial version
+        b"\x00\x61\x73",         // truncated magic
+        b"\x00\x61\x73\x6D",     // magic only, no version
+        b"\x00\x61\x73\x6D\x01", // magic + partial version
         b"ELF binary not wasm",
         b"#!/bin/sh\necho hello",
         &[0xFF; 100],

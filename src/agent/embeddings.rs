@@ -46,10 +46,7 @@ pub async fn embed_text(config: &Config, text: &str) -> Result<Vec<f32>> {
         return embed_ollama(config, prov, text).await;
     }
 
-    if lower.contains("anthropic")
-        || lower.contains("claude")
-        || lower.contains("gemini")
-    {
+    if lower.contains("anthropic") || lower.contains("claude") || lower.contains("gemini") {
         return Ok(stub_embedding(dim));
     }
 

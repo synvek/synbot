@@ -13,7 +13,12 @@ pub fn format_tool_list_markdown(mut tools: Vec<ToolInfo>) -> String {
     tools.sort_by(|a, b| a.name.cmp(&b.name));
     let mut lines: Vec<String> = Vec::with_capacity(tools.len());
     for t in &tools {
-        let desc = t.description.lines().next().unwrap_or(&t.description).trim();
+        let desc = t
+            .description
+            .lines()
+            .next()
+            .unwrap_or(&t.description)
+            .trim();
         lines.push(format!("- **{}**: {}", t.name, desc));
     }
     lines.join("\n")

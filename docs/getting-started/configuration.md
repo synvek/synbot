@@ -474,7 +474,8 @@ Configuration key: **`mainAgent`** (camelCase in JSON). The main agent is **impl
     "model": "claude-3-5-sonnet-20241022",
     "maxTokens": 8192,
     "temperature": 0.7,
-    "maxToolIterations": 20,
+    "maxToolIterations": 99,
+    "maxIdleIterations": 6,
     "maxConcurrentSubagents": 5,
     "agents": [
       { "name": "dev", "role": "dev" }
@@ -482,6 +483,11 @@ Configuration key: **`mainAgent`** (camelCase in JSON). The main agent is **impl
   }
 }
 ```
+
+- **maxToolIterations** (default **99**): the turn's **productive-round** budget — model round trips that actually move the task forward. Waiting on a subagent, or repeating a tool call (the earlier result is reused), does **not** count.
+- **maxIdleIterations** (default **6**): how many consecutive rounds without new progress the turn tolerates before stopping early. Re-reading a file you already read, or re-polling `list_subagents` while nothing changed, counts as no progress — this is what keeps a spinning turn from burning tokens.
+- **maxConsecutiveToolErrors** (default **8**): stop after this many consecutive rounds with a failing tool call.
+- **maxChatHistoryMessages** (default **20**): how many recent messages each request carries. Too small a window makes the model forget what it already read and re-read it (which then counts as no progress).
 
 ### Roles (from filesystem)
 
@@ -503,7 +509,8 @@ Example with an extra agent using the dev role:
     "model": "claude-3-5-sonnet-20241022",
     "maxTokens": 8192,
     "temperature": 0.7,
-    "maxToolIterations": 20,
+    "maxToolIterations": 99,
+    "maxIdleIterations": 6,
     "maxConcurrentSubagents": 5,
     "agents": [
       { "name": "dev", "role": "dev" },
@@ -953,7 +960,8 @@ Here's a complete configuration example:
     "model": "claude-3-5-sonnet-20241022",
     "maxTokens": 8192,
     "temperature": 0.7,
-    "maxToolIterations": 20,
+    "maxToolIterations": 99,
+    "maxIdleIterations": 6,
     "maxConcurrentSubagents": 5,
     "agents": [
       { "name": "dev", "role": "dev" }

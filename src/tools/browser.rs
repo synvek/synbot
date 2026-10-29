@@ -98,20 +98,27 @@ impl BrowserTool {
             cmd.env("PATH", path);
         }
 
-        let output = tokio::time::timeout(
-            Duration::from_secs(self.timeout_secs),
-            cmd.output(),
-        )
-        .await
-        .map_err(|_| anyhow::anyhow!("browser command timed out after {}s", self.timeout_secs))?
-        .context("failed to spawn agent-browser; is it installed? (npm install -g agent-browser)")?;
+        let output = tokio::time::timeout(Duration::from_secs(self.timeout_secs), cmd.output())
+            .await
+            .map_err(|_| anyhow::anyhow!("browser command timed out after {}s", self.timeout_secs))?
+            .context(
+                "failed to spawn agent-browser; is it installed? (npm install -g agent-browser)",
+            )?;
 
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
 
         if !output.status.success() {
-            let msg = if stderr.is_empty() { stdout.clone() } else { stderr };
-            anyhow::bail!("agent-browser exited with {}: {}", output.status, msg.trim());
+            let msg = if stderr.is_empty() {
+                stdout.clone()
+            } else {
+                stderr
+            };
+            anyhow::bail!(
+                "agent-browser exited with {}: {}",
+                output.status,
+                msg.trim()
+            );
         }
 
         Ok(stdout)

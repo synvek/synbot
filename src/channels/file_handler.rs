@@ -43,9 +43,18 @@ pub fn save_incoming_file(
 /// Sanitize a file name: remove path components and characters unsafe for the filesystem.
 fn sanitize_filename(name: &str) -> String {
     let s = name.trim();
-    let base = Path::new(s).file_name().and_then(|n| n.to_str()).unwrap_or(s);
+    let base = Path::new(s)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(s);
     base.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect::<String>()
 }
 
@@ -70,8 +79,14 @@ mod tests {
 
     #[test]
     fn test_split_stem_ext() {
-        assert_eq!(split_stem_ext("a.pdf"), ("a".to_string(), Some("pdf".to_string())));
-        assert_eq!(split_stem_ext("doc.x.y"), ("doc.x".to_string(), Some("y".to_string())));
+        assert_eq!(
+            split_stem_ext("a.pdf"),
+            ("a".to_string(), Some("pdf".to_string()))
+        );
+        assert_eq!(
+            split_stem_ext("doc.x.y"),
+            ("doc.x".to_string(), Some("y".to_string()))
+        );
         assert_eq!(split_stem_ext("noext"), ("noext".to_string(), None));
         assert_eq!(split_stem_ext("Makefile"), ("Makefile".to_string(), None));
     }

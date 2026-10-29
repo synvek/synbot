@@ -42,18 +42,14 @@ fn all_builtin_channel_types_are_registered() {
     let r = registry();
     let names = r.type_names();
     let expected = [
-        "telegram",
-        "discord",
-        "feishu",
-        "slack",
-        "email",
-        "matrix",
-        "dingtalk",
-        "whatsapp",
-        "irc",
+        "telegram", "discord", "feishu", "slack", "email", "matrix", "dingtalk", "whatsapp", "irc",
     ];
     for e in expected {
-        assert!(names.contains(&e.to_string()), "missing channel type: {}", e);
+        assert!(
+            names.contains(&e.to_string()),
+            "missing channel type: {}",
+            e
+        );
     }
     assert_eq!(names.len(), expected.len());
 }
@@ -76,7 +72,11 @@ fn telegram_factory_creates_channel_from_valid_config() {
         "defaultAgent": "main"
     });
     let result = factory.create(config, test_ctx());
-    assert!(result.is_ok(), "telegram factory should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "telegram factory should succeed: {:?}",
+        result.err()
+    );
     assert_eq!(result.unwrap().name(), "telegram");
 }
 
@@ -87,7 +87,10 @@ fn telegram_factory_accepts_empty_token() {
     let factory = r.get("telegram").expect("telegram factory");
     let config = serde_json::json!({ "enabled": false });
     let result = factory.create(config, test_ctx());
-    assert!(result.is_ok(), "telegram factory should accept minimal config");
+    assert!(
+        result.is_ok(),
+        "telegram factory should accept minimal config"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -108,7 +111,11 @@ fn discord_factory_creates_channel_from_valid_config() {
         "defaultAgent": "main"
     });
     let result = factory.create(config, test_ctx());
-    assert!(result.is_ok(), "discord factory should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "discord factory should succeed: {:?}",
+        result.err()
+    );
     assert_eq!(result.unwrap().name(), "discord");
 }
 
@@ -140,7 +147,11 @@ fn feishu_factory_creates_channel_from_valid_config() {
         "defaultAgent": "main"
     });
     let result = factory.create(config, test_ctx());
-    assert!(result.is_ok(), "feishu factory should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "feishu factory should succeed: {:?}",
+        result.err()
+    );
     assert_eq!(result.unwrap().name(), "feishu");
 }
 
@@ -163,7 +174,11 @@ fn slack_factory_creates_channel_from_valid_config() {
         "defaultAgent": "main"
     });
     let result = factory.create(config, test_ctx());
-    assert!(result.is_ok(), "slack factory should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "slack factory should succeed: {:?}",
+        result.err()
+    );
     assert_eq!(result.unwrap().name(), "slack");
 }
 
@@ -199,7 +214,11 @@ fn email_factory_creates_channel_from_valid_config() {
         "defaultAgent": "main"
     });
     let result = factory.create(config, test_ctx());
-    assert!(result.is_ok(), "email factory should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "email factory should succeed: {:?}",
+        result.err()
+    );
     assert_eq!(result.unwrap().name(), "email");
 }
 
@@ -223,7 +242,11 @@ fn matrix_factory_creates_channel_from_valid_config() {
         "defaultAgent": "main"
     });
     let result = factory.create(config, test_ctx());
-    assert!(result.is_ok(), "matrix factory should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "matrix factory should succeed: {:?}",
+        result.err()
+    );
     assert_eq!(result.unwrap().name(), "matrix");
 }
 
@@ -247,7 +270,11 @@ fn dingtalk_factory_creates_channel_from_valid_config() {
         "robotCode": ""
     });
     let result = factory.create(config, test_ctx());
-    assert!(result.is_ok(), "dingtalk factory should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "dingtalk factory should succeed: {:?}",
+        result.err()
+    );
     assert_eq!(result.unwrap().name(), "dingtalk");
 }
 
@@ -267,7 +294,11 @@ fn whatsapp_factory_creates_channel_from_valid_config() {
         "agent": "main"
     });
     let result = factory.create(config, test_ctx());
-    assert!(result.is_ok(), "whatsapp factory should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "whatsapp factory should succeed: {:?}",
+        result.err()
+    );
     assert_eq!(result.unwrap().name(), "whatsapp");
 }
 
@@ -278,7 +309,11 @@ fn whatsapp_factory_accepts_config_without_optional_fields() {
     let factory = r.get("whatsapp").expect("whatsapp factory");
     let config = serde_json::json!({ "enabled": false });
     let result = factory.create(config, test_ctx());
-    assert!(result.is_ok(), "whatsapp factory should accept minimal config: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "whatsapp factory should accept minimal config: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -288,7 +323,10 @@ fn whatsapp_factory_rejects_invalid_json_type() {
     let factory = r.get("whatsapp").expect("whatsapp factory");
     let config = serde_json::json!("not-an-object");
     let result = factory.create(config, test_ctx());
-    assert!(result.is_err(), "whatsapp factory should reject non-object config");
+    assert!(
+        result.is_err(),
+        "whatsapp factory should reject non-object config"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -311,7 +349,11 @@ fn irc_factory_creates_channel_from_valid_config() {
         "agent": "main"
     });
     let result = factory.create(config, test_ctx());
-    assert!(result.is_ok(), "irc factory should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "irc factory should succeed: {:?}",
+        result.err()
+    );
     assert_eq!(result.unwrap().name(), "irc");
 }
 
@@ -322,7 +364,11 @@ fn irc_factory_accepts_config_without_optional_fields() {
     let factory = r.get("irc").expect("irc factory");
     let config = serde_json::json!({ "enabled": false });
     let result = factory.create(config, test_ctx());
-    assert!(result.is_ok(), "irc factory should accept minimal config: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "irc factory should accept minimal config: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -331,7 +377,10 @@ fn irc_factory_rejects_invalid_json_type() {
     let factory = r.get("irc").expect("irc factory");
     let config = serde_json::json!(42);
     let result = factory.create(config, test_ctx());
-    assert!(result.is_err(), "irc factory should reject non-object config");
+    assert!(
+        result.is_err(),
+        "irc factory should reject non-object config"
+    );
 }
 
 // ---------------------------------------------------------------------------

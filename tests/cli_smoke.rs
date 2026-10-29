@@ -11,7 +11,10 @@ fn cli_help_exits_success() {
                 .join("target/debug/synbot")
         });
     if !exe.exists() {
-        eprintln!("Skipping cli_help_exits_success: binary not found at {}", exe.display());
+        eprintln!(
+            "Skipping cli_help_exits_success: binary not found at {}",
+            exe.display()
+        );
         return;
         // When run via `cargo test`, the binary is usually built and CARGO_BIN_EXE_synbot is set.
     }

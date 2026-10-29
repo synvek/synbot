@@ -1,22 +1,24 @@
 pub mod approval_classifier;
 pub mod approval_formatter;
-pub mod file_handler;
+pub mod dingtalk;
+pub mod dingtalk_stream;
 pub mod discord;
 pub mod email;
+pub mod factory;
 pub mod feishu;
 pub mod feishu_api;
 pub mod feishu_ws;
-pub mod dingtalk;
-pub mod dingtalk_stream;
-pub mod factory;
+pub mod file_handler;
+pub mod irc;
 pub mod matrix;
 pub mod slack;
 pub mod status;
 pub mod telegram;
 pub mod whatsapp;
-pub mod irc;
 
-pub use status::{ChannelStatusHandle, ChannelStatusRegistry, RuntimeChannelSnapshot, RuntimeChannelStatus};
+pub use status::{
+    ChannelStatusHandle, ChannelStatusRegistry, RuntimeChannelSnapshot, RuntimeChannelStatus,
+};
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -67,8 +69,8 @@ impl RetryPolicy {
     ///
     /// Formula: `min(initial_delay * backoff_factor^attempt, max_delay)`
     pub fn delay_for_attempt(&self, attempt: u32) -> Duration {
-        let delay_ms = self.initial_delay.as_millis() as f64
-            * self.backoff_factor.powi(attempt as i32);
+        let delay_ms =
+            self.initial_delay.as_millis() as f64 * self.backoff_factor.powi(attempt as i32);
         Duration::from_millis(delay_ms.min(self.max_delay.as_millis() as f64) as u64)
     }
 }
@@ -261,23 +263,13 @@ mod tests {
 
     #[test]
     fn delay_for_attempt_zero_returns_initial_delay() {
-        let policy = RetryPolicy::new(
-            5,
-            Duration::from_millis(100),
-            Duration::from_secs(10),
-            2.0,
-        );
+        let policy = RetryPolicy::new(5, Duration::from_millis(100), Duration::from_secs(10), 2.0);
         assert_eq!(policy.delay_for_attempt(0), Duration::from_millis(100));
     }
 
     #[test]
     fn delay_for_attempt_grows_exponentially() {
-        let policy = RetryPolicy::new(
-            5,
-            Duration::from_millis(100),
-            Duration::from_secs(60),
-            2.0,
-        );
+        let policy = RetryPolicy::new(5, Duration::from_millis(100), Duration::from_secs(60), 2.0);
         // attempt 0 → 100ms
         // attempt 1 → 200ms
         // attempt 2 → 400ms
@@ -326,12 +318,7 @@ mod tests {
 
     #[test]
     fn record_failure_increments_attempts() {
-        let policy = RetryPolicy::new(
-            3,
-            Duration::from_millis(100),
-            Duration::from_secs(10),
-            2.0,
-        );
+        let policy = RetryPolicy::new(3, Duration::from_millis(100), Duration::from_secs(10), 2.0);
         let mut state = RetryState::new();
 
         let should_retry = state.record_failure(&policy, "timeout".into());
@@ -343,12 +330,7 @@ mod tests {
 
     #[test]
     fn record_failure_enters_cooldown_when_exhausted() {
-        let policy = RetryPolicy::new(
-            3,
-            Duration::from_millis(100),
-            Duration::from_secs(10),
-            2.0,
-        );
+        let policy = RetryPolicy::new(3, Duration::from_millis(100), Duration::from_secs(10), 2.0);
         let mut state = RetryState::new();
 
         // First two failures → should retry
@@ -365,12 +347,7 @@ mod tests {
 
     #[test]
     fn reset_clears_state() {
-        let policy = RetryPolicy::new(
-            3,
-            Duration::from_millis(100),
-            Duration::from_secs(10),
-            2.0,
-        );
+        let policy = RetryPolicy::new(3, Duration::from_millis(100), Duration::from_secs(10), 2.0);
         let mut state = RetryState::new();
         state.record_failure(&policy, "err".into());
         state.record_failure(&policy, "err".into());
@@ -385,12 +362,7 @@ mod tests {
 
     #[test]
     fn should_retry_returns_false_in_cooldown() {
-        let policy = RetryPolicy::new(
-            2,
-            Duration::from_millis(100),
-            Duration::from_secs(10),
-            2.0,
-        );
+        let policy = RetryPolicy::new(2, Duration::from_millis(100), Duration::from_secs(10), 2.0);
         let mut state = RetryState::new();
         assert!(state.should_retry(&policy));
 
@@ -403,12 +375,7 @@ mod tests {
 
     #[test]
     fn next_delay_uses_current_attempt_count() {
-        let policy = RetryPolicy::new(
-            5,
-            Duration::from_millis(100),
-            Duration::from_secs(60),
-            2.0,
-        );
+        let policy = RetryPolicy::new(5, Duration::from_millis(100), Duration::from_secs(60), 2.0);
         let mut state = RetryState::new();
         // Before any failure, next delay is for attempt 0
         assert_eq!(state.next_delay(&policy), Duration::from_millis(100));
@@ -420,12 +387,7 @@ mod tests {
 
     #[test]
     fn record_failure_with_max_retries_zero_enters_cooldown_immediately() {
-        let policy = RetryPolicy::new(
-            0,
-            Duration::from_millis(100),
-            Duration::from_secs(10),
-            2.0,
-        );
+        let policy = RetryPolicy::new(0, Duration::from_millis(100), Duration::from_secs(10), 2.0);
         let mut state = RetryState::new();
         // With max_retries=0, even the first failure should enter cooldown
         assert!(!state.record_failure(&policy, "err".into()));
@@ -434,12 +396,7 @@ mod tests {
 
     #[test]
     fn record_failure_with_max_retries_one() {
-        let policy = RetryPolicy::new(
-            1,
-            Duration::from_millis(100),
-            Duration::from_secs(10),
-            2.0,
-        );
+        let policy = RetryPolicy::new(1, Duration::from_millis(100), Duration::from_secs(10), 2.0);
         let mut state = RetryState::new();
         // First failure reaches max_retries=1, enters cooldown
         assert!(!state.record_failure(&policy, "err".into()));
@@ -450,12 +407,7 @@ mod tests {
     #[test]
     fn delay_for_attempt_with_backoff_factor_one() {
         // backoff_factor=1.0 means constant delay
-        let policy = RetryPolicy::new(
-            5,
-            Duration::from_millis(500),
-            Duration::from_secs(10),
-            1.0,
-        );
+        let policy = RetryPolicy::new(5, Duration::from_millis(500), Duration::from_secs(10), 1.0);
         assert_eq!(policy.delay_for_attempt(0), Duration::from_millis(500));
         assert_eq!(policy.delay_for_attempt(1), Duration::from_millis(500));
         assert_eq!(policy.delay_for_attempt(5), Duration::from_millis(500));

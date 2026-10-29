@@ -1,17 +1,21 @@
 //! Agent command - Run the agent (one-shot or interactive).
 
-use anyhow::Result;
-use tracing::info;
+use super::helpers::{build_default_tools, build_rig_completion_model, resolve_provider};
 use crate::config;
 use crate::logging;
-use super::helpers::{resolve_provider, build_rig_completion_model, build_default_tools};
+use anyhow::Result;
+use tracing::info;
 
-pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model: Option<String>) -> Result<()> {
+pub async fn cmd_agent(
+    message: Option<String>,
+    provider: Option<String>,
+    model: Option<String>,
+) -> Result<()> {
     let cfg = config::load_config(None)?;
-    
+
     // Initialize logging with config
     logging::init_logging(&cfg, None)?;
-    
+
     let ws = config::effective_workspace_path(&cfg);
 
     let model_name = model.unwrap_or(cfg.main_agent.model.clone());
@@ -29,38 +33,35 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
     }
 
     // Build rig completion model via rig-core (no rig-dyn)
-    let completion_model = build_rig_completion_model(
-        &provider_name,
-        &model_name,
-        &api_key,
-        api_base.as_deref(),
-    )?;
+    let completion_model =
+        build_rig_completion_model(&provider_name, &model_name, &api_key, api_base.as_deref())?;
 
     // Subagent manager (shared via Arc<Mutex<>>)
-    let subagent_mgr = std::sync::Arc::new(
-        tokio::sync::Mutex::new(
-            crate::agent::subagent::SubagentManager::new(
-                cfg.main_agent.max_concurrent_subagents,
-                Some(cfg.main_agent.subagent_task_timeout_secs),
-            ),
+    let subagent_mgr = std::sync::Arc::new(tokio::sync::Mutex::new(
+        crate::agent::subagent::SubagentManager::new(
+            cfg.main_agent.max_concurrent_subagents,
+            Some(cfg.main_agent.subagent_task_timeout_secs),
         ),
-    );
+    ));
 
     // Create approval manager
     let approval_manager = std::sync::Arc::new(crate::tools::approval::ApprovalManager::new());
 
     // Load permission policy if enabled
     let permission_policy = if cfg.tools.exec.permissions.enabled {
-        Some(std::sync::Arc::new(crate::tools::permission::CommandPermissionPolicy::new(
-            cfg.tools.exec.permissions.rules.clone(),
-            cfg.tools.exec.permissions.default_level,
-        )))
+        Some(std::sync::Arc::new(
+            crate::tools::permission::CommandPermissionPolicy::new(
+                cfg.tools.exec.permissions.rules.clone(),
+                cfg.tools.exec.permissions.default_level,
+            ),
+        ))
     } else {
         None
     };
 
     // Shared session state for CLI mode (create before tools so list_sessions/reset_session can be registered)
-    let session_store = crate::agent::session::SessionStore::new(crate::config::sessions_root().as_path());
+    let session_store =
+        crate::agent::session::SessionStore::new(crate::config::sessions_root().as_path());
     let shared_session_state = crate::agent::session_state::SharedSessionState::new(session_store);
     if let Err(e) = shared_session_state.load_persisted_sessions().await {
         tracing::warn!(error = %e, "Failed to load persisted sessions");
@@ -73,8 +74,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
     let shared_config = std::sync::Arc::new(tokio::sync::RwLock::new(cfg.clone()));
 
     let sandbox_context = super::start::init_sandbox_if_configured(&cfg).await;
-    let tool_sandbox_delegate =
-        super::start::tool_sandbox_delegate_from_startup(&sandbox_context);
+    let tool_sandbox_delegate = super::start::tool_sandbox_delegate_from_startup(&sandbox_context);
 
     // Build tools (pass subagent manager, approval manager, permission policy, session state, and outbound_tx for message tool)
     let (mut tool_reg, spawn_context) = build_default_tools(
@@ -84,7 +84,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
         std::sync::Arc::clone(&subagent_mgr),
         approval_manager,
         permission_policy,
-        None, // no heartbeat/cron tools in CLI agent mode
+        None,                   // no heartbeat/cron tools in CLI agent mode
         &tool_sandbox_delegate, // use the configured sandbox; Safe mode fails closed if unavailable
         shared_session_state.clone(),
         bus.outbound_tx_clone(),
@@ -97,7 +97,8 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
     if let Err(e) = std::fs::create_dir_all(&skills_dir) {
         tracing::warn!(path = %skills_dir.display(), error = %e, "Could not create skills dir");
     }
-    let mut skills_composite = crate::agent::skills::CompositeSkillProvider::default_with_fs(&skills_dir);
+    let mut skills_composite =
+        crate::agent::skills::CompositeSkillProvider::default_with_fs(&skills_dir);
     crate::plugin::load_extism_plugins(
         &cfg,
         &mut tool_reg,
@@ -139,12 +140,9 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
     }
     let role_registry = std::sync::Arc::new(role_registry);
     let mut agent_registry = crate::agent::agent_registry::AgentRegistry::new();
-    if let Err(e) = agent_registry.load_from_config(
-        &cfg.main_agent,
-        &cfg.providers,
-        &role_registry,
-        &ws,
-    ) {
+    if let Err(e) =
+        agent_registry.load_from_config(&cfg.main_agent, &cfg.providers, &role_registry, &ws)
+    {
         tracing::warn!(error = %e, "Failed to load agent registry");
     }
     let agent_registry = std::sync::Arc::new(agent_registry);
@@ -158,6 +156,7 @@ pub async fn cmd_agent(message: Option<String>, provider: Option<String>, model:
         tools,
         cfg.main_agent.max_tool_iterations,
         bus.outbound_tx_clone(),
+        crate::agent::events::EventBus::new(),
         &cfg,
         shared_session_state,
         agent_registry,

@@ -2,8 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::RwLock;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::RwLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -21,6 +21,19 @@ pub struct PermissionRule {
     pub level: PermissionLevel,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+}
+
+/// Result of explaining one command against the policy: the level **and** the rule that produced it.
+///
+/// `check_permission` only returns the level, which is all the executor needs but not enough for a
+/// user asking "why was this blocked?" in the Security page.
+#[derive(Debug, Clone, Serialize)]
+pub struct PolicyVerdict {
+    pub level: PermissionLevel,
+    /// The rule that matched, if any.
+    pub matched_rule: Option<PermissionRule>,
+    /// True when no rule matched and `default_level` decided.
+    pub default_applied: bool,
 }
 
 /// Performance monitoring metrics.
@@ -51,7 +64,7 @@ impl PermissionMetrics {
             hits as f64 / total as f64
         }
     }
-    
+
     /// Resets all metrics.
     pub fn reset(&self) {
         self.total_checks.store(0, Ordering::Relaxed);
@@ -66,8 +79,6 @@ impl PermissionMetrics {
 /// Compiled pattern matching rules (for optimized matching).
 #[derive(Debug, Clone)]
 enum CompiledPattern {
-    /// Exact match.
-    Exact(String),
     /// Prefix match (pattern*).
     Prefix(String),
     /// Contains match (*pattern* or pattern).
@@ -78,7 +89,7 @@ impl CompiledPattern {
     /// Compile from a pattern string.
     fn compile(pattern: &str) -> Self {
         let pattern_lower = pattern.to_lowercase();
-        
+
         if pattern_lower.ends_with('*') && !pattern_lower.starts_with('*') {
             // Prefix match: e.g. npm run dev*
             let prefix = pattern_lower.trim_end_matches('*').to_string();
@@ -100,11 +111,10 @@ impl CompiledPattern {
             CompiledPattern::Contains(pattern_lower)
         }
     }
-    
+
     /// Check whether the command matches this pattern.
     fn matches(&self, command: &str) -> bool {
         match self {
-            CompiledPattern::Exact(pattern) => command == pattern,
             CompiledPattern::Prefix(prefix) => command.starts_with(prefix),
             CompiledPattern::Contains(substring) => command.contains(substring),
         }
@@ -150,7 +160,7 @@ impl CommandPermissionPolicy {
                 level: rule.level,
             })
             .collect();
-        
+
         Self {
             rules,
             compiled_rules,
@@ -160,14 +170,14 @@ impl CommandPermissionPolicy {
             metrics: PermissionMetrics::default(),
         }
     }
-    
+
     /// Check command permission level (with caching).
     pub fn check_permission(&self, command: &str) -> PermissionLevel {
         // Increment total check count
         self.metrics.total_checks.fetch_add(1, Ordering::Relaxed);
-        
+
         let lower = command.to_lowercase();
-        
+
         // Try to read from cache
         {
             let cache = self.cache.read().unwrap();
@@ -178,20 +188,20 @@ impl CommandPermissionPolicy {
                 return level;
             }
         }
-        
+
         // Cache miss
         self.metrics.cache_misses.fetch_add(1, Ordering::Relaxed);
-        
+
         // Perform actual check
         let level = self.check_permission_uncached(&lower);
-        
+
         // Record permission level stats
         self.record_permission_level(level);
-        
+
         // Write to cache
         {
             let mut cache = self.cache.write().unwrap();
-            
+
             // If cache is full, clear half
             if cache.len() >= self.cache_size_limit {
                 let keys_to_remove: Vec<String> = cache
@@ -203,13 +213,35 @@ impl CommandPermissionPolicy {
                     cache.remove(&key);
                 }
             }
-            
+
             cache.insert(lower, level);
         }
-        
+
         level
     }
-    
+
+    /// Explain a command: which rule wins, or whether the default level applied.
+    ///
+    /// Uses the same lower-casing and rule order as [`CommandPermissionPolicy::check_permission`],
+    /// but never touches the cache or the metrics so a dry run does not distort usage stats.
+    pub fn explain(&self, command: &str) -> PolicyVerdict {
+        let lower = command.to_lowercase();
+        for (compiled, rule) in self.compiled_rules.iter().zip(self.rules.iter()) {
+            if compiled.pattern.matches(&lower) {
+                return PolicyVerdict {
+                    level: compiled.level,
+                    matched_rule: Some(rule.clone()),
+                    default_applied: false,
+                };
+            }
+        }
+        PolicyVerdict {
+            level: self.default_level,
+            matched_rule: None,
+            default_applied: true,
+        }
+    }
+
     /// Record permission level stats.
     fn record_permission_level(&self, level: PermissionLevel) {
         match level {
@@ -217,24 +249,26 @@ impl CommandPermissionPolicy {
                 self.metrics.allow_count.fetch_add(1, Ordering::Relaxed);
             }
             PermissionLevel::RequireApproval => {
-                self.metrics.require_approval_count.fetch_add(1, Ordering::Relaxed);
+                self.metrics
+                    .require_approval_count
+                    .fetch_add(1, Ordering::Relaxed);
             }
             PermissionLevel::Deny => {
                 self.metrics.deny_count.fetch_add(1, Ordering::Relaxed);
             }
         }
     }
-    
+
     /// Get performance metrics.
     pub fn metrics(&self) -> &PermissionMetrics {
         &self.metrics
     }
-    
+
     /// Reset performance metrics.
     pub fn reset_metrics(&self) {
         self.metrics.reset();
     }
-    
+
     /// Check command permission level (no cache).
     fn check_permission_uncached(&self, command: &str) -> PermissionLevel {
         // Use compiled rules for fast matching
@@ -243,29 +277,22 @@ impl CommandPermissionPolicy {
                 return compiled_rule.level;
             }
         }
-        
+
         self.default_level
     }
-    
+
     /// Clear the cache.
     pub fn clear_cache(&self) {
         let mut cache = self.cache.write().unwrap();
         cache.clear();
     }
-    
+
     /// Get cache stats.
     pub fn cache_stats(&self) -> (usize, usize) {
         let cache = self.cache.read().unwrap();
         (cache.len(), self.cache_size_limit)
     }
-    
-    /// Pattern match (supports wildcard *).
-    /// Kept for backward compatibility; internally uses compiled patterns.
-    fn matches_pattern(&self, command: &str, pattern: &str) -> bool {
-        let compiled = CompiledPattern::compile(pattern);
-        compiled.matches(command)
-    }
-    
+
     /// Load from JSON config.
     pub fn from_json(json_str: &str) -> anyhow::Result<Self> {
         #[derive(Deserialize)]
@@ -275,7 +302,7 @@ impl CommandPermissionPolicy {
             #[serde(default = "default_permission_level")]
             default_level: PermissionLevel,
         }
-        
+
         let config: PolicyConfig = serde_json::from_str(json_str)?;
         Ok(Self::new(config.rules, config.default_level))
     }
@@ -288,13 +315,11 @@ mod tests {
     #[test]
     fn test_pattern_matching_exact() {
         let policy = CommandPermissionPolicy::new(
-            vec![
-                PermissionRule {
-                    pattern: "git status".to_string(),
-                    level: PermissionLevel::Allow,
-                    description: None,
-                },
-            ],
+            vec![PermissionRule {
+                pattern: "git status".to_string(),
+                level: PermissionLevel::Allow,
+                description: None,
+            }],
             PermissionLevel::Deny,
         );
 
@@ -306,22 +331,17 @@ mod tests {
             policy.check_permission("git status --short"),
             PermissionLevel::Allow
         );
-        assert_eq!(
-            policy.check_permission("git push"),
-            PermissionLevel::Deny
-        );
+        assert_eq!(policy.check_permission("git push"), PermissionLevel::Deny);
     }
 
     #[test]
     fn test_pattern_matching_case_insensitive() {
         let policy = CommandPermissionPolicy::new(
-            vec![
-                PermissionRule {
-                    pattern: "Git Status".to_string(),
-                    level: PermissionLevel::Allow,
-                    description: None,
-                },
-            ],
+            vec![PermissionRule {
+                pattern: "Git Status".to_string(),
+                level: PermissionLevel::Allow,
+                description: None,
+            }],
             PermissionLevel::Deny,
         );
 
@@ -338,13 +358,11 @@ mod tests {
     #[test]
     fn test_wildcard_prefix_matching() {
         let policy = CommandPermissionPolicy::new(
-            vec![
-                PermissionRule {
-                    pattern: "npm run dev*".to_string(),
-                    level: PermissionLevel::RequireApproval,
-                    description: None,
-                },
-            ],
+            vec![PermissionRule {
+                pattern: "npm run dev*".to_string(),
+                level: PermissionLevel::RequireApproval,
+                description: None,
+            }],
             PermissionLevel::Deny,
         );
 
@@ -386,11 +404,11 @@ mod tests {
 
         assert_eq!(policy.check_permission("ls"), PermissionLevel::Allow);
         assert_eq!(policy.check_permission("ls -la"), PermissionLevel::Allow);
-        assert_eq!(policy.check_permission("rm file.txt"), PermissionLevel::Deny);
         assert_eq!(
-            policy.check_permission("rm -rf /"),
+            policy.check_permission("rm file.txt"),
             PermissionLevel::Deny
         );
+        assert_eq!(policy.check_permission("rm -rf /"), PermissionLevel::Deny);
         assert_eq!(
             policy.check_permission("cat file.txt"),
             PermissionLevel::RequireApproval
@@ -416,10 +434,7 @@ mod tests {
         );
 
         // First rule matches, so "git push" gets Allow (not RequireApproval)
-        assert_eq!(
-            policy.check_permission("git push"),
-            PermissionLevel::Allow
-        );
+        assert_eq!(policy.check_permission("git push"), PermissionLevel::Allow);
         assert_eq!(
             policy.check_permission("git status"),
             PermissionLevel::Allow
@@ -428,10 +443,7 @@ mod tests {
 
     #[test]
     fn test_default_level() {
-        let policy = CommandPermissionPolicy::new(
-            vec![],
-            PermissionLevel::RequireApproval,
-        );
+        let policy = CommandPermissionPolicy::new(vec![], PermissionLevel::RequireApproval);
 
         assert_eq!(
             policy.check_permission("any command"),
@@ -481,206 +493,274 @@ mod tests {
     }
 }
 
-    #[test]
-    fn test_cache_functionality() {
-        let policy = CommandPermissionPolicy::new(
-            vec![
-                PermissionRule {
-                    pattern: "git*".to_string(),
-                    level: PermissionLevel::Allow,
-                    description: None,
-                },
-            ],
-            PermissionLevel::Deny,
-        );
+#[test]
+fn test_cache_functionality() {
+    let policy = CommandPermissionPolicy::new(
+        vec![PermissionRule {
+            pattern: "git*".to_string(),
+            level: PermissionLevel::Allow,
+            description: None,
+        }],
+        PermissionLevel::Deny,
+    );
 
-        // First check - cache miss
-        assert_eq!(policy.check_permission("git status"), PermissionLevel::Allow);
-        
-        // Second check - cache hit
-        assert_eq!(policy.check_permission("git status"), PermissionLevel::Allow);
-        
-        // Check cache stats
-        let (size, limit) = policy.cache_stats();
-        assert_eq!(size, 1);
-        assert_eq!(limit, 1000);
-        
-        // Clear cache
-        policy.clear_cache();
-        let (size, _) = policy.cache_stats();
-        assert_eq!(size, 0);
+    // First check - cache miss
+    assert_eq!(
+        policy.check_permission("git status"),
+        PermissionLevel::Allow
+    );
+
+    // Second check - cache hit
+    assert_eq!(
+        policy.check_permission("git status"),
+        PermissionLevel::Allow
+    );
+
+    // Check cache stats
+    let (size, limit) = policy.cache_stats();
+    assert_eq!(size, 1);
+    assert_eq!(limit, 1000);
+
+    // Clear cache
+    policy.clear_cache();
+    let (size, _) = policy.cache_stats();
+    assert_eq!(size, 0);
+}
+
+#[test]
+fn test_cache_size_limit() {
+    let policy = CommandPermissionPolicy::new(
+        vec![PermissionRule {
+            pattern: "test*".to_string(),
+            level: PermissionLevel::Allow,
+            description: None,
+        }],
+        PermissionLevel::Deny,
+    );
+
+    // Fill cache beyond limit
+    for i in 0..1100 {
+        policy.check_permission(&format!("command{}", i));
     }
 
-    #[test]
-    fn test_cache_size_limit() {
-        let policy = CommandPermissionPolicy::new(
-            vec![
-                PermissionRule {
-                    pattern: "test*".to_string(),
-                    level: PermissionLevel::Allow,
-                    description: None,
-                },
-            ],
-            PermissionLevel::Deny,
-        );
+    // Cache should be trimmed
+    let (size, limit) = policy.cache_stats();
+    assert!(size <= limit);
+    assert!(size >= limit / 2); // Should have at least half after trimming
+}
 
-        // Fill cache beyond limit
-        for i in 0..1100 {
-            policy.check_permission(&format!("command{}", i));
-        }
-        
-        // Cache should be trimmed
-        let (size, limit) = policy.cache_stats();
-        assert!(size <= limit);
-        assert!(size >= limit / 2); // Should have at least half after trimming
+#[test]
+fn test_compiled_pattern_prefix() {
+    let pattern = CompiledPattern::compile("npm run dev*");
+    assert!(pattern.matches("npm run dev"));
+    assert!(pattern.matches("npm run dev:server"));
+    assert!(pattern.matches("npm run development"));
+    assert!(!pattern.matches("npm run build"));
+}
+
+#[test]
+fn test_compiled_pattern_contains() {
+    let pattern = CompiledPattern::compile("*docker*");
+    assert!(pattern.matches("docker ps"));
+    assert!(pattern.matches("sudo docker run"));
+    assert!(pattern.matches("docker-compose up"));
+    assert!(!pattern.matches("podman ps"));
+}
+
+#[test]
+fn test_compiled_pattern_suffix() {
+    let pattern = CompiledPattern::compile("*.txt");
+    assert!(pattern.matches("file.txt"));
+    assert!(pattern.matches("readme.txt"));
+    assert!(!pattern.matches("file.md"));
+}
+
+#[test]
+fn test_optimized_matching_performance() {
+    // Create a policy with many rules
+    let mut rules = Vec::new();
+    for i in 0..100 {
+        rules.push(PermissionRule {
+            pattern: format!("command{}*", i),
+            level: PermissionLevel::Allow,
+            description: None,
+        });
     }
 
-    #[test]
-    fn test_compiled_pattern_prefix() {
-        let pattern = CompiledPattern::compile("npm run dev*");
-        assert!(pattern.matches("npm run dev"));
-        assert!(pattern.matches("npm run dev:server"));
-        assert!(pattern.matches("npm run development"));
-        assert!(!pattern.matches("npm run build"));
-    }
+    let policy = CommandPermissionPolicy::new(rules, PermissionLevel::Deny);
 
-    #[test]
-    fn test_compiled_pattern_contains() {
-        let pattern = CompiledPattern::compile("*docker*");
-        assert!(pattern.matches("docker ps"));
-        assert!(pattern.matches("sudo docker run"));
-        assert!(pattern.matches("docker-compose up"));
-        assert!(!pattern.matches("podman ps"));
+    // Test matching performance
+    let start = std::time::Instant::now();
+    for _ in 0..1000 {
+        policy.check_permission("command50 arg1 arg2");
     }
+    let duration = start.elapsed();
 
-    #[test]
-    fn test_compiled_pattern_suffix() {
-        let pattern = CompiledPattern::compile("*.txt");
-        assert!(pattern.matches("file.txt"));
-        assert!(pattern.matches("readme.txt"));
-        assert!(!pattern.matches("file.md"));
-    }
+    // Should complete quickly (under 100ms for 1000 checks with 100 rules)
+    assert!(
+        duration.as_millis() < 100,
+        "Performance test failed: took {:?}",
+        duration
+    );
+}
 
-    #[test]
-    fn test_optimized_matching_performance() {
-        // Create a policy with many rules
-        let mut rules = Vec::new();
-        for i in 0..100 {
-            rules.push(PermissionRule {
-                pattern: format!("command{}*", i),
+#[test]
+fn test_pattern_compilation_optimization() {
+    let policy = CommandPermissionPolicy::new(
+        vec![
+            PermissionRule {
+                pattern: "git*".to_string(),
                 level: PermissionLevel::Allow,
                 description: None,
-            });
-        }
-        
-        let policy = CommandPermissionPolicy::new(rules, PermissionLevel::Deny);
-        
-        // Test matching performance
-        let start = std::time::Instant::now();
-        for _ in 0..1000 {
-            policy.check_permission("command50 arg1 arg2");
-        }
-        let duration = start.elapsed();
-        
-        // Should complete quickly (under 100ms for 1000 checks with 100 rules)
-        assert!(duration.as_millis() < 100, "Performance test failed: took {:?}", duration);
-    }
+            },
+            PermissionRule {
+                pattern: "*docker*".to_string(),
+                level: PermissionLevel::RequireApproval,
+                description: None,
+            },
+            PermissionRule {
+                pattern: "rm*".to_string(),
+                level: PermissionLevel::Deny,
+                description: None,
+            },
+        ],
+        PermissionLevel::RequireApproval,
+    );
 
-    #[test]
-    fn test_pattern_compilation_optimization() {
-        let policy = CommandPermissionPolicy::new(
-            vec![
-                PermissionRule {
-                    pattern: "git*".to_string(),
-                    level: PermissionLevel::Allow,
-                    description: None,
-                },
-                PermissionRule {
-                    pattern: "*docker*".to_string(),
-                    level: PermissionLevel::RequireApproval,
-                    description: None,
-                },
-                PermissionRule {
-                    pattern: "rm*".to_string(),
-                    level: PermissionLevel::Deny,
-                    description: None,
-                },
-            ],
-            PermissionLevel::RequireApproval,
-        );
+    // Verify compiled rules work correctly
+    assert_eq!(
+        policy.check_permission("git status"),
+        PermissionLevel::Allow
+    );
+    assert_eq!(
+        policy.check_permission("docker ps"),
+        PermissionLevel::RequireApproval
+    );
+    assert_eq!(
+        policy.check_permission("sudo docker run"),
+        PermissionLevel::RequireApproval
+    );
+    assert_eq!(policy.check_permission("rm -rf /"), PermissionLevel::Deny);
+    assert_eq!(
+        policy.check_permission("cat file"),
+        PermissionLevel::RequireApproval
+    );
+}
 
-        // Verify compiled rules work correctly
-        assert_eq!(policy.check_permission("git status"), PermissionLevel::Allow);
-        assert_eq!(policy.check_permission("docker ps"), PermissionLevel::RequireApproval);
-        assert_eq!(policy.check_permission("sudo docker run"), PermissionLevel::RequireApproval);
-        assert_eq!(policy.check_permission("rm -rf /"), PermissionLevel::Deny);
-        assert_eq!(policy.check_permission("cat file"), PermissionLevel::RequireApproval);
-    }
+#[test]
+fn test_permission_metrics() {
+    let policy = CommandPermissionPolicy::new(
+        vec![
+            PermissionRule {
+                pattern: "git*".to_string(),
+                level: PermissionLevel::Allow,
+                description: None,
+            },
+            PermissionRule {
+                pattern: "rm*".to_string(),
+                level: PermissionLevel::Deny,
+                description: None,
+            },
+        ],
+        PermissionLevel::RequireApproval,
+    );
 
-    #[test]
-    fn test_permission_metrics() {
-        let policy = CommandPermissionPolicy::new(
-            vec![
-                PermissionRule {
-                    pattern: "git*".to_string(),
-                    level: PermissionLevel::Allow,
-                    description: None,
-                },
-                PermissionRule {
-                    pattern: "rm*".to_string(),
-                    level: PermissionLevel::Deny,
-                    description: None,
-                },
-            ],
-            PermissionLevel::RequireApproval,
-        );
+    // Run some permission checks
+    policy.check_permission("git status");
+    policy.check_permission("git status"); // cache hit
+    policy.check_permission("rm -rf /");
+    policy.check_permission("cat file");
 
-        // Run some permission checks
-        policy.check_permission("git status");
-        policy.check_permission("git status"); // cache hit
-        policy.check_permission("rm -rf /");
-        policy.check_permission("cat file");
+    // Verify metrics
+    let metrics = policy.metrics();
+    assert_eq!(metrics.total_checks.load(Ordering::Relaxed), 4);
+    assert_eq!(metrics.cache_hits.load(Ordering::Relaxed), 1);
+    assert_eq!(metrics.cache_misses.load(Ordering::Relaxed), 3);
+    assert_eq!(metrics.allow_count.load(Ordering::Relaxed), 2);
+    assert_eq!(metrics.deny_count.load(Ordering::Relaxed), 1);
+    assert_eq!(metrics.require_approval_count.load(Ordering::Relaxed), 1);
 
-        // Verify metrics
-        let metrics = policy.metrics();
-        assert_eq!(metrics.total_checks.load(Ordering::Relaxed), 4);
-        assert_eq!(metrics.cache_hits.load(Ordering::Relaxed), 1);
-        assert_eq!(metrics.cache_misses.load(Ordering::Relaxed), 3);
-        assert_eq!(metrics.allow_count.load(Ordering::Relaxed), 2);
-        assert_eq!(metrics.deny_count.load(Ordering::Relaxed), 1);
-        assert_eq!(metrics.require_approval_count.load(Ordering::Relaxed), 1);
-        
-        // Verify cache hit rate
-        assert!((metrics.cache_hit_rate() - 0.25).abs() < 0.01);
-        
-        // Reset metrics
-        policy.reset_metrics();
-        assert_eq!(metrics.total_checks.load(Ordering::Relaxed), 0);
-    }
+    // Verify cache hit rate
+    assert!((metrics.cache_hit_rate() - 0.25).abs() < 0.01);
 
-    #[test]
-    fn test_metrics_cache_hit_rate() {
-        let policy = CommandPermissionPolicy::new(
-            vec![
-                PermissionRule {
-                    pattern: "test*".to_string(),
-                    level: PermissionLevel::Allow,
-                    description: None,
-                },
-            ],
-            PermissionLevel::Deny,
-        );
+    // Reset metrics
+    policy.reset_metrics();
+    assert_eq!(metrics.total_checks.load(Ordering::Relaxed), 0);
+}
 
-        // First check - cache miss
-        policy.check_permission("test command");
-        let metrics = policy.metrics();
-        assert_eq!(metrics.cache_hit_rate(), 0.0);
+#[test]
+fn test_metrics_cache_hit_rate() {
+    let policy = CommandPermissionPolicy::new(
+        vec![PermissionRule {
+            pattern: "test*".to_string(),
+            level: PermissionLevel::Allow,
+            description: None,
+        }],
+        PermissionLevel::Deny,
+    );
 
-        // Second check - cache hit
-        policy.check_permission("test command");
-        assert_eq!(metrics.cache_hit_rate(), 0.5);
+    // First check - cache miss
+    policy.check_permission("test command");
+    let metrics = policy.metrics();
+    assert_eq!(metrics.cache_hit_rate(), 0.0);
 
-        // Third check - cache hit
-        policy.check_permission("test command");
-        assert!((metrics.cache_hit_rate() - 0.666).abs() < 0.01);
-    }
+    // Second check - cache hit
+    policy.check_permission("test command");
+    assert_eq!(metrics.cache_hit_rate(), 0.5);
+
+    // Third check - cache hit
+    policy.check_permission("test command");
+    assert!((metrics.cache_hit_rate() - 0.666).abs() < 0.01);
+}
+
+#[test]
+fn test_explain_returns_the_matching_rule() {
+    let policy = CommandPermissionPolicy::new(
+        vec![
+            PermissionRule {
+                pattern: "ls*".to_string(),
+                level: PermissionLevel::Allow,
+                description: Some("list files".to_string()),
+            },
+            PermissionRule {
+                pattern: "*rm*".to_string(),
+                level: PermissionLevel::Deny,
+                description: Some("never delete".to_string()),
+            },
+        ],
+        PermissionLevel::RequireApproval,
+    );
+
+    let verdict = policy.explain("LS -la");
+    assert_eq!(verdict.level, PermissionLevel::Allow);
+    assert!(!verdict.default_applied);
+    let rule = verdict.matched_rule.expect("rule matched");
+    assert_eq!(rule.pattern, "ls*");
+    assert_eq!(rule.description.as_deref(), Some("list files"));
+
+    let denied = policy.explain("sudo rm -rf /tmp/x");
+    assert_eq!(denied.level, PermissionLevel::Deny);
+    assert_eq!(denied.matched_rule.unwrap().pattern, "*rm*");
+
+    // No rule matches -> the default level is reported as such.
+    let fallback = policy.explain("cargo test");
+    assert_eq!(fallback.level, PermissionLevel::RequireApproval);
+    assert!(fallback.default_applied);
+    assert!(fallback.matched_rule.is_none());
+}
+
+#[test]
+fn test_explain_does_not_touch_metrics_or_cache() {
+    let policy = CommandPermissionPolicy::new(
+        vec![PermissionRule {
+            pattern: "pwd".to_string(),
+            level: PermissionLevel::Allow,
+            description: None,
+        }],
+        PermissionLevel::Deny,
+    );
+
+    policy.explain("pwd");
+    assert_eq!(policy.metrics().total_checks.load(Ordering::Relaxed), 0);
+    assert_eq!(policy.cache_stats().0, 0);
+}

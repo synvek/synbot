@@ -1,11 +1,11 @@
 // gVisor Docker sandbox implementation for tool execution
 
 use super::error::{Result, SandboxError};
+use super::plain_docker::connect_docker;
 use super::sandbox_trait::Sandbox;
 use super::types::{
     ExecutionResult, HealthStatus, SandboxConfig, SandboxInfo, SandboxState, SandboxStatus,
 };
-use super::plain_docker::connect_docker;
 use bollard::container::{
     Config, CreateContainerOptions, KillContainerOptions, RemoveContainerOptions,
     StartContainerOptions, StopContainerOptions,
@@ -19,7 +19,7 @@ use std::time::Duration;
 use tokio::time::timeout as tokio_timeout;
 
 /// gVisor Docker sandbox implementation
-/// 
+///
 /// This sandbox uses Docker with gVisor (runsc) runtime to provide
 /// secure isolation for tool execution. It supports:
 /// - Network isolation
@@ -35,21 +35,21 @@ pub struct GVisorDockerSandbox {
 
 impl GVisorDockerSandbox {
     /// Create a new gVisor Docker sandbox instance
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `config` - Sandbox configuration
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// Returns a new `GVisorDockerSandbox` instance
-    /// 
+    ///
     /// # Errors
-    /// 
+    ///
     /// Returns an error if Docker connection cannot be established
     pub fn new(config: SandboxConfig) -> Result<Self> {
         let docker = connect_docker()?;
-        
+
         let status = SandboxStatus {
             sandbox_id: config.sandbox_id.clone(),
             state: SandboxState::Created,
@@ -58,7 +58,7 @@ impl GVisorDockerSandbox {
             stopped_at: None,
             error: None,
         };
-        
+
         Ok(Self {
             config,
             docker,
@@ -66,7 +66,7 @@ impl GVisorDockerSandbox {
             status,
         })
     }
-    
+
     /// Get network mode based on configuration
     fn get_network_mode(&self) -> String {
         if self.config.network.enabled {
@@ -75,7 +75,7 @@ impl GVisorDockerSandbox {
             "none".to_string()
         }
     }
-    
+
     /// Get volume bindings from configuration (writable_paths as host:host, plus workspace at /workspace if set)
     fn get_volumes(&self) -> Vec<String> {
         let mut binds: Vec<String> = self
@@ -93,7 +93,7 @@ impl GVisorDockerSandbox {
         }
         binds
     }
-    
+
     /// Get required capabilities (minimal set for security)
     fn get_required_capabilities(&self) -> Vec<String> {
         // Return minimal capability set
@@ -127,8 +127,9 @@ impl Sandbox for GVisorDockerSandbox {
         // Use async move + cloned Docker only — borrowing self across .await inside block_on
         // can trigger rustc internal errors on some toolchains.
         let container_id = tokio::task::block_in_place(|| {
-            let runtime = tokio::runtime::Runtime::new()
-                .map_err(|e| SandboxError::CreationFailed(format!("Failed to create runtime: {}", e)))?;
+            let runtime = tokio::runtime::Runtime::new().map_err(|e| {
+                SandboxError::CreationFailed(format!("Failed to create runtime: {}", e))
+            })?;
 
             runtime.block_on(async move {
                 if delete_on_start {
@@ -195,13 +196,17 @@ impl Sandbox for GVisorDockerSandbox {
                 let container = docker
                     .create_container(Some(options), config)
                     .await
-                    .map_err(|e| SandboxError::CreationFailed(format!("Failed to create container: {}", e)))?;
+                    .map_err(|e| {
+                        SandboxError::CreationFailed(format!("Failed to create container: {}", e))
+                    })?;
 
                 let cid = container.id.clone();
                 docker
                     .start_container(&cid, None::<StartContainerOptions<String>>)
                     .await
-                    .map_err(|e| SandboxError::CreationFailed(format!("Failed to start container: {}", e)))?;
+                    .map_err(|e| {
+                        SandboxError::CreationFailed(format!("Failed to start container: {}", e))
+                    })?;
 
                 Ok(cid)
             })
@@ -214,7 +219,7 @@ impl Sandbox for GVisorDockerSandbox {
 
         Ok(())
     }
-    
+
     fn stop(&mut self) -> Result<()> {
         let Some(container_id) = self.container_id.clone() else {
             return Ok(());
@@ -224,24 +229,43 @@ impl Sandbox for GVisorDockerSandbox {
         let docker = self.docker.clone();
 
         let exit_reason = tokio::task::block_in_place(|| {
-            let runtime = tokio::runtime::Runtime::new()
-                .map_err(|e| SandboxError::ExecutionFailed(format!("Failed to create runtime: {}", e)))?;
+            let runtime = tokio::runtime::Runtime::new().map_err(|e| {
+                SandboxError::ExecutionFailed(format!("Failed to create runtime: {}", e))
+            })?;
             runtime.block_on(async move {
-                docker.stop_container(&container_id, None::<StopContainerOptions>).await.ok();
-                let reason = docker.inspect_container(&container_id, None).await.ok().and_then(|info| {
-                    info.state.and_then(|state| state.error.filter(|reason| !reason.is_empty()).or_else(|| {
-                        if state.oom_killed == Some(true) {
-                            Some("container was killed by the OOM killer".to_string())
-                        } else if let Some(exit_code) = state.exit_code {
-                            Some(format!("container exited with code {}", exit_code))
-                        } else {
-                            state.status.map(|status| format!("container exited with status {}", status))
-                        }
-                    }))
-                });
-                docker.remove_container(&container_id, Some(RemoveContainerOptions {
-                    force: true, ..Default::default()
-                })).await.ok();
+                docker
+                    .stop_container(&container_id, None::<StopContainerOptions>)
+                    .await
+                    .ok();
+                let reason = docker
+                    .inspect_container(&container_id, None)
+                    .await
+                    .ok()
+                    .and_then(|info| {
+                        info.state.and_then(|state| {
+                            state.error.filter(|reason| !reason.is_empty()).or_else(|| {
+                                if state.oom_killed == Some(true) {
+                                    Some("container was killed by the OOM killer".to_string())
+                                } else if let Some(exit_code) = state.exit_code {
+                                    Some(format!("container exited with code {}", exit_code))
+                                } else {
+                                    state.status.map(|status| {
+                                        format!("container exited with status {}", status)
+                                    })
+                                }
+                            })
+                        })
+                    });
+                docker
+                    .remove_container(
+                        &container_id,
+                        Some(RemoveContainerOptions {
+                            force: true,
+                            ..Default::default()
+                        }),
+                    )
+                    .await
+                    .ok();
                 Ok::<Option<String>, SandboxError>(reason)
             })
         })?;
@@ -253,7 +277,7 @@ impl Sandbox for GVisorDockerSandbox {
         self.status.stopped_at = Some(Utc::now());
         Ok(())
     }
-    
+
     fn execute(
         &self,
         command: &str,
@@ -261,21 +285,35 @@ impl Sandbox for GVisorDockerSandbox {
         timeout: Duration,
         working_dir: Option<&str>,
     ) -> Result<ExecutionResult> {
-        let container_id = self.container_id.as_ref().ok_or(SandboxError::NotStarted)?.clone();
+        let container_id = self
+            .container_id
+            .as_ref()
+            .ok_or(SandboxError::NotStarted)?
+            .clone();
         let docker = self.docker.clone();
-        let cmd: Vec<String> = std::iter::once(command.to_string()).chain(args.iter().cloned()).collect();
+        let cmd: Vec<String> = std::iter::once(command.to_string())
+            .chain(args.iter().cloned())
+            .collect();
         let working_dir = working_dir.map(str::to_string);
 
         tokio::task::block_in_place(|| {
-            let runtime = tokio::runtime::Runtime::new()
-                .map_err(|e| SandboxError::ExecutionFailed(format!("Failed to create runtime: {}", e)))?;
+            let runtime = tokio::runtime::Runtime::new().map_err(|e| {
+                SandboxError::ExecutionFailed(format!("Failed to create runtime: {}", e))
+            })?;
             runtime.block_on(async move {
                 let exec_config = CreateExecOptions {
-                    cmd: Some(cmd), attach_stdout: Some(true), attach_stderr: Some(true),
-                    working_dir, ..Default::default()
+                    cmd: Some(cmd),
+                    attach_stdout: Some(true),
+                    attach_stderr: Some(true),
+                    working_dir,
+                    ..Default::default()
                 };
-                let exec = docker.create_exec(&container_id, exec_config).await
-                    .map_err(|e| SandboxError::ExecutionFailed(format!("Failed to create exec: {}", e)))?;
+                let exec = docker
+                    .create_exec(&container_id, exec_config)
+                    .await
+                    .map_err(|e| {
+                        SandboxError::ExecutionFailed(format!("Failed to create exec: {}", e))
+                    })?;
                 let started_at = std::time::Instant::now();
                 let result = tokio_timeout(timeout, async {
                     match docker.start_exec(&exec.id, None).await {
@@ -286,41 +324,59 @@ impl Sandbox for GVisorDockerSandbox {
                             tokio::pin!(output);
                             while let Some(chunk) = output.next().await {
                                 match chunk {
-                                    Ok(bollard::container::LogOutput::StdOut { message }) => stdout.extend_from_slice(&message),
-                                    Ok(bollard::container::LogOutput::StdErr { message }) => stderr.extend_from_slice(&message),
+                                    Ok(bollard::container::LogOutput::StdOut { message }) => {
+                                        stdout.extend_from_slice(&message)
+                                    }
+                                    Ok(bollard::container::LogOutput::StdErr { message }) => {
+                                        stderr.extend_from_slice(&message)
+                                    }
                                     _ => {}
                                 }
                             }
-                            let inspect = docker.inspect_exec(&exec.id).await
-                                .map_err(|e| SandboxError::ExecutionFailed(format!("Failed to inspect exec: {}", e)))?;
+                            let inspect = docker.inspect_exec(&exec.id).await.map_err(|e| {
+                                SandboxError::ExecutionFailed(format!(
+                                    "Failed to inspect exec: {}",
+                                    e
+                                ))
+                            })?;
                             Ok::<ExecutionResult, SandboxError>(ExecutionResult {
-                                exit_code: inspect.exit_code.unwrap_or(-1) as i32, stdout, stderr,
-                                duration: started_at.elapsed(), error: None,
+                                exit_code: inspect.exit_code.unwrap_or(-1) as i32,
+                                stdout,
+                                stderr,
+                                duration: started_at.elapsed(),
+                                error: None,
                             })
                         }
-                        Ok(StartExecResults::Detached) => Err(SandboxError::ExecutionFailed("Docker exec unexpectedly detached".to_string())),
+                        Ok(StartExecResults::Detached) => Err(SandboxError::ExecutionFailed(
+                            "Docker exec unexpectedly detached".to_string(),
+                        )),
                         Err(e) => Err(SandboxError::ExecutionFailed(format!("Exec failed: {}", e))),
                     }
-                }).await;
+                })
+                .await;
                 match result {
                     Ok(result) => result,
                     Err(_) => {
-                        let _ = docker.kill_container(&container_id, None::<KillContainerOptions<String>>).await;
-                        let _ = docker.start_container(&container_id, None::<StartContainerOptions<String>>).await;
+                        let _ = docker
+                            .kill_container(&container_id, None::<KillContainerOptions<String>>)
+                            .await;
+                        let _ = docker
+                            .start_container(&container_id, None::<StartContainerOptions<String>>)
+                            .await;
                         Err(SandboxError::Timeout)
                     }
                 }
             })
         })
     }
-    
+
     fn get_status(&self) -> SandboxStatus {
         self.status.clone()
     }
-    
+
     fn health_check(&self) -> HealthStatus {
         let mut checks = HashMap::new();
-        
+
         if let Some(container_id) = &self.container_id {
             let cid = container_id.clone();
             let docker = self.docker.clone();
@@ -334,9 +390,9 @@ impl Sandbox for GVisorDockerSandbox {
                         .unwrap_or(false)
                 })
             });
-            
+
             checks.insert("container_running".to_string(), container_running);
-            
+
             HealthStatus {
                 healthy: container_running,
                 checks,
@@ -348,7 +404,7 @@ impl Sandbox for GVisorDockerSandbox {
             }
         } else {
             checks.insert("container_exists".to_string(), false);
-            
+
             HealthStatus {
                 healthy: false,
                 checks,
@@ -356,7 +412,7 @@ impl Sandbox for GVisorDockerSandbox {
             }
         }
     }
-    
+
     fn get_info(&self) -> SandboxInfo {
         SandboxInfo {
             sandbox_id: self.config.sandbox_id.clone(),

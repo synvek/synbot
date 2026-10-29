@@ -51,7 +51,10 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     let app_sandbox_id = manager.create_app_sandbox(app_config).await?;
     manager.start_sandbox(&app_sandbox_id).await?;
-    println!("   ✓ Application sandbox created and started: {}\n", app_sandbox_id);
+    println!(
+        "   ✓ Application sandbox created and started: {}\n",
+        app_sandbox_id
+    );
 
     // Create tool sandbox (Layer 2)
     println!("3. Creating tool sandbox (Layer 2)...");
@@ -70,8 +73,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             allowed_ports: vec![],
         },
         resources: ResourceConfig {
-            max_memory: 1024 * 1024 * 1024, // 1GB - less than app
-            max_cpu: 1.0, // Less CPU than app
+            max_memory: 1024 * 1024 * 1024,   // 1GB - less than app
+            max_cpu: 1.0,                     // Less CPU than app
             max_disk: 5 * 1024 * 1024 * 1024, // 5GB
         },
         process: ProcessConfig {
@@ -87,21 +90,33 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     let tool_sandbox_id = manager.create_tool_sandbox(tool_config).await?;
     manager.start_sandbox(&tool_sandbox_id).await?;
-    println!("   ✓ Tool sandbox created and started: {}\n", tool_sandbox_id);
+    println!(
+        "   ✓ Tool sandbox created and started: {}\n",
+        tool_sandbox_id
+    );
 
     // Verify isolation between layers
     println!("4. Verifying isolation between layers...");
-    let verification = manager.verify_isolation(&app_sandbox_id, &tool_sandbox_id).await?;
-    
-    println!("   Isolation Status: {}", if verification.isolated { "✓ ISOLATED" } else { "✗ NOT ISOLATED" });
+    let verification = manager
+        .verify_isolation(&app_sandbox_id, &tool_sandbox_id)
+        .await?;
+
+    println!(
+        "   Isolation Status: {}",
+        if verification.isolated {
+            "✓ ISOLATED"
+        } else {
+            "✗ NOT ISOLATED"
+        }
+    );
     println!("   Checks performed: {}", verification.checks.len());
     println!("   Isolation score: {:.2}", verification.isolation_score);
-    
+
     for check in &verification.checks {
         let status = if check.passed { "✓" } else { "✗" };
         println!("   {} {}: {}", status, check.name, check.description);
     }
-    
+
     if !verification.violations.is_empty() {
         println!("\n   ⚠ Violations detected:");
         for violation in &verification.violations {
@@ -112,7 +127,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     // Demonstrate safe communication
     println!("5. Demonstrating safe communication...");
-    
+
     // Simulate tool execution result
     let tool_result = ExecutionResult {
         exit_code: 0,
@@ -121,28 +136,34 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         duration: std::time::Duration::from_secs(2),
         error: None,
     };
-    
+
     println!("   Tool result (raw):");
     println!("     Exit code: {}", tool_result.exit_code);
-    println!("     Output: {}", String::from_utf8_lossy(&tool_result.stdout));
-    
+    println!(
+        "     Output: {}",
+        String::from_utf8_lossy(&tool_result.stdout)
+    );
+
     // Transfer through secure channel
     let safe_result = manager.transfer_result(tool_result)?;
-    
+
     println!("\n   Tool result (after filtering):");
     println!("     Exit code: {}", safe_result.exit_code);
-    println!("     Output: {}", String::from_utf8_lossy(&safe_result.stdout));
+    println!(
+        "     Output: {}",
+        String::from_utf8_lossy(&safe_result.stdout)
+    );
     println!("     ✓ Result safely transferred to app sandbox\n");
 
     // Test malicious payload filtering
     println!("6. Testing malicious payload filtering...");
-    
+
     let malicious_payloads = vec![
         ("ELF executable", vec![0x7F, 0x45, 0x4C, 0x46, 0x01, 0x02]),
         ("PE executable", vec![0x4D, 0x5A, 0x90, 0x00]),
         ("Shell script", b"#!/bin/bash\nrm -rf /".to_vec()),
     ];
-    
+
     for (name, payload) in malicious_payloads {
         let malicious_result = ExecutionResult {
             exit_code: 0,
@@ -151,7 +172,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             duration: std::time::Duration::from_secs(1),
             error: None,
         };
-        
+
         match manager.transfer_result(malicious_result) {
             Ok(_) => println!("   ✗ {} was NOT filtered!", name),
             Err(_) => println!("   ✓ {} was blocked", name),
@@ -172,30 +193,30 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 
     // Security validation
     println!("8. Performing security validation...");
-    
+
     // Verify isolation integrity
     match manager.verify_sandbox_isolation(&app_sandbox_id).await {
         Ok(_) => println!("   ✓ App sandbox isolation verified"),
         Err(e) => println!("   ✗ App sandbox isolation check failed: {:?}", e),
     }
-    
+
     match manager.verify_sandbox_isolation(&tool_sandbox_id).await {
         Ok(_) => println!("   ✓ Tool sandbox isolation verified"),
         Err(e) => println!("   ✗ Tool sandbox isolation check failed: {:?}", e),
     }
-    
+
     // Verify no-new-privileges
     match manager.verify_no_new_privileges() {
         Ok(_) => println!("   ✓ No-new-privileges flag verified"),
         Err(e) => println!("   ✗ No-new-privileges check failed: {:?}", e),
     }
-    
+
     // Enforce resource limits
     match manager.enforce_resource_limits(&app_sandbox_id).await {
         Ok(_) => println!("   ✓ App sandbox resource limits enforced"),
         Err(e) => println!("   ✗ Resource limit enforcement failed: {:?}", e),
     }
-    
+
     match manager.enforce_resource_limits(&tool_sandbox_id).await {
         Ok(_) => println!("   ✓ Tool sandbox resource limits enforced"),
         Err(e) => println!("   ✗ Resource limit enforcement failed: {:?}", e),
@@ -217,6 +238,6 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     println!("  3. Isolation verification ensures layers are properly separated");
     println!("  4. Safe communication channel filters malicious content");
     println!("  5. Security validation ensures ongoing protection");
-    
+
     Ok(())
 }

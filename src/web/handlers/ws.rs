@@ -1,4 +1,7 @@
-use actix::{Actor, ActorContext, AsyncContext, Handler, Message as ActixMessage, StreamHandler, WrapFuture, ActorFutureExt};
+use actix::{
+    Actor, ActorContext, ActorFutureExt, AsyncContext, Handler, Message as ActixMessage,
+    StreamHandler, WrapFuture,
+};
 use actix_web::{web, Error, HttpRequest, HttpResponse};
 use actix_web_actors::ws;
 use chrono::Utc;
@@ -21,10 +24,7 @@ const CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum WsClientMessage {
     Chat { content: String },
-    ApprovalResponse {
-        request_id: String,
-        approved: bool,
-    },
+    ApprovalResponse { request_id: String, approved: bool },
     Ping,
 }
 
@@ -221,7 +221,8 @@ impl Actor for WsSession {
                     }
                 }
                 all.sort_by_key(|(ts, _)| *ts);
-                let history_messages: Vec<HistoryMessage> = all.into_iter().map(|(_, m)| m).collect();
+                let history_messages: Vec<HistoryMessage> =
+                    all.into_iter().map(|(_, m)| m).collect();
                 addr.do_send(HistoryMessageWrapper(history_messages));
             }
             .into_actor(self)
@@ -287,11 +288,14 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsSession {
                             .map(|_, _, _| {}),
                         );
                     }
-                    Ok(WsClientMessage::ApprovalResponse { request_id, approved }) => {
+                    Ok(WsClientMessage::ApprovalResponse {
+                        request_id,
+                        approved,
+                    }) => {
                         // Handle approval response
                         let approval_manager = self.state.approval_manager.clone();
                         let user_id = self.user_id.clone();
-                        
+
                         ctx.spawn(
                             async move {
                                 let response = crate::tools::approval::ApprovalResponse {
@@ -300,11 +304,11 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsSession {
                                     responder: user_id,
                                     timestamp: Utc::now(),
                                 };
-                                
+
                                 if let Err(e) = approval_manager.submit_response(response).await {
                                     tracing::error!("Failed to submit approval response: {}", e);
                                 }
-                                
+
                                 (request_id, approved)
                             }
                             .into_actor(self)
@@ -405,9 +409,7 @@ impl Handler<HistoryMessageWrapper> for WsSession {
     type Result = ();
 
     fn handle(&mut self, msg: HistoryMessageWrapper, ctx: &mut Self::Context) {
-        let server_msg = WsServerMessage::History {
-            messages: msg.0,
-        };
+        let server_msg = WsServerMessage::History { messages: msg.0 };
 
         self.send_message(ctx, server_msg);
     }

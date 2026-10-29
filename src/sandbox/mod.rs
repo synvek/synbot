@@ -3,29 +3,29 @@
 // This module provides a multi-layer sandbox security solution for safe execution
 // of applications and tools in isolated environments.
 
-pub mod types;
-pub mod error;
 pub mod config;
+pub mod error;
+pub mod gvisor_docker;
+pub mod manager;
 pub mod monitoring;
 pub mod sandbox_trait;
-pub mod manager;
-pub mod gvisor_docker;
+pub mod types;
 //#[cfg(any(target_os = "linux", target_os = "macos"))]
-pub mod plain_docker;
-pub mod isolation;
-pub mod recovery;
 pub mod fallback;
-pub mod platform;
-pub mod security;
+pub mod isolation;
 pub mod performance;
+pub mod plain_docker;
+pub mod platform;
+pub mod recovery;
+pub mod security;
 
 // Platform-specific implementations
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub mod nono;
 
+pub mod tool_sandbox_delegate;
 #[cfg(target_os = "windows")]
 pub mod tool_sandbox_ipc;
-pub mod tool_sandbox_delegate;
 
 #[cfg(target_os = "windows")]
 pub mod windows_appcontainer;
@@ -37,29 +37,31 @@ pub mod macos_sandbox_exec;
 pub mod wsl2;
 
 // Re-export commonly used types
-pub use error::{SandboxError, ConfigError, Result, ErrorReport, ErrorSeverity};
-pub use types::*;
-pub use tool_sandbox_delegate::{SandboxContext, ToolSandboxDelegate};
 pub use config::*;
-pub use monitoring::*;
-pub use sandbox_trait::Sandbox;
-pub use manager::SandboxManager;
+pub use error::{ConfigError, ErrorReport, ErrorSeverity, Result, SandboxError};
+pub use fallback::{FallbackConfig, FallbackEvent, FallbackManager, FallbackResult};
 pub use gvisor_docker::GVisorDockerSandbox;
 pub use isolation::{
-    IsolationVerifier, IsolationVerification, IsolationCheck,
-    CrossSandboxChannel, PayloadFilter, ChannelConfig, IsolationVerifierConfig,
+    ChannelConfig, CrossSandboxChannel, IsolationCheck, IsolationVerification, IsolationVerifier,
+    IsolationVerifierConfig, PayloadFilter,
 };
-pub use recovery::{RecoveryManager, RecoveryConfig, RecoveryResult, recover_sandbox, recover_sandbox_with_retries};
-pub use fallback::{FallbackManager, FallbackConfig, FallbackResult, FallbackEvent};
-pub use platform::{PlatformDetector, PlatformInfo, SandboxFactory};
-pub use security::{
-    SecurityValidator, EscapePrevention, PrivilegeEscalationPrevention,
-    ResourceExhaustionPrevention, ResourceLimits,
-};
+pub use manager::SandboxManager;
+pub use monitoring::*;
 pub use performance::{
-    DockerConnectionPool, LazyInit, ConfigCache, BatchExecutor,
-    ResourcePool, PoolStats, StringInterner, parallel_init,
+    parallel_init, BatchExecutor, ConfigCache, DockerConnectionPool, LazyInit, PoolStats,
+    ResourcePool, StringInterner,
 };
+pub use platform::{PlatformDetector, PlatformInfo, SandboxFactory};
+pub use recovery::{
+    recover_sandbox, recover_sandbox_with_retries, RecoveryConfig, RecoveryManager, RecoveryResult,
+};
+pub use sandbox_trait::Sandbox;
+pub use security::{
+    EscapePrevention, PrivilegeEscalationPrevention, ResourceExhaustionPrevention, ResourceLimits,
+    SecurityValidator,
+};
+pub use tool_sandbox_delegate::{SandboxContext, ToolSandboxDelegate};
+pub use types::*;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub use nono::NonoSandbox;
@@ -68,4 +70,4 @@ pub use nono::NonoSandbox;
 pub use windows_appcontainer::WindowsAppContainerSandbox;
 
 #[cfg(target_os = "windows")]
-pub use wsl2::{Wsl2Integration, Wsl2GVisorSandbox};
+pub use wsl2::{Wsl2GVisorSandbox, Wsl2Integration};

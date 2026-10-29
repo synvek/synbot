@@ -12,9 +12,10 @@
 use actix_web::{test, web, App};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use std::sync::Arc;
+use synbot::agent::subagent::{SubagentScope, SubagentStatus};
 use synbot::config::WebAuthConfig;
 use synbot::tools::approval::ApprovalManager;
-use synbot::web::handlers::api;
+use synbot::web::handlers::{api, team};
 use synbot::web::state::AppState;
 use synbot::web::BasicAuth;
 
@@ -28,13 +29,18 @@ async fn create_test_state() -> AppState {
     let (inbound_tx, _) = tokio::sync::mpsc::channel(100);
     let (outbound_tx, _) = tokio::sync::broadcast::channel(100);
     let approval_manager = Arc::new(ApprovalManager::new());
-    let state = common::create_test_app_state_with_approval(inbound_tx, outbound_tx, approval_manager).await;
+    let state =
+        common::create_test_app_state_with_approval(inbound_tx, outbound_tx, approval_manager)
+            .await;
     state.runtime_status.mark_running();
     state
 }
 
 fn basic_auth_header(username: &str, password: &str) -> String {
-    format!("Basic {}", BASE64.encode(format!("{}:{}", username, password)))
+    format!(
+        "Basic {}",
+        BASE64.encode(format!("{}:{}", username, password))
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -281,7 +287,10 @@ async fn test_auth_middleware_rejects_wrong_password() {
 
     let req = test::TestRequest::get()
         .uri("/api/status")
-        .insert_header(("Authorization", basic_auth_header("admin", "wrong-password")))
+        .insert_header((
+            "Authorization",
+            basic_auth_header("admin", "wrong-password"),
+        ))
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), 401, "Wrong password should return 401");
@@ -357,7 +366,11 @@ async fn test_auth_middleware_rejects_malformed_auth_header() {
         .insert_header(("Authorization", "Basic not-valid-base64!!!"))
         .to_request();
     let resp = test::call_service(&app, req).await;
-    assert_eq!(resp.status(), 401, "Malformed auth header should return 401");
+    assert_eq!(
+        resp.status(),
+        401,
+        "Malformed auth header should return 401"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -464,14 +477,10 @@ async fn test_get_session_by_id_returns_400_for_invalid_id_format() {
 #[actix_web::test]
 async fn test_submit_approval_response_with_missing_body_returns_error() {
     let state = create_test_state().await;
-    let app = test::init_service(
-        App::new()
-            .app_data(web::Data::new(state))
-            .route(
-                "/api/approvals/{id}/respond",
-                web::post().to(api::submit_approval_response),
-            ),
-    )
+    let app = test::init_service(App::new().app_data(web::Data::new(state)).route(
+        "/api/approvals/{id}/respond",
+        web::post().to(api::submit_approval_response),
+    ))
     .await;
 
     // Missing JSON body
@@ -518,14 +527,10 @@ async fn test_update_cron_job_returns_404_for_nonexistent() {
 #[actix_web::test]
 async fn test_get_approval_history_returns_200() {
     let state = create_test_state().await;
-    let app = test::init_service(
-        App::new()
-            .app_data(web::Data::new(state))
-            .route(
-                "/api/approvals/history",
-                web::get().to(api::get_approval_history),
-            ),
-    )
+    let app = test::init_service(App::new().app_data(web::Data::new(state)).route(
+        "/api/approvals/history",
+        web::get().to(api::get_approval_history),
+    ))
     .await;
 
     let req = test::TestRequest::get()
@@ -542,14 +547,10 @@ async fn test_get_approval_history_returns_200() {
 #[actix_web::test]
 async fn test_get_pending_approvals_returns_200() {
     let state = create_test_state().await;
-    let app = test::init_service(
-        App::new()
-            .app_data(web::Data::new(state))
-            .route(
-                "/api/approvals/pending",
-                web::get().to(api::get_pending_approvals),
-            ),
-    )
+    let app = test::init_service(App::new().app_data(web::Data::new(state)).route(
+        "/api/approvals/pending",
+        web::get().to(api::get_pending_approvals),
+    ))
     .await;
 
     let req = test::TestRequest::get()
@@ -594,7 +595,11 @@ async fn test_runtime_channel_snapshot_is_not_derived_from_enabled_config() {
     let body: serde_json::Value = test::read_body_json(resp).await;
     let channel = body["data"]["channels"]
         .as_array()
-        .and_then(|channels| channels.iter().find(|c| c["instance_id"] == "matrix:0:primary"))
+        .and_then(|channels| {
+            channels
+                .iter()
+                .find(|c| c["instance_id"] == "matrix:0:primary")
+        })
         .expect("matrix runtime snapshot");
     assert_eq!(channel["status"], "connected");
     assert_eq!(channel["last_latency_ms"], 17);
@@ -602,4 +607,807 @@ async fn test_runtime_channel_snapshot_is_not_derived_from_enabled_config() {
     assert!(channel["last_connected_at"].is_string());
     assert!(channel["last_received_at"].is_string());
     assert!(channel["last_sent_at"].is_string());
+}
+
+// ---------------------------------------------------------------------------
+// Projects — open/close, directory listing, file preview, path safety
+// ---------------------------------------------------------------------------
+
+fn projects_routes() -> actix_web::Scope {
+    web::scope("/api")
+        .route(
+            "/projects",
+            web::get().to(synbot::web::handlers::projects::get_projects),
+        )
+        .route(
+            "/projects",
+            web::post().to(synbot::web::handlers::projects::open_project),
+        )
+        .route(
+            "/projects/{id}",
+            web::delete().to(synbot::web::handlers::projects::delete_project),
+        )
+        .route(
+            "/projects/{id}/files",
+            web::get().to(synbot::web::handlers::projects::get_project_files),
+        )
+        .route(
+            "/projects/{id}/file",
+            web::get().to(synbot::web::handlers::projects::get_project_file),
+        )
+}
+
+#[actix_web::test]
+async fn test_projects_open_list_preview_and_delete() {
+    let state = create_test_state().await;
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(state))
+            .service(projects_routes()),
+    )
+    .await;
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::write(dir.path().join("hello.txt"), "hello world").unwrap();
+
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::post()
+            .uri("/api/projects")
+            .set_json(serde_json::json!({ "path": dir.path().to_str().unwrap() }))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    let id = body["data"]["id"].as_str().expect("project id").to_string();
+
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::get().uri("/api/projects").to_request(),
+    )
+    .await;
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["data"].as_array().unwrap().len(), 1);
+
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri(&format!("/api/projects/{id}/files"))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    let names: Vec<&str> = body["data"]["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["name"].as_str().unwrap())
+        .collect();
+    // Directories sort before files.
+    assert_eq!(names, vec!["src", "hello.txt"]);
+
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri(&format!("/api/projects/{id}/file?path=hello.txt"))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["data"]["content"], "hello world");
+    assert_eq!(body["data"]["truncated"], false);
+
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::delete()
+            .uri(&format!("/api/projects/{id}"))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+}
+
+#[actix_web::test]
+async fn test_projects_reject_escaping_paths_and_missing_folders() {
+    let state = create_test_state().await;
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(state))
+            .service(projects_routes()),
+    )
+    .await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::post()
+            .uri("/api/projects")
+            .set_json(
+                serde_json::json!({ "path": dir.path().join("does-not-exist").to_str().unwrap() }),
+            )
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 400);
+
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::post()
+            .uri("/api/projects")
+            .set_json(serde_json::json!({ "path": dir.path().to_str().unwrap() }))
+            .to_request(),
+    )
+    .await;
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    let id = body["data"]["id"].as_str().unwrap().to_string();
+
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri(&format!("/api/projects/{id}/files?path=../../etc"))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 400);
+}
+
+// ---------------------------------------------------------------------------
+// /api/checkpoints
+// ---------------------------------------------------------------------------
+
+fn checkpoints_routes() -> actix_web::Scope {
+    web::scope("/api")
+        .route(
+            "/checkpoints",
+            web::get().to(synbot::web::handlers::checkpoints::list_checkpoints),
+        )
+        .route(
+            "/checkpoints/{turn_id}",
+            web::get().to(synbot::web::handlers::checkpoints::get_checkpoint),
+        )
+        .route(
+            "/checkpoints/{turn_id}/undo",
+            web::post().to(synbot::web::handlers::checkpoints::undo_checkpoint),
+        )
+}
+
+#[actix_web::test]
+async fn test_checkpoints_expose_diff_and_undo_a_turn() {
+    let state = create_test_state().await;
+    let store = synbot::checkpoint::CheckpointStore::new(state.checkpoints.root().to_path_buf());
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(state))
+            .service(checkpoints_routes()),
+    )
+    .await;
+
+    // Mimic what the loop does around a `write_file` call.
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("notes.md");
+    std::fs::write(&file, "old line\nunchanged\n").unwrap();
+    let args = serde_json::json!({ "path": file.to_str().unwrap() });
+    let pending = store
+        .capture_before("turn-abc", "write_file", &args)
+        .await
+        .expect("write_file has a snapshot target");
+    std::fs::write(&file, "new line\nunchanged\n").unwrap();
+    assert_eq!(store.finish(pending).await, 1);
+
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri("/api/checkpoints/turn-abc")
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["data"]["additions"], 1);
+    assert_eq!(body["data"]["deletions"], 1);
+    let hunks = body["data"]["files"][0]["hunks"].as_array().unwrap();
+    assert_eq!(hunks.len(), 1);
+    assert_eq!(hunks[0]["lines"][0]["kind"], "del");
+
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri("/api/checkpoints?limit=5")
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["data"][0]["id"], "turn-abc");
+
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::post()
+            .uri("/api/checkpoints/turn-abc/undo")
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["data"]["restored"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        std::fs::read_to_string(&file).unwrap(),
+        "old line\nunchanged\n"
+    );
+}
+
+#[actix_web::test]
+async fn test_checkpoints_unknown_turn_is_404() {
+    let state = create_test_state().await;
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(state))
+            .service(checkpoints_routes()),
+    )
+    .await;
+
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri("/api/checkpoints/nope")
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 404);
+
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::post()
+            .uri("/api/checkpoints/nope/undo")
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 404);
+}
+
+// ---------------------------------------------------------------------------
+// /api/git
+// ---------------------------------------------------------------------------
+
+/// Both handlers under one scope: two scopes with the same prefix do not fall through to each other.
+fn projects_and_git_routes() -> actix_web::Scope {
+    web::scope("/api")
+        .route(
+            "/projects",
+            web::get().to(synbot::web::handlers::projects::get_projects),
+        )
+        .route(
+            "/projects",
+            web::post().to(synbot::web::handlers::projects::open_project),
+        )
+        .route(
+            "/git/status",
+            web::get().to(synbot::web::handlers::git::get_status),
+        )
+        .route(
+            "/git/diff",
+            web::get().to(synbot::web::handlers::git::get_diff),
+        )
+        .route(
+            "/git/log",
+            web::get().to(synbot::web::handlers::git::get_log),
+        )
+        .route(
+            "/tasks",
+            web::get().to(synbot::web::handlers::tasks::list_tasks),
+        )
+        .route(
+            "/tasks",
+            web::put().to(synbot::web::handlers::tasks::replace_tasks),
+        )
+        .route(
+            "/tasks/{id}",
+            web::patch().to(synbot::web::handlers::tasks::update_task),
+        )
+        .route(
+            "/commands",
+            web::get().to(synbot::web::handlers::commands::list_commands),
+        )
+        .route(
+            "/index",
+            web::get().to(synbot::web::handlers::index::get_index),
+        )
+        .route(
+            "/index/refresh",
+            web::post().to(synbot::web::handlers::index::refresh_index),
+        )
+        .route(
+            "/index/symbols",
+            web::get().to(synbot::web::handlers::index::search_symbols),
+        )
+        .route(
+            "/index/wiki",
+            web::post().to(synbot::web::handlers::index::write_wiki),
+        )
+}
+
+fn git_available() -> bool {
+    std::process::Command::new("git")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+#[actix_web::test]
+async fn test_git_status_diff_and_log_for_an_open_project() {
+    if !git_available() {
+        return;
+    }
+    let state = create_test_state().await;
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(state))
+            .service(projects_and_git_routes()),
+    )
+    .await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    for args in [
+        vec!["init", "-q", "-b", "main"],
+        vec!["config", "user.email", "test@example.com"],
+        vec!["config", "user.name", "Test"],
+        vec!["config", "commit.gpgsign", "false"],
+    ] {
+        std::process::Command::new("git")
+            .current_dir(root)
+            .args(&args)
+            .output()
+            .unwrap();
+    }
+    std::fs::write(root.join("a.txt"), "one\n").unwrap();
+    std::process::Command::new("git")
+        .current_dir(root)
+        .args(["add", "."])
+        .output()
+        .unwrap();
+    std::process::Command::new("git")
+        .current_dir(root)
+        .args(["commit", "-q", "-m", "first"])
+        .output()
+        .unwrap();
+    std::fs::write(root.join("a.txt"), "one\ntwo\n").unwrap();
+
+    // `project_id` selects the repository; without it the configured workspace is used.
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::get().uri("/api/git/status").to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["data"]["is_repo"], false);
+
+    // Unknown project ids are a 404 — the repository must be opened first.
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri(&format!(
+                "/api/git/status?project_id={}",
+                root.to_str().unwrap()
+            ))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 404);
+
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::post()
+            .uri("/api/projects")
+            .set_json(serde_json::json!({ "path": root.to_str().unwrap() }))
+            .to_request(),
+    )
+    .await;
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    let id = body["data"]["id"].as_str().unwrap().to_string();
+
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri(&format!("/api/git/status?project_id={id}"))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["data"]["is_repo"], true);
+    assert_eq!(body["data"]["branch"], "main");
+    assert_eq!(body["data"]["files"][0]["path"], "a.txt");
+    assert_eq!(body["data"]["files"][0]["status"], "M");
+
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri(&format!("/api/git/diff?project_id={id}&path=a.txt"))
+            .to_request(),
+    )
+    .await;
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert!(body["data"]["diff"].as_str().unwrap().contains("+two"));
+
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri(&format!("/api/git/log?project_id={id}&limit=1"))
+            .to_request(),
+    )
+    .await;
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["data"][0]["subject"], "first");
+}
+
+#[actix_web::test]
+async fn test_tasks_rest_reads_writes_and_ticks_the_board_of_a_project() {
+    let state = create_test_state().await;
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(state))
+            .service(projects_and_git_routes()),
+    )
+    .await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::post()
+            .uri("/api/projects")
+            .set_json(serde_json::json!({ "path": root.to_str().unwrap() }))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    let id = body["data"]["id"].as_str().unwrap().to_string();
+
+    // A fresh project has an empty board pointing at the project folder.
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri(&format!("/api/tasks?project_id={id}"))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert!(body["data"]["tasks"].as_array().unwrap().is_empty());
+    // macOS resolves `/var` → `/private/var`, so compare against the canonical project path.
+    let canonical_root = std::fs::canonicalize(root).unwrap();
+    assert_eq!(
+        body["data"]["path"],
+        canonical_root
+            .join(".synbot/plans/tasks.json")
+            .to_str()
+            .unwrap()
+    );
+
+    // PUT replaces the list and persists it where the tool would write it.
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::put()
+            .uri(&format!("/api/tasks?project_id={id}"))
+            .set_json(serde_json::json!({
+                "tasks": [
+                    { "title": "read code", "status": "in_progress" },
+                    { "title": "write tests" }
+                ]
+            }))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    let first_id = body["data"]["tasks"][0]["id"].as_str().unwrap().to_string();
+    assert_eq!(first_id, "t1");
+    assert!(root.join(".synbot/plans/tasks.json").exists());
+
+    // PATCH ticks one task without resending the whole list.
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::patch()
+            .uri(&format!("/api/tasks/{first_id}?project_id={id}"))
+            .set_json(serde_json::json!({ "status": "completed" }))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["data"]["tasks"][0]["status"], "completed");
+    assert_eq!(body["data"]["tasks"][1]["status"], "pending");
+
+    // Unknown statuses and unknown ids are client errors, not 500s.
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::patch()
+            .uri(&format!("/api/tasks/{first_id}?project_id={id}"))
+            .set_json(serde_json::json!({ "status": "almost" }))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 400);
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::patch()
+            .uri(&format!("/api/tasks/nope?project_id={id}"))
+            .set_json(serde_json::json!({ "status": "completed" }))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 404);
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri("/api/tasks?project_id=missing")
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 404);
+
+    // Workspace slash commands come from the same project folder.
+    std::fs::create_dir_all(root.join(".synbot/commands")).unwrap();
+    std::fs::write(
+        root.join(".synbot/commands/review.md"),
+        "---\ndescription: Review a diff\n---\nReview $ARGUMENTS.\n",
+    )
+    .unwrap();
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri(&format!("/api/commands?project_id={id}"))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["data"][0]["name"], "review");
+    assert_eq!(body["data"][0]["description"], "Review a diff");
+}
+
+/// The symbol index has to answer three questions the panel asks: "is it built?", "refresh it" and
+/// "where is this symbol?" — all against the project folder the agent would use.
+#[actix_web::test]
+async fn test_index_rest_searches_symbols_inside_the_project() {
+    let state = create_test_state().await;
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(state))
+            .service(projects_and_git_routes()),
+    )
+    .await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("src/agent.rs"),
+        "pub struct AgentLoop;\nimpl AgentLoop {\n    pub async fn run_turn(&self) {}\n}\n",
+    )
+    .unwrap();
+
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::post()
+            .uri("/api/projects")
+            .set_json(serde_json::json!({ "path": root.to_str().unwrap() }))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    let id = body["data"]["id"].as_str().unwrap().to_string();
+
+    // Nothing indexed yet: the summary is empty and points at the file a refresh would write.
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri(&format!("/api/index?project_id={id}"))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["data"]["files"], 0);
+    assert!(body["data"]["path"]
+        .as_str()
+        .unwrap()
+        .ends_with(".synbot/index/code.json"));
+
+    // Search builds on demand, so the panel works before the agent ever ran.
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri(&format!("/api/index/symbols?q=run_turn&project_id={id}"))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    let hits = body["data"]["hits"].as_array().unwrap();
+    assert_eq!(hits.len(), 1, "{body}");
+    assert_eq!(hits[0]["path"], "src/agent.rs");
+    assert_eq!(hits[0]["line"], 3);
+    assert_eq!(hits[0]["container"], "AgentLoop");
+    assert_eq!(body["data"]["files"], 1);
+
+    // A second refresh reuses the fingerprint instead of re-parsing.
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::post()
+            .uri(&format!("/api/index/refresh?project_id={id}"))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["data"]["files"], 1);
+    assert_eq!(body["data"]["parsed"], 0);
+    assert_eq!(body["data"]["reused"], 1);
+    assert_eq!(body["data"]["languages"]["rust"], 1);
+
+    // Wiki pages land in the project folder as markdown.
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::post()
+            .uri(&format!("/api/index/wiki?project_id={id}"))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert!(body["data"]["files"][0] == "index.md", "{body}");
+    assert!(root.join(".synbot/repowiki/index.md").exists());
+
+    // Empty queries and unknown projects are client errors.
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri(&format!("/api/index/symbols?q=%20&project_id={id}"))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 400);
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::get()
+            .uri("/api/index/symbols?q=x&project_id=missing")
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 404);
+}
+
+// ---------------------------------------------------------------------------
+// Agent team — /api/subagents snapshot + cancel
+// ---------------------------------------------------------------------------
+
+fn subagent_routes() -> actix_web::Scope {
+    web::scope("/api")
+        .route("/subagents", web::get().to(team::list_subagents))
+        .route(
+            "/subagents/{id}/cancel",
+            web::post().to(team::cancel_subagent),
+        )
+}
+
+#[actix_web::test]
+async fn test_subagents_list_is_empty_by_default() {
+    let state = create_test_state().await;
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(state))
+            .service(subagent_routes()),
+    )
+    .await;
+
+    let req = test::TestRequest::get().uri("/api/subagents").to_request();
+    let body: serde_json::Value = test::call_and_read_body_json(&app, req).await;
+    assert_eq!(body["success"], true);
+    assert_eq!(
+        body["data"]["agents"]
+            .as_array()
+            .expect("agents array")
+            .len(),
+        0
+    );
+    assert_eq!(body["data"]["running"], 0);
+}
+
+#[actix_web::test]
+async fn test_subagents_cancel_stops_a_running_teammate() {
+    let state = create_test_state().await;
+
+    // A teammate parked on a slow future, so the snapshot has something running to cancel.
+    let id = state
+        .subagents
+        .lock()
+        .await
+        .spawn_fn(
+            "slow teammate".to_string(),
+            Some("reviewer".to_string()),
+            SubagentScope::default(),
+            Box::pin(async {
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                Ok("never".to_string())
+            }),
+            None,
+        )
+        .await
+        .expect("spawn should be accepted");
+
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(state.clone()))
+            .service(subagent_routes()),
+    )
+    .await;
+
+    let body: serde_json::Value = test::call_and_read_body_json(
+        &app,
+        test::TestRequest::get().uri("/api/subagents").to_request(),
+    )
+    .await;
+    assert_eq!(body["data"]["running"], 1);
+    assert_eq!(body["data"]["agents"][0]["id"], id.as_str());
+    assert_eq!(body["data"]["agents"][0]["role"], "reviewer");
+    assert_eq!(body["data"]["agents"][0]["state"], "running");
+
+    let body: serde_json::Value = test::call_and_read_body_json(
+        &app,
+        test::TestRequest::post()
+            .uri(&format!("/api/subagents/{id}/cancel"))
+            .set_json(serde_json::json!({ "all": false }))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(body["success"], true);
+    assert_eq!(body["data"]["cancelled"], 1);
+
+    let mut cancelled = false;
+    for _ in 0..100 {
+        let handle = state
+            .subagents
+            .lock()
+            .await
+            .get_result(&id)
+            .await
+            .expect("handle stays in the pool");
+        if matches!(handle.status, SubagentStatus::Cancelled) {
+            cancelled = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(cancelled, "teammate should end up cancelled");
+}
+
+#[actix_web::test]
+async fn test_subagents_cancel_unknown_id_is_404() {
+    let state = create_test_state().await;
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(state))
+            .service(subagent_routes()),
+    )
+    .await;
+
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::post()
+            .uri("/api/subagents/nope/cancel")
+            .set_json(serde_json::json!({ "all": false }))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 404);
 }

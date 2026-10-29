@@ -10,14 +10,12 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use matrix_sdk::{
+    authentication::{matrix::MatrixSession, AuthSession},
     config::SyncSettings,
     ruma::{
-        events::room::message::{
-            MessageType, RoomMessageEventContent, SyncRoomMessageEvent,
-        },
+        events::room::message::{MessageType, RoomMessageEventContent, SyncRoomMessageEvent},
         RoomId,
     },
-    authentication::{matrix::MatrixSession, AuthSession},
     Client, Room, RoomState, SessionMeta, SessionTokens,
 };
 use tokio::sync::{broadcast, broadcast::error::RecvError, mpsc};
@@ -66,9 +64,11 @@ fn matrix_channel_slug(name: &str) -> String {
 fn expand_user_path(raw: &str) -> PathBuf {
     let raw = raw.trim();
     if raw.starts_with('~') {
-        dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(raw.trim_start_matches("~/").trim_start_matches('~').trim_start_matches('/'))
+        dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join(
+            raw.trim_start_matches("~/")
+                .trim_start_matches('~')
+                .trim_start_matches('/'),
+        )
     } else {
         PathBuf::from(raw)
     }
@@ -101,10 +101,7 @@ fn matrix_allowlist_entry_matches(entry_chat_id: &str, room_id: &str, sender: &s
     }
     let room = room_id.trim();
     let send = sender.trim();
-    e == room
-        || e == send
-        || e.eq_ignore_ascii_case(room)
-        || e.eq_ignore_ascii_case(send)
+    e == room || e == send || e.eq_ignore_ascii_case(room) || e.eq_ignore_ascii_case(send)
 }
 
 fn matrix_sqlite_path(cfg: &MatrixConfig) -> PathBuf {
@@ -193,8 +190,9 @@ impl MatrixChannel {
             .trim()
             .trim_end_matches('/')
             .to_string();
-        let url = url::Url::parse(&homeserver_url)
-            .context("Matrix homeserver_url must be a valid URL (e.g. https://matrix.example.org)")?;
+        let url = url::Url::parse(&homeserver_url).context(
+            "Matrix homeserver_url must be a valid URL (e.g. https://matrix.example.org)",
+        )?;
         let server = url.host_str().unwrap_or("localhost").to_string();
 
         let db_path = matrix_sqlite_path(&self.config);
@@ -551,7 +549,13 @@ impl Channel for MatrixChannel {
                         let preview = if result_preview.is_empty() {
                             String::new()
                         } else if result_preview.len() > tool_result_preview_chars {
-                            format!("{}...", result_preview.chars().take(tool_result_preview_chars).collect::<String>())
+                            format!(
+                                "{}...",
+                                result_preview
+                                    .chars()
+                                    .take(tool_result_preview_chars)
+                                    .collect::<String>()
+                            )
                         } else {
                             result_preview.clone()
                         };
@@ -567,7 +571,9 @@ impl Channel for MatrixChannel {
                             .display_message
                             .clone()
                             .filter(|s| !s.is_empty())
-                            .unwrap_or_else(|| approval_formatter::format_approval_request(request));
+                            .unwrap_or_else(|| {
+                                approval_formatter::format_approval_request(request)
+                            });
                         (content, vec![])
                     }
                 };
@@ -580,11 +586,14 @@ impl Channel for MatrixChannel {
                                 if let Err(e) =
                                     room.send(RoomMessageEventContent::text_plain(&chunk)).await
                                 {
-                                    runtime_status_out.record_error(format!("Matrix outbound send failed: {e:#}"));
+                                    runtime_status_out.record_error(format!(
+                                        "Matrix outbound send failed: {e:#}"
+                                    ));
                                     error!("Matrix outbound send error: {e:#}");
                                 } else {
                                     runtime_status_out.record_sent();
-                                    runtime_status_out.record_latency(started.elapsed().as_millis() as u64);
+                                    runtime_status_out
+                                        .record_latency(started.elapsed().as_millis() as u64);
                                 }
                             }
                         }
@@ -612,9 +621,12 @@ impl Channel for MatrixChannel {
                                         .map(|n| n.to_string_lossy().into_owned())
                                         .unwrap_or_else(|| "file".to_string());
                                     if let Some(room) = client_out.get_room(&room_id) {
-                                        if let Err(e) = room.send(
-                                            RoomMessageEventContent::text_plain(&format!("[Attachment: {}]", file_name))
-                                        ).await {
+                                        if let Err(e) =
+                                            room.send(RoomMessageEventContent::text_plain(
+                                                &format!("[Attachment: {}]", file_name),
+                                            ))
+                                            .await
+                                        {
                                             error!("Matrix file notice send error: {e:#}");
                                         }
                                     }
@@ -699,7 +711,13 @@ impl Channel for MatrixChannel {
                 let preview = if result_preview.is_empty() {
                     String::new()
                 } else if result_preview.len() > self.tool_result_preview_chars {
-                    format!("{}...", result_preview.chars().take(self.tool_result_preview_chars).collect::<String>())
+                    format!(
+                        "{}...",
+                        result_preview
+                            .chars()
+                            .take(self.tool_result_preview_chars)
+                            .collect::<String>()
+                    )
                 } else {
                     result_preview.clone()
                 };
@@ -730,11 +748,8 @@ impl Channel for MatrixChannel {
                             .file_name()
                             .map(|n| n.to_string_lossy().into_owned())
                             .unwrap_or_else(|| "file".to_string());
-                        self.send_to_room(
-                            &room_id,
-                            &format!("[Attachment: {}]", file_name),
-                        )
-                        .await?;
+                        self.send_to_room(&room_id, &format!("[Attachment: {}]", file_name))
+                            .await?;
                     }
                 }
             }

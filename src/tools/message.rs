@@ -19,7 +19,9 @@ pub struct MessageTool {
 
 #[async_trait::async_trait]
 impl DynTool for MessageTool {
-    fn name(&self) -> &str { "message" }
+    fn name(&self) -> &str {
+        "message"
+    }
     fn description(&self) -> &str {
         "Send a message to the user on the current chat channel. Optional: pass 'files' (array of file paths relative to workspace) to attach files to the message (e.g. Feishu/Discord/Slack will send them). Use when the user asks you to send or share a file."
     }
@@ -70,7 +72,10 @@ impl DynTool for MessageTool {
         if empty_media {
             Ok("Message sent.".into())
         } else {
-            Ok(format!("Message sent with {} file(s) (will be delivered with your next reply).", media_len))
+            Ok(format!(
+                "Message sent with {} file(s) (will be delivered with your next reply).",
+                media_len
+            ))
         }
     }
 }
@@ -92,6 +97,9 @@ mod tests {
         let schema = tool.parameters_schema();
         assert_eq!(schema["type"], "object");
         assert!(schema["properties"]["content"].is_object());
-        assert!(schema["required"].as_array().unwrap().contains(&serde_json::json!("content")));
+        assert!(schema["required"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("content")));
     }
 }

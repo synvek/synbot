@@ -79,7 +79,11 @@ impl DynTool for ListHeartbeatTasksTool {
             .map(|(i, t)| {
                 format!(
                     "{}. [{}] {} (chat: {}, user: {})",
-                    i + 1, t.channel, t.target, t.chat_id, t.user_id
+                    i + 1,
+                    t.channel,
+                    t.target,
+                    t.chat_id,
+                    t.user_id
                 )
             })
             .collect();
@@ -137,11 +141,26 @@ impl DynTool for AddHeartbeatTaskTool {
             .map(|s| s.to_string())
             .unwrap_or_default();
         if target.is_empty() {
-            return Ok("Error: 'target' is required (e.g. task content like 'check disk space').".to_string());
+            return Ok(
+                "Error: 'target' is required (e.g. task content like 'check disk space')."
+                    .to_string(),
+            );
         }
-        let channel = args.get("channel").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let chat_id = args.get("chat_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let user_id = args.get("user_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let channel = args
+            .get("channel")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let chat_id = args
+            .get("chat_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let user_id = args
+            .get("user_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         if channel.is_empty() || chat_id.is_empty() || user_id.is_empty() {
             return Ok("Error: channel/chat_id/user_id must be set (caller should inject from current message).".to_string());
         }
@@ -207,7 +226,10 @@ impl DynTool for DeleteHeartbeatTaskTool {
         if let Some(ref p) = config_path {
             save_config(&cfg, Some(p.as_path()))?;
         }
-        Ok(format!("Deleted heartbeat task #{}: {}", index, removed.target))
+        Ok(format!(
+            "Deleted heartbeat task #{}: {}",
+            index, removed.target
+        ))
     }
 }
 
@@ -249,15 +271,27 @@ impl DynTool for ListCronTasksTool {
                     i + 1,
                     if t.enabled { "on" } else { "off" },
                     t.schedule,
-                    if t.description.is_empty() { "-" } else { &t.description },
-                    if t.command.is_empty() { "-" } else { &t.command }
+                    if t.description.is_empty() {
+                        "-"
+                    } else {
+                        &t.description
+                    },
+                    if t.command.is_empty() {
+                        "-"
+                    } else {
+                        &t.command
+                    }
                 )
             })
             .collect();
         let msg = if lines.is_empty() {
             "Cron tasks: 0. Use add_cron_task to add.".to_string()
         } else {
-            format!("Cron tasks ({}):\n{}", cfg.cron.tasks.len(), lines.join("\n"))
+            format!(
+                "Cron tasks ({}):\n{}",
+                cfg.cron.tasks.len(),
+                lines.join("\n")
+            )
         };
         Ok(msg)
     }
@@ -307,7 +341,9 @@ impl DynTool for AddCronTaskTool {
             .map(|s| s.to_string())
             .unwrap_or_default();
         if schedule.is_empty() {
-            return Ok("Error: 'schedule' is required (cron expression, e.g. '0 9 * * 1-5').".to_string());
+            return Ok(
+                "Error: 'schedule' is required (cron expression, e.g. '0 9 * * 1-5').".to_string(),
+            );
         }
         let description = args
             .get("description")
@@ -319,17 +355,32 @@ impl DynTool for AddCronTaskTool {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        let channel = args.get("channel").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let user_id = args.get("user_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let channel = args
+            .get("channel")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let user_id = args
+            .get("user_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let chat_id = args
             .get("chat_id")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
         if channel.is_empty() || user_id.is_empty() {
-            return Ok("Error: channel/user_id must be set (caller should inject from current message).".to_string());
+            return Ok(
+                "Error: channel/user_id must be set (caller should inject from current message)."
+                    .to_string(),
+            );
         }
-        let chat_id = if chat_id.is_empty() { user_id.clone() } else { chat_id };
+        let chat_id = if chat_id.is_empty() {
+            user_id.clone()
+        } else {
+            chat_id
+        };
         sync_scheduled_sections_from_disk(&self.inner).await;
         let (config, config_path) = get_config_and_path(&self.inner);
         let task = CronTaskConfig {
@@ -388,13 +439,17 @@ impl DynTool for DeleteCronTaskTool {
         if index == 0 || index > tasks.len() {
             return Ok(format!(
                 "Invalid index {}. There are {} cron tasks. Use list_cron_tasks to see indices.",
-                index, tasks.len()
+                index,
+                tasks.len()
             ));
         }
         let removed = tasks.remove(index - 1);
         if let Some(ref p) = config_path {
             save_config(&cfg, Some(p.as_path()))?;
         }
-        Ok(format!("Deleted cron task #{}: schedule={}", index, removed.schedule))
+        Ok(format!(
+            "Deleted cron task #{}: schedule={}",
+            index, removed.schedule
+        ))
     }
 }

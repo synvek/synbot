@@ -27,11 +27,7 @@ impl HeartbeatService {
             let (enabled, interval_secs, tasks) = {
                 let cfg = self.config.read().await;
                 let hb = &cfg.heartbeat;
-                (
-                    hb.enabled,
-                    hb.interval,
-                    hb.tasks.clone(),
-                )
+                (hb.enabled, hb.interval, hb.tasks.clone())
             };
 
             if !enabled {

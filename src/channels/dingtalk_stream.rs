@@ -67,7 +67,10 @@ pub async fn open_connection(
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        let hint = if status.as_u16() == 401 || text.contains("authFailed") || text.contains("鉴权失败") {
+        let hint = if status.as_u16() == 401
+            || text.contains("authFailed")
+            || text.contains("鉴权失败")
+        {
             " (Check: 应用开发 → 应用 → 应用信息 中的 ClientID/ClientSecret 或 AppKey/AppSecret 是否正确；是否已为该应用开启 Stream 模式与机器人能力；同一应用是否被其他进程占用连接)"
         } else {
             ""
@@ -133,7 +136,9 @@ fn ack_event_success(message_id: &str) -> String {
     .to_string()
 }
 
-async fn ws_connect(conn_url: &str) -> Result<
+async fn ws_connect(
+    conn_url: &str,
+) -> Result<
     (
         tokio_tungstenite::WebSocketStream<
             tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
@@ -203,7 +208,11 @@ where
                         .data
                         .as_ref()
                         .and_then(|d| serde_json::from_str::<serde_json::Value>(d).ok())
-                        .and_then(|v| v.get("opaque").and_then(|x| x.as_str()).map(|s| s.to_string()))
+                        .and_then(|v| {
+                            v.get("opaque")
+                                .and_then(|x| x.as_str())
+                                .map(|s| s.to_string())
+                        })
                         .unwrap_or_default();
                     let ack = ack_ping(message_id, &opaque);
                     write
@@ -253,8 +262,7 @@ pub async fn run_forever<F>(
     client_secret: String,
     runtime_status: ChannelStatusHandle,
     mut on_bot_message: F,
-)
-where
+) where
     F: FnMut(String) + Send + 'static,
 {
     let policy = crate::channels::RetryPolicy::default();

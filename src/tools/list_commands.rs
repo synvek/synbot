@@ -36,4 +36,3 @@ impl DynTool for ListCommandsTool {
         Ok(slash_commands_help_text().to_string())
     }
 }
-

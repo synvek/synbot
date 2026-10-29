@@ -11,7 +11,7 @@ use rust_embed::RustEmbed;
 pub struct Assets;
 
 /// Serve static files from embedded assets
-/// 
+///
 /// This handler serves files from the embedded frontend build.
 /// If a file is not found, it falls back to serving index.html
 /// to support SPA client-side routing.
@@ -19,7 +19,7 @@ pub async fn serve_static(path: actix_web::web::Path<String>) -> impl Responder 
     #[cfg(not(debug_assertions))]
     {
         let path = path.into_inner();
-        
+
         // Default to index.html for root path
         let file_path = if path.is_empty() || path == "/" {
             "index.html"
@@ -27,13 +27,12 @@ pub async fn serve_static(path: actix_web::web::Path<String>) -> impl Responder 
             // Remove leading slash if present
             path.strip_prefix('/').unwrap_or(&path)
         };
-        
+
         match Assets::get(file_path) {
             Some(content) => {
                 // Determine MIME type from file extension
-                let mime = mime_guess::from_path(file_path)
-                    .first_or_octet_stream();
-                
+                let mime = mime_guess::from_path(file_path).first_or_octet_stream();
+
                 HttpResponse::Ok()
                     .content_type(mime.as_ref())
                     .body(content.data.into_owned())
@@ -46,13 +45,12 @@ pub async fn serve_static(path: actix_web::web::Path<String>) -> impl Responder 
                         .content_type("text/html")
                         .body(index.data.into_owned())
                 } else {
-                    HttpResponse::NotFound()
-                        .body("404 Not Found")
+                    HttpResponse::NotFound().body("404 Not Found")
                 }
             }
         }
     }
-    
+
     #[cfg(debug_assertions)]
     {
         // In debug mode, return a placeholder message
@@ -74,7 +72,7 @@ pub async fn serve_index() -> impl Responder {
                 .body("404 Not Found - index.html not found in embedded assets"),
         }
     }
-    
+
     #[cfg(debug_assertions)]
     {
         // In debug mode, return a placeholder message
@@ -83,4 +81,3 @@ pub async fn serve_index() -> impl Responder {
             .body("<html><body><h1>Web Admin Dashboard</h1><p>Frontend not built. Run the frontend build to see the dashboard.</p></body></html>")
     }
 }
-

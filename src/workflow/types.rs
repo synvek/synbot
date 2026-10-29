@@ -58,10 +58,7 @@ impl WorkflowDef {
                 return Err(format!("step {}: type must be 'llm' or 'user_input'", i));
             }
             if t == "user_input" && s.input_key.as_deref().unwrap_or("").trim().is_empty() {
-                return Err(format!(
-                    "step {} (user_input): input_key is required",
-                    i
-                ));
+                return Err(format!("step {} (user_input): input_key is required", i));
             }
         }
         Ok(())

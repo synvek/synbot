@@ -8,10 +8,10 @@ use std::sync::Arc;
 use crate::agent::memory::MemoryStore;
 #[cfg(feature = "memory-index")]
 use crate::agent::memory_backend::{FileSqliteMemoryBackend, MemoryBackend, MemoryContextOptions};
-#[cfg(feature = "memory-index")]
-use crate::config::Config;
 use crate::agent::skills::{CompositeSkillProvider, SkillProvider};
 use crate::config;
+#[cfg(feature = "memory-index")]
+use crate::config::Config;
 use crate::sandbox::types::ToolSandboxExecKind;
 
 const BOOTSTRAP_FILES: &[&str] = &["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md", "IDENTITY.md"];
@@ -94,6 +94,23 @@ impl ContextBuilder {
 
         if !role_prompt.trim().is_empty() {
             parts.push(role_prompt.trim().to_string());
+        }
+
+        // Planning: the task board is user-visible, so keep it current instead of "thinking" silently.
+        parts.push(
+            "# Planning\n\nFor any task that needs more than two steps, publish the plan with \
+             `plan_write` before touching files, then rewrite the whole list (keeping ids) as steps \
+             start and finish. The user sees this list as the workbench task board."
+                .to_string(),
+        );
+        let board = crate::tasks::TaskBoard::load(&self.workspace);
+        if !board.tasks.is_empty() {
+            parts.push(format!("# Current plan\n\n{}", board.summary()));
+        }
+
+        // Repo map: only the small sidecar is read, so this stays cheap on every turn.
+        if let Some(map) = crate::codeindex::repo_map(&self.workspace) {
+            parts.push(format!("# Repository map\n\n{map}"));
         }
 
         let mem = self.build_memory_section(memory_query);
@@ -187,8 +204,10 @@ impl ContextBuilder {
              You are synbot assistant, a helpful AI assistant.\n\n\
              ## Current Time\n{now}\n\n\
              {env}\
-             {workspace}"
-        , env = env_section, workspace = workspace_section)
+             {workspace}",
+            env = env_section,
+            workspace = workspace_section
+        )
     }
 
     fn load_bootstrap_files(&self) -> String {
@@ -198,6 +217,14 @@ impl ContextBuilder {
             if let Ok(content) = std::fs::read_to_string(&path) {
                 parts.push(content);
             }
+        }
+        // Project rules (`.synbot/rules/*.md`) complement AGENTS.md; skip AGENTS.md here because
+        // it is already part of BOOTSTRAP_FILES above.
+        for (name, content) in crate::project::read_rules(&self.workspace, 32 * 1024) {
+            if name == "AGENTS.md" {
+                continue;
+            }
+            parts.push(format!("# Project rule: {name}\n\n{content}"));
         }
         parts.join("\n\n")
     }
@@ -220,6 +247,50 @@ mod tests {
         assert!(prompt.contains("Synbot"));
         assert!(prompt.contains("Workspace"));
         assert!(prompt.contains("# Skills"));
+        assert!(prompt.contains("plan_write"));
+    }
+
+    #[test]
+    fn build_system_prompt_injects_the_current_plan() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills_dir = dir.path().join("skills");
+        std::fs::create_dir_all(&skills_dir).unwrap();
+        let mut board = crate::tasks::TaskBoard::load(dir.path());
+        board
+            .replace(vec![crate::tasks::TaskInput {
+                id: None,
+                title: "read the code".to_string(),
+                status: None,
+                notes: None,
+            }])
+            .unwrap();
+        board.save(dir.path()).unwrap();
+        #[cfg(feature = "memory-index")]
+        let ctx = ContextBuilder::new(dir.path(), "main", &skills_dir, None, None);
+        #[cfg(not(feature = "memory-index"))]
+        let ctx = ContextBuilder::new(dir.path(), "main", &skills_dir, None);
+        let prompt = ctx.build_system_prompt();
+        assert!(prompt.contains("# Current plan"));
+        assert!(prompt.contains("read the code"));
+    }
+
+    #[test]
+    fn build_system_prompt_injects_the_repository_map_when_an_index_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills_dir = dir.path().join("skills");
+        std::fs::create_dir_all(&skills_dir).unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(dir.path().join("src/lib.rs"), "pub fn api() {}\n").unwrap();
+        let mut index = crate::codeindex::CodeIndex::empty(dir.path());
+        index.refresh(dir.path()).unwrap();
+        #[cfg(feature = "memory-index")]
+        let ctx = ContextBuilder::new(dir.path(), "main", &skills_dir, None, None);
+        #[cfg(not(feature = "memory-index"))]
+        let ctx = ContextBuilder::new(dir.path(), "main", &skills_dir, None);
+        let prompt = ctx.build_system_prompt();
+        assert!(prompt.contains("# Repository map"), "{prompt}");
+        assert!(prompt.contains("1 files / 1 symbols"), "{prompt}");
+        assert!(prompt.contains("find_symbols"), "{prompt}");
     }
 
     #[test]
@@ -231,10 +302,25 @@ mod tests {
         let ctx = ContextBuilder::new(dir.path(), "main", &skills_dir, None, None);
         #[cfg(not(feature = "memory-index"))]
         let ctx = ContextBuilder::new(dir.path(), "main", &skills_dir, None);
-        let prompt =
-            ctx.build_system_prompt_with_role_prompt("You are a helpful tester.", None);
+        let prompt = ctx.build_system_prompt_with_role_prompt("You are a helpful tester.", None);
         assert!(prompt.contains("Synbot"));
         assert!(prompt.contains("You are a helpful tester."));
+    }
+
+    #[test]
+    fn build_system_prompt_injects_project_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        let skills_dir = dir.path().join("skills");
+        std::fs::create_dir_all(&skills_dir).unwrap();
+        std::fs::create_dir_all(dir.path().join(".synbot/rules")).unwrap();
+        std::fs::write(dir.path().join(".synbot/rules/style.md"), "prefer tabs").unwrap();
+        #[cfg(feature = "memory-index")]
+        let ctx = ContextBuilder::new(dir.path(), "main", &skills_dir, None, None);
+        #[cfg(not(feature = "memory-index"))]
+        let ctx = ContextBuilder::new(dir.path(), "main", &skills_dir, None);
+        let prompt = ctx.build_system_prompt();
+        assert!(prompt.contains("# Project rule: .synbot/rules/style.md"));
+        assert!(prompt.contains("prefer tabs"));
     }
 
     #[test]
@@ -302,7 +388,15 @@ mod tests {
             Some(ToolSandboxExecKind::Docker),
         );
         let id = ctx.build_system_prompt_with_role_prompt("", None);
-        assert!(id.contains("/workspace"), "docker prompt should mention /workspace: {}", id);
-        assert!(id.contains("Docker"), "docker prompt should mention Docker: {}", id);
+        assert!(
+            id.contains("/workspace"),
+            "docker prompt should mention /workspace: {}",
+            id
+        );
+        assert!(
+            id.contains("Docker"),
+            "docker prompt should mention Docker: {}",
+            id
+        );
     }
 }

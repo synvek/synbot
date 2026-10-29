@@ -267,7 +267,8 @@ fn parse_wrapped_invocation_at(s: &str, start: usize) -> Option<EmbeddedInv> {
 
 fn find_next_embedded_invocation(rest: &str, base: usize) -> Option<EmbeddedInv> {
     let w = find_open_tag(rest).and_then(|rel| parse_wrapped_invocation_at(rest, rel));
-    let s = find_session_tool_marker(rest).and_then(|rel| parse_session_style_invocation(rest, rel));
+    let s =
+        find_session_tool_marker(rest).and_then(|rel| parse_session_style_invocation(rest, rel));
     let pick = match (w, s) {
         (Some(a), Some(b)) => {
             if a.start < b.start {

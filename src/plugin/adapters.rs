@@ -42,7 +42,10 @@ impl ExtismTool {
     }
 
     fn get_manifest(&self) -> Result<(String, String, Value)> {
-        let mut guard = self.cache.lock().map_err(|_| anyhow::anyhow!("lock cache"))?;
+        let mut guard = self
+            .cache
+            .lock()
+            .map_err(|_| anyhow::anyhow!("lock cache"))?;
         if let Some(ref c) = *guard {
             return Ok(c.clone());
         }
@@ -51,10 +54,22 @@ impl ExtismTool {
             .lock()
             .map_err(|_| anyhow::anyhow!("lock plugin"))?
             .call(abi::FN_TOOL_MANIFEST, "")?;
-        let obj: Value = serde_json::from_str(&out).map_err(|e| anyhow::anyhow!("tool manifest json: {}", e))?;
-        let name = obj.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let description = obj.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let parameters_schema = obj.get("parameters_schema").cloned().unwrap_or(Value::Object(serde_json::Map::new()));
+        let obj: Value =
+            serde_json::from_str(&out).map_err(|e| anyhow::anyhow!("tool manifest json: {}", e))?;
+        let name = obj
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let description = obj
+            .get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let parameters_schema = obj
+            .get("parameters_schema")
+            .cloned()
+            .unwrap_or(Value::Object(serde_json::Map::new()));
         let cached = (name.clone(), description.clone(), parameters_schema.clone());
         *guard = Some(cached);
         Ok((name, description, parameters_schema))
@@ -68,7 +83,10 @@ impl ExtismTool {
             let name_static: &'static str = Box::leak(name.into_boxed_str());
             let desc_static: &'static str = Box::leak(description.into_boxed_str());
             let _ = self.name_ref.lock().map(|mut g| *g = Some(name_static));
-            let _ = self.description_ref.lock().map(|mut g| *g = Some(desc_static));
+            let _ = self
+                .description_ref
+                .lock()
+                .map(|mut g| *g = Some(desc_static));
         }
     }
 }
@@ -77,11 +95,7 @@ impl ExtismTool {
 impl DynTool for ExtismTool {
     fn name(&self) -> &str {
         self.ensure_name_description_refs();
-        self.name_ref
-            .lock()
-            .ok()
-            .and_then(|g| *g)
-            .unwrap_or("")
+        self.name_ref.lock().ok().and_then(|g| *g).unwrap_or("")
     }
 
     fn description(&self) -> &str {
@@ -109,7 +123,8 @@ impl DynTool for ExtismTool {
                 .call(abi::FN_TOOL_CALL, &input)
         })
         .await??;
-        let obj: Value = serde_json::from_str(&out).unwrap_or(Value::Object(serde_json::Map::new()));
+        let obj: Value =
+            serde_json::from_str(&out).unwrap_or(Value::Object(serde_json::Map::new()));
         if let Some(err) = obj.get("err").and_then(|v| v.as_str()) {
             anyhow::bail!("plugin tool error: {}", err);
         }
@@ -185,7 +200,12 @@ impl SkillProvider for ExtismSkillProvider {
 
     fn load_skill(&self, name: &str) -> Option<String> {
         let input = serde_json::json!({ "name": name }).to_string();
-        let out: String = self.plugin.lock().ok()?.call(abi::FN_SKILL_LOAD, &input).ok()?;
+        let out: String = self
+            .plugin
+            .lock()
+            .ok()?
+            .call(abi::FN_SKILL_LOAD, &input)
+            .ok()?;
         let v: Option<String> = serde_json::from_str(&out).ok().flatten();
         v.filter(|s| !s.is_empty())
     }

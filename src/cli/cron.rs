@@ -1,8 +1,8 @@
 //! Cron command - Manage cron jobs.
 
+use crate::config;
 use anyhow::{Context, Result};
 use clap::Subcommand;
-use crate::config;
 
 #[derive(Subcommand)]
 pub enum CronAction {
@@ -22,9 +22,7 @@ pub enum CronAction {
         cron: Option<String>,
     },
     /// Remove a job by ID.
-    Remove {
-        id: String,
-    },
+    Remove { id: String },
 }
 
 pub async fn cmd_cron(action: CronAction) -> Result<()> {
@@ -43,16 +41,28 @@ pub async fn cmd_cron(action: CronAction) -> Result<()> {
                 }
             }
         }
-        CronAction::Add { name, message, at, every, cron } => {
+        CronAction::Add {
+            name,
+            message,
+            at,
+            every,
+            cron,
+        } => {
             use crate::cron::types::*;
             let schedule = if let Some(at_str) = at {
                 let dt = chrono::DateTime::parse_from_rfc3339(&at_str)
-                    .or_else(|_| chrono::NaiveDateTime::parse_from_str(&at_str, "%Y-%m-%dT%H:%M:%S")
-                        .map(|ndt| ndt.and_utc().fixed_offset()))
+                    .or_else(|_| {
+                        chrono::NaiveDateTime::parse_from_str(&at_str, "%Y-%m-%dT%H:%M:%S")
+                            .map(|ndt| ndt.and_utc().fixed_offset())
+                    })
                     .context("Invalid --at timestamp")?;
-                Schedule::At { at_ms: dt.timestamp_millis() }
+                Schedule::At {
+                    at_ms: dt.timestamp_millis(),
+                }
             } else if let Some(secs) = every {
-                Schedule::Every { every_ms: (secs * 1000) as i64 }
+                Schedule::Every {
+                    every_ms: (secs * 1000) as i64,
+                }
             } else if let Some(expr) = cron {
                 Schedule::Cron { expr, tz: None }
             } else {
@@ -64,7 +74,10 @@ pub async fn cmd_cron(action: CronAction) -> Result<()> {
                 name,
                 enabled: true,
                 schedule,
-                payload: CronPayload { message, ..Default::default() },
+                payload: CronPayload {
+                    message,
+                    ..Default::default()
+                },
                 state: CronJobState::default(),
                 created_at_ms: chrono::Utc::now().timestamp_millis(),
                 updated_at_ms: chrono::Utc::now().timestamp_millis(),

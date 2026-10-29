@@ -69,28 +69,29 @@ impl DynTool for GenerateImageTool {
             anyhow::bail!("prompt cannot be empty");
         }
         let ws = effective_workspace(&self.workspace);
-        let (full_path, rel_path) = if let Some(s) = args["output_path"].as_str().filter(|s| !s.is_empty()) {
-            let rel = s.trim().replace('\\', "/");
-            let full = ws.join(&rel);
-            if let Some(parent) = full.parent() {
-                ensure_dir(parent)?;
-            }
-            (full, rel)
-        } else {
-            let out_dir_path = ws.join(&self.output_dir);
-            ensure_dir(&out_dir_path)?;
-            let filename = format!(
-                "image_{}.png",
-                chrono::Utc::now().format("%Y%m%d_%H%M%S")
-            );
-            let full = out_dir_path.join(&filename);
-            let rel = format!("{}/{}", self.output_dir.trim_end_matches('/'), filename);
-            (full, rel)
-        };
+        let (full_path, rel_path) =
+            if let Some(s) = args["output_path"].as_str().filter(|s| !s.is_empty()) {
+                let rel = s.trim().replace('\\', "/");
+                let full = ws.join(&rel);
+                if let Some(parent) = full.parent() {
+                    ensure_dir(parent)?;
+                }
+                (full, rel)
+            } else {
+                let out_dir_path = ws.join(&self.output_dir);
+                ensure_dir(&out_dir_path)?;
+                let filename = format!("image_{}.png", chrono::Utc::now().format("%Y%m%d_%H%M%S"));
+                let full = out_dir_path.join(&filename);
+                let rel = format!("{}/{}", self.output_dir.trim_end_matches('/'), filename);
+                (full, rel)
+            };
 
         let model = args["model"].as_str().unwrap_or(&self.model).to_string();
         let size = args["size"].as_str().unwrap_or(&self.size).to_string();
-        let base = self.api_base.as_deref().unwrap_or("https://api.openai.com/v1");
+        let base = self
+            .api_base
+            .as_deref()
+            .unwrap_or("https://api.openai.com/v1");
         let base_trim = base.trim_end_matches('/');
         let is_openrouter = base_trim.contains("openrouter.ai");
         let client = crate::appcontainer_dns::build_reqwest_client();
@@ -115,7 +116,10 @@ impl DynTool for GenerateImageTool {
                 let text = resp.text().await.unwrap_or_default();
                 anyhow::bail!("OpenRouter image API error {}: {}", status, text);
             }
-            let json: Value = resp.json().await.context("parse OpenRouter image response")?;
+            let json: Value = resp
+                .json()
+                .await
+                .context("parse OpenRouter image response")?;
             let msg = json["choices"]
                 .as_array()
                 .and_then(|c| c.first())
@@ -130,11 +134,15 @@ impl DynTool for GenerateImageTool {
                     msg["content"]
                         .as_array()
                         .and_then(|parts| {
-                            parts.iter().find(|p| p["type"].as_str() == Some("image_url"))
+                            parts
+                                .iter()
+                                .find(|p| p["type"].as_str() == Some("image_url"))
                         })
                         .and_then(|p| p["image_url"]["url"].as_str())
                 })
-                .context("OpenRouter response missing image data in message.images or message.content")?;
+                .context(
+                    "OpenRouter response missing image data in message.images or message.content",
+                )?;
             // Strip data URL prefix (e.g. "data:image/png;base64,") if present.
             let b64 = b64_data
                 .strip_prefix("data:")
@@ -199,10 +207,7 @@ impl DynTool for GenerateImageTool {
             );
             let _ = self.outbound_tx.send(msg);
         }
-        Ok(format!(
-            "Image saved to {} and sent to user.",
-            rel_path
-        ))
+        Ok(format!("Image saved to {} and sent to user.", rel_path))
     }
 }
 
@@ -246,7 +251,10 @@ impl DynTool for GenerateSpeechTool {
         })
     }
     async fn call(&self, args: Value) -> Result<String> {
-        let text = args["text"].as_str().context("text is required")?.to_string();
+        let text = args["text"]
+            .as_str()
+            .context("text is required")?
+            .to_string();
         if text.is_empty() {
             anyhow::bail!("text cannot be empty");
         }
@@ -254,7 +262,11 @@ impl DynTool for GenerateSpeechTool {
         let output_dir = self.output_dir.clone();
         let out_dir_path = ws.join(&output_dir);
         ensure_dir(&out_dir_path)?;
-        let ext = if self.format.is_empty() { "mp3" } else { &self.format };
+        let ext = if self.format.is_empty() {
+            "mp3"
+        } else {
+            &self.format
+        };
         let filename = format!(
             "speech_{}.{}",
             chrono::Utc::now().format("%Y%m%d_%H%M%S"),
@@ -263,7 +275,10 @@ impl DynTool for GenerateSpeechTool {
         let full_path = out_dir_path.join(&filename);
         let rel_path = format!("{}/{}", output_dir.trim_end_matches('/'), filename);
 
-        let base = self.api_base.as_deref().unwrap_or("https://api.openai.com/v1");
+        let base = self
+            .api_base
+            .as_deref()
+            .unwrap_or("https://api.openai.com/v1");
         let url = format!("{}/audio/speech", base.trim_end_matches('/'));
         let client = crate::appcontainer_dns::build_reqwest_client();
         let body = json!({
@@ -307,10 +322,7 @@ impl DynTool for GenerateSpeechTool {
             );
             let _ = self.outbound_tx.send(msg);
         }
-        Ok(format!(
-            "Speech saved to {} and sent to user.",
-            rel_path
-        ))
+        Ok(format!("Speech saved to {} and sent to user.", rel_path))
     }
 }
 
@@ -358,10 +370,7 @@ impl DynTool for GenerateVideoTool {
         if prompt.is_empty() {
             anyhow::bail!("prompt cannot be empty");
         }
-        let api_base = self
-            .api_base
-            .as_deref()
-            .filter(|s| !s.is_empty());
+        let api_base = self.api_base.as_deref().filter(|s| !s.is_empty());
         if api_base.is_none() || self.model.is_empty() {
             anyhow::bail!(
                 "Video generation requires tools.generation.video with provider (api_base) and model configured (e.g. Runway or other provider in providers.extra)"
@@ -405,16 +414,9 @@ impl DynTool for GenerateVideoTool {
         let ws = effective_workspace(&self.workspace);
         let out_dir_path = ws.join(&self.output_dir);
         ensure_dir(&out_dir_path)?;
-        let filename = format!(
-            "video_{}.mp4",
-            chrono::Utc::now().format("%Y%m%d_%H%M%S")
-        );
+        let filename = format!("video_{}.mp4", chrono::Utc::now().format("%Y%m%d_%H%M%S"));
         let full_path = out_dir_path.join(&filename);
-        let rel_path = format!(
-            "{}/{}",
-            self.output_dir.trim_end_matches('/'),
-            filename
-        );
+        let rel_path = format!("{}/{}", self.output_dir.trim_end_matches('/'), filename);
         tokio::fs::write(&full_path, &video_bytes)
             .await
             .context("write video file")?;
@@ -437,9 +439,6 @@ impl DynTool for GenerateVideoTool {
             );
             let _ = self.outbound_tx.send(msg);
         }
-        Ok(format!(
-            "Video saved to {} and sent to user.",
-            rel_path
-        ))
+        Ok(format!("Video saved to {} and sent to user.", rel_path))
     }
 }

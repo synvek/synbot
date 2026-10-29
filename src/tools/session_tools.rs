@@ -79,11 +79,7 @@ impl DynTool for ListSessionsTool {
                     .as_ref()
                     .map(|s| format!("{:?}", s))
                     .unwrap_or_else(|| "—".to_string());
-                let id = meta
-                    .id
-                    .identifier
-                    .as_deref()
-                    .unwrap_or("—");
+                let id = meta.id.identifier.as_deref().unwrap_or("—");
                 let session_key = meta.id.format();
                 let (running, activity) = match active.get(&session_key) {
                     Some(a) => ("running=true", format!("  activity={}", a)),

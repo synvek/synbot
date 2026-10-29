@@ -107,7 +107,10 @@ WantedBy=default.target
                     String::from_utf8_lossy(&out.stderr)
                 );
             }
-            println!("✓ Service installed (systemd user): {}", unit_path.display());
+            println!(
+                "✓ Service installed (systemd user): {}",
+                unit_path.display()
+            );
         }
         ServiceAction::Uninstall => {
             let _ = Command::new("systemctl")
@@ -198,9 +201,20 @@ async fn run_macos(action: ServiceAction) -> Result<()> {
         ServiceAction::Install => {
             std::fs::create_dir_all(&plist_dir).context("Create LaunchAgents dir")?;
             let mut args_xml = String::new();
-            args_xml.push_str(&format!("    <string>{}</string>\n", exe.to_string_lossy().replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")));
+            args_xml.push_str(&format!(
+                "    <string>{}</string>\n",
+                exe.to_string_lossy()
+                    .replace('&', "&amp;")
+                    .replace('<', "&lt;")
+                    .replace('>', "&gt;")
+            ));
             for a in &args {
-                args_xml.push_str(&format!("    <string>{}</string>\n", a.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")));
+                args_xml.push_str(&format!(
+                    "    <string>{}</string>\n",
+                    a.replace('&', "&amp;")
+                        .replace('<', "&lt;")
+                        .replace('>', "&gt;")
+                ));
             }
             let plist = format!(
                 r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -310,7 +324,13 @@ async fn run_macos(action: ServiceAction) -> Result<()> {
             let has_pid = out2
                 .as_ref()
                 .and_then(|o| std::str::from_utf8(o.stdout.as_slice()).ok())
-                .map(|s| s.trim_start().chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false))
+                .map(|s| {
+                    s.trim_start()
+                        .chars()
+                        .next()
+                        .map(|c| c.is_ascii_digit())
+                        .unwrap_or(false)
+                })
                 .unwrap_or(false);
             if running && has_pid {
                 println!("active");
@@ -352,12 +372,8 @@ async fn run_windows(action: ServiceAction) -> Result<()> {
         ServiceAction::Install => {
             let out = Command::new("schtasks")
                 .args([
-                    "/create",
-                    "/tn", TASK_NAME,
-                    "/tr", &task_cmd,
-                    "/sc", "onlogon",
-                    "/rl", "highest",
-                    "/f",
+                    "/create", "/tn", TASK_NAME, "/tr", &task_cmd, "/sc", "onlogon", "/rl",
+                    "highest", "/f",
                 ])
                 .output()
                 .context("schtasks create")?;

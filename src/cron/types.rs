@@ -26,7 +26,9 @@ pub struct CronPayload {
     pub to: Option<String>,
 }
 
-fn default_kind() -> String { "agent_turn".into() }
+fn default_kind() -> String {
+    "agent_turn".into()
+}
 
 impl Default for CronPayload {
     fn default() -> Self {
@@ -69,7 +71,9 @@ pub struct CronJob {
     pub delete_after_run: bool,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CronStore {
@@ -79,7 +83,9 @@ pub struct CronStore {
     pub jobs: Vec<CronJob>,
 }
 
-fn default_version() -> u32 { 1 }
+fn default_version() -> u32 {
+    1
+}
 
 #[cfg(test)]
 mod tests {

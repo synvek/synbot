@@ -87,11 +87,7 @@ async fn search_searxng(base_url: &str, query: &str, count: usize) -> Result<Vec
 
     let resp = client
         .get(&url)
-        .query(&[
-            ("q", query),
-            ("format", "json"),
-            ("categories", "general"),
-        ])
+        .query(&[("q", query), ("format", "json"), ("categories", "general")])
         .send()
         .await
         .context("SearxNG request failed")?
@@ -305,6 +301,10 @@ impl DynTool for WebSearchTool {
         "web_search"
     }
 
+    fn read_only(&self) -> bool {
+        true
+    }
+
     fn description(&self) -> &str {
         "Search the web and return a list of relevant results (title, URL, snippet)."
     }
@@ -376,6 +376,10 @@ pub struct WebFetchTool;
 impl DynTool for WebFetchTool {
     fn name(&self) -> &str {
         "web_fetch"
+    }
+
+    fn read_only(&self) -> bool {
+        true
     }
 
     fn description(&self) -> &str {

@@ -163,7 +163,8 @@ where
         .map_err(|_| "invalid service_id")?;
 
     let (mut sink, mut stream) = stream.split();
-    let mut ping_interval = tokio::time::interval(Duration::from_secs(client_config.ping_interval_secs));
+    let mut ping_interval =
+        tokio::time::interval(Duration::from_secs(client_config.ping_interval_secs));
     ping_interval.reset();
     let mut last_pong = Instant::now();
     let mut check_interval = tokio::time::interval(Duration::from_secs(1));
@@ -277,9 +278,7 @@ pub async fn ws_connect_appcontainer(
         .await
         .map_err(|e| e.to_string())?;
 
-    let mut request = conn_url
-        .into_client_request()
-        .map_err(|e| e.to_string())?;
+    let mut request = conn_url.into_client_request().map_err(|e| e.to_string())?;
     request
         .headers_mut()
         .insert("host", host.try_into().map_err(|_| "invalid host")?);

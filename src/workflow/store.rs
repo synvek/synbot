@@ -48,7 +48,9 @@ impl WorkflowStore {
         let json = serde_json::to_string_pretty(state).context("serialize workflow state")?;
         let tmp = self.tmp_path(session_key);
         let target = self.state_path(session_key);
-        fs::write(&tmp, &json).await.context("write tmp workflow file")?;
+        fs::write(&tmp, &json)
+            .await
+            .context("write tmp workflow file")?;
         #[cfg(target_os = "windows")]
         if target.exists() {
             let _ = fs::remove_file(&target).await;
@@ -68,8 +70,7 @@ impl WorkflowStore {
         let data = fs::read_to_string(&path)
             .await
             .context("read workflow state file")?;
-        let state =
-            serde_json::from_str(&data).context("deserialize workflow state")?;
+        let state = serde_json::from_str(&data).context("deserialize workflow state")?;
         Ok(Some(state))
     }
 
@@ -104,12 +105,7 @@ mod tests {
                 input_key: None,
             }],
         };
-        WorkflowState::new(
-            session_key.to_string(),
-            def,
-            HashMap::new(),
-            60,
-        )
+        WorkflowState::new(session_key.to_string(), def, HashMap::new(), 60)
     }
 
     #[tokio::test]
@@ -156,7 +152,10 @@ mod tests {
         let key = "agent:main:chat_123";
         store.save_state(key, &sample_state(key)).await.unwrap();
         let path = dir.path().join("agent_main_chat_123.json");
-        assert!(path.exists(), "session key with colons should become underscores in filename");
+        assert!(
+            path.exists(),
+            "session key with colons should become underscores in filename"
+        );
     }
 
     #[tokio::test]

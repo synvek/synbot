@@ -31,10 +31,7 @@ impl DirectiveParser {
     pub fn parse(input: &str) -> Vec<Directive> {
         // Find all positions where "@@" occurs
         let marker = "@@";
-        let positions: Vec<usize> = input
-            .match_indices(marker)
-            .map(|(idx, _)| idx)
-            .collect();
+        let positions: Vec<usize> = input.match_indices(marker).map(|(idx, _)| idx).collect();
 
         // No @@ at all -> entire message goes to Commander
         if positions.is_empty() {
@@ -130,7 +127,6 @@ impl DirectiveParser {
         parts.join(" ")
     }
 }
-
 
 // ── tests ───────────────────────────────────────────────────────────────
 
@@ -302,10 +298,7 @@ mod tests {
                 content: "do it".to_string(),
             },
         ];
-        assert_eq!(
-            DirectiveParser::format(&directives),
-            "hello @@role1 do it"
-        );
+        assert_eq!(DirectiveParser::format(&directives), "hello @@role1 do it");
     }
 
     #[test]

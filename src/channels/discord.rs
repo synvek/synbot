@@ -26,7 +26,8 @@ use crate::bus::{InboundMessage, OutboundMessage};
 use crate::channels::file_handler;
 use crate::channels::{approval_formatter, Channel, ChannelStatusHandle, RetryPolicy, RetryState};
 use crate::config::{
-    pairing_allows, pairing_message, pairings_from_config_file_cached, AllowlistEntry, DiscordConfig,
+    pairing_allows, pairing_message, pairings_from_config_file_cached, AllowlistEntry,
+    DiscordConfig,
 };
 use crate::tools::approval::ApprovalManager;
 
@@ -306,7 +307,12 @@ impl DiscordChannel {
     }
 
     /// Register a user's pending approval request.
-    async fn register_pending_approval(&self, user_id: String, request_id: String, chat_id: String) {
+    async fn register_pending_approval(
+        &self,
+        user_id: String,
+        request_id: String,
+        chat_id: String,
+    ) {
         let mut pending = self.pending_approvals.write().await;
         pending.insert(user_id, (request_id, chat_id));
     }
@@ -347,7 +353,7 @@ impl DiscordChannel {
             .json(&serde_json::json!({ "content": feedback }))
             .send()
             .await?;
-            
+
         if !resp.status().is_success() {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
@@ -358,7 +364,7 @@ impl DiscordChannel {
             );
             anyhow::bail!("Discord send failed: HTTP {status}: {body}");
         }
-        
+
         Ok(())
     }
 
@@ -456,18 +462,13 @@ impl DiscordChannel {
         workspace_dir: Option<&PathBuf>,
     ) -> std::result::Result<(), DiscordGatewayError> {
         // Choose URL: use resume_gateway_url if we have one, else default.
-        let ws_url = resume
-            .resume_gateway_url
-            .as_deref()
-            .unwrap_or(GATEWAY_URL);
+        let ws_url = resume.resume_gateway_url.as_deref().unwrap_or(GATEWAY_URL);
 
         info!(url = %ws_url, "Discord Gateway connecting...");
 
         let (ws_stream, _) = tokio_tungstenite::connect_async(ws_url)
             .await
-            .map_err(|e| {
-                classify_discord_error(&format!("WebSocket connect failed: {e}"))
-            })?;
+            .map_err(|e| classify_discord_error(&format!("WebSocket connect failed: {e}")))?;
 
         let (mut ws_tx, mut ws_rx) = ws_stream.split();
 
@@ -475,16 +476,11 @@ impl DiscordChannel {
         let hello_msg = ws_rx
             .next()
             .await
-            .ok_or_else(|| {
-                DiscordGatewayError::Transient("Connection closed before Hello".into())
-            })?
-            .map_err(|e| {
-                DiscordGatewayError::Transient(format!("WS read error: {e}"))
-            })?;
+            .ok_or_else(|| DiscordGatewayError::Transient("Connection closed before Hello".into()))?
+            .map_err(|e| DiscordGatewayError::Transient(format!("WS read error: {e}")))?;
 
         let hello: serde_json::Value =
-            serde_json::from_str(&hello_msg.to_text().unwrap_or("{}"))
-                .unwrap_or_default();
+            serde_json::from_str(&hello_msg.to_text().unwrap_or("{}")).unwrap_or_default();
 
         let heartbeat_interval_ms = hello
             .get("d")
@@ -492,15 +488,10 @@ impl DiscordChannel {
             .and_then(|v| v.as_u64())
             .unwrap_or(41250);
 
-        info!(
-            heartbeat_interval_ms,
-            "Discord Gateway Hello received"
-        );
+        info!(heartbeat_interval_ms, "Discord Gateway Hello received");
 
         // --- Send Identify or Resume ---
-        if let (Some(session_id), Some(seq)) =
-            (&resume.session_id, resume.sequence)
-        {
+        if let (Some(session_id), Some(seq)) = (&resume.session_id, resume.sequence) {
             // Attempt to resume the previous session.
             let resume_payload = serde_json::json!({
                 "op": opcode::RESUME,
@@ -993,7 +984,13 @@ impl Channel for DiscordChannel {
                         let preview = if result_preview.is_empty() {
                             String::new()
                         } else if result_preview.len() > tool_result_preview_chars {
-                            format!("{}...", result_preview.chars().take(tool_result_preview_chars).collect::<String>())
+                            format!(
+                                "{}...",
+                                result_preview
+                                    .chars()
+                                    .take(tool_result_preview_chars)
+                                    .collect::<String>()
+                            )
                         } else {
                             result_preview.clone()
                         };
@@ -1006,7 +1003,12 @@ impl Channel for DiscordChannel {
                     }
                     crate::bus::OutboundMessageType::ApprovalRequest { request } => {
                         // Register the pending approval request
-                        let user_id = request.session_id.split(':').last().unwrap_or("").to_string();
+                        let user_id = request
+                            .session_id
+                            .split(':')
+                            .last()
+                            .unwrap_or("")
+                            .to_string();
                         if !user_id.is_empty() {
                             let mut pending = pending_approvals_clone.write().await;
                             pending.insert(user_id, (request.id.clone(), msg.chat_id.clone()));
@@ -1058,7 +1060,8 @@ impl Channel for DiscordChannel {
                             .await;
                         match resp {
                             Err(e) => {
-                                runtime_status.record_error(format!("Discord outbound send failed: {e:#}"));
+                                runtime_status
+                                    .record_error(format!("Discord outbound send failed: {e:#}"));
                                 error!("Discord outbound send (with files) error: {e:#}");
                             }
                             Ok(r) if r.status().is_success() => {
@@ -1068,8 +1071,13 @@ impl Channel for DiscordChannel {
                             Ok(r) => {
                                 let status = r.status();
                                 let body = r.text().await.unwrap_or_default();
-                                runtime_status.record_error(format!("Discord outbound send failed: {status} {body}"));
-                                error!("Discord outbound send (with files) failed: {} {}", status, body);
+                                runtime_status.record_error(format!(
+                                    "Discord outbound send failed: {status} {body}"
+                                ));
+                                error!(
+                                    "Discord outbound send (with files) failed: {} {}",
+                                    status, body
+                                );
                             }
                         }
                         // If there was also text, we already sent it with the files; no need to send content again unless we split.
@@ -1081,16 +1089,14 @@ impl Channel for DiscordChannel {
                     let started = Instant::now();
                     let resp = outbound_client
                         .post(&url)
-                        .header(
-                            "Authorization",
-                            format!("Bot {}", outbound_token),
-                        )
+                        .header("Authorization", format!("Bot {}", outbound_token))
                         .json(&serde_json::json!({ "content": chunk }))
                         .send()
                         .await;
                     match resp {
                         Err(e) => {
-                            runtime_status.record_error(format!("Discord outbound send failed: {e:#}"));
+                            runtime_status
+                                .record_error(format!("Discord outbound send failed: {e:#}"));
                             error!("Discord outbound send error: {e:#}");
                         }
                         Ok(r) if r.status().is_success() => {
@@ -1100,7 +1106,9 @@ impl Channel for DiscordChannel {
                         Ok(r) => {
                             let status = r.status();
                             let body = r.text().await.unwrap_or_default();
-                            runtime_status.record_error(format!("Discord outbound send failed: {status} {body}"));
+                            runtime_status.record_error(format!(
+                                "Discord outbound send failed: {status} {body}"
+                            ));
                             error!("Discord outbound send failed: {} {}", status, body);
                         }
                     }
@@ -1154,10 +1162,7 @@ impl Channel for DiscordChannel {
                         // Clear resume state — must do a fresh Identify.
                         resume = ResumeState::default();
                     }
-                    info!(
-                        resumable,
-                        "Discord invalid session, reconnecting..."
-                    );
+                    info!(resumable, "Discord invalid session, reconnecting...");
                     tokio::time::sleep(Duration::from_secs(1)).await;
                 }
                 Err(DiscordGatewayError::Unrecoverable(msg)) => {
@@ -1174,8 +1179,7 @@ impl Channel for DiscordChannel {
                 }
                 Err(DiscordGatewayError::Transient(msg)) => {
                     self.runtime_status.mark_reconnecting(Some(&msg));
-                    let should_retry =
-                        retry_state.record_failure(&retry_policy, msg.clone());
+                    let should_retry = retry_state.record_failure(&retry_policy, msg.clone());
 
                     if should_retry {
                         let delay = retry_state.next_delay(&retry_policy);
@@ -1241,7 +1245,13 @@ impl Channel for DiscordChannel {
                 let preview = if result_preview.is_empty() {
                     String::new()
                 } else if result_preview.len() > self.tool_result_preview_chars {
-                    format!("{}...", result_preview.chars().take(self.tool_result_preview_chars).collect::<String>())
+                    format!(
+                        "{}...",
+                        result_preview
+                            .chars()
+                            .take(self.tool_result_preview_chars)
+                            .collect::<String>()
+                    )
                 } else {
                     result_preview.clone()
                 };

@@ -1,8 +1,8 @@
 // Integration tests for sandbox core data structures
 
 use synbot::sandbox::{
-    SandboxConfig, FilesystemConfig, NetworkConfig, ResourceConfig,
-    ProcessConfig, MonitoringConfig, ConfigurationManager, SandboxError,
+    ConfigurationManager, FilesystemConfig, MonitoringConfig, NetworkConfig, ProcessConfig,
+    ResourceConfig, SandboxConfig, SandboxError,
 };
 
 #[test]
@@ -36,13 +36,13 @@ fn test_sandbox_config_serialization() {
         requested_tool_sandbox_type: None,
         image: None,
     };
-    
+
     // Serialize to JSON
     let json = serde_json::to_string(&config).unwrap();
-    
+
     // Deserialize back
     let deserialized: SandboxConfig = serde_json::from_str(&json).unwrap();
-    
+
     // Verify equality
     assert_eq!(config, deserialized);
 }
@@ -61,20 +61,17 @@ fn test_parse_size_various_units() {
         ConfigurationManager::parse_size("1024K").unwrap(),
         1024 * 1024
     );
-    assert_eq!(
-        ConfigurationManager::parse_size("2048").unwrap(),
-        2048
-    );
+    assert_eq!(ConfigurationManager::parse_size("2048").unwrap(), 2048);
 }
 
 #[test]
 fn test_sandbox_error_display() {
     let err = SandboxError::Timeout;
     assert_eq!(err.to_string(), "Timeout");
-    
+
     let err = SandboxError::NotFound;
     assert_eq!(err.to_string(), "Sandbox not found");
-    
+
     let err = SandboxError::Configuration("invalid field".to_string());
     assert_eq!(err.to_string(), "Configuration error: invalid field");
 }

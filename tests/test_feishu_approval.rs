@@ -3,11 +3,13 @@
 //! 测试飞书渠道的审批请求和响应处理
 
 use std::sync::Arc;
-use tokio::sync::{broadcast, mpsc};
 use synbot::bus::{InboundMessage, OutboundMessage, OutboundMessageType};
 use synbot::channels::feishu::FeishuChannel;
 use synbot::config::FeishuConfig;
-use synbot::tools::approval::{ApprovalManager, ApprovalOutcome, ApprovalRequest, ApprovalResponse};
+use synbot::tools::approval::{
+    ApprovalManager, ApprovalOutcome, ApprovalRequest, ApprovalResponse,
+};
+use tokio::sync::{broadcast, mpsc};
 
 /// 测试辅助函数：创建测试用的 FeishuChannel
 fn create_test_channel(
@@ -26,8 +28,17 @@ fn create_test_channel(
         group_my_name: None,
         default_agent: "main".to_string(),
     };
-    
-    let mut channel = FeishuChannel::new(config, inbound_tx, outbound_rx, true, 500, None, None, synbot::channels::ChannelStatusHandle::detached());
+
+    let mut channel = FeishuChannel::new(
+        config,
+        inbound_tx,
+        outbound_rx,
+        true,
+        500,
+        None,
+        None,
+        synbot::channels::ChannelStatusHandle::detached(),
+    );
     if let Some(manager) = approval_manager {
         channel = channel.with_approval_manager(manager);
     }
@@ -38,7 +49,7 @@ fn create_test_channel(
 async fn test_approval_manager_integration() {
     // 创建审批管理器
     let manager = Arc::new(ApprovalManager::new());
-    
+
     // 创建审批请求
     let request = ApprovalRequest {
         id: "test_request_1".to_string(),
@@ -52,7 +63,7 @@ async fn test_approval_manager_integration() {
         timeout_secs: 300,
         display_message: None,
     };
-    
+
     // 在后台任务中模拟审批响应
     let manager_clone = manager.clone();
     let request_id = request.id.clone();
@@ -66,7 +77,7 @@ async fn test_approval_manager_integration() {
         };
         let _ = manager_clone.submit_response(response).await;
     });
-    
+
     // 请求审批
     let outcome = manager
         .request_approval(
@@ -81,15 +92,19 @@ async fn test_approval_manager_integration() {
         )
         .await
         .unwrap();
-    
-    assert_eq!(outcome, ApprovalOutcome::Approved, "Approval should be granted");
+
+    assert_eq!(
+        outcome,
+        ApprovalOutcome::Approved,
+        "Approval should be granted"
+    );
 }
 
 #[tokio::test]
 async fn test_approval_rejection() {
     // 创建审批管理器
     let manager = Arc::new(ApprovalManager::new());
-    
+
     // 创建审批请求
     let request = ApprovalRequest {
         id: "test_request_2".to_string(),
@@ -103,7 +118,7 @@ async fn test_approval_rejection() {
         timeout_secs: 300,
         display_message: None,
     };
-    
+
     // 在后台任务中模拟拒绝响应
     let manager_clone = manager.clone();
     let request_id = request.id.clone();
@@ -117,7 +132,7 @@ async fn test_approval_rejection() {
         };
         let _ = manager_clone.submit_response(response).await;
     });
-    
+
     // 请求审批
     let outcome = manager
         .request_approval(
@@ -132,15 +147,19 @@ async fn test_approval_rejection() {
         )
         .await
         .unwrap();
-    
-    assert_eq!(outcome, ApprovalOutcome::Rejected, "Approval should be rejected");
+
+    assert_eq!(
+        outcome,
+        ApprovalOutcome::Rejected,
+        "Approval should be rejected"
+    );
 }
 
 #[tokio::test]
 async fn test_approval_timeout() {
     // 创建审批管理器
     let manager = Arc::new(ApprovalManager::new());
-    
+
     // 创建审批请求，设置短超时时间
     let request = ApprovalRequest {
         id: "test_request_3".to_string(),
@@ -154,7 +173,7 @@ async fn test_approval_timeout() {
         timeout_secs: 1, // 1 秒超时
         display_message: None,
     };
-    
+
     // 不发送响应，让请求超时
     let outcome = manager
         .request_approval(
@@ -169,7 +188,7 @@ async fn test_approval_timeout() {
         )
         .await
         .unwrap();
-    
+
     assert_eq!(outcome, ApprovalOutcome::Timeout, "Approval should timeout");
 }
 
@@ -178,13 +197,13 @@ async fn test_outbound_approval_request_formatting() {
     // 创建消息通道
     let (inbound_tx, _inbound_rx) = mpsc::channel(10);
     let (outbound_tx, outbound_rx) = broadcast::channel(10);
-    
+
     // 创建审批管理器
     let manager = Arc::new(ApprovalManager::new());
-    
+
     // 创建飞书渠道
     let _channel = create_test_channel(inbound_tx, outbound_rx, Some(manager.clone()));
-    
+
     // 创建审批请求消息
     let request = ApprovalRequest {
         id: "test_request_4".to_string(),
@@ -198,7 +217,7 @@ async fn test_outbound_approval_request_formatting() {
         timeout_secs: 300,
         display_message: None,
     };
-    
+
     let msg = OutboundMessage {
         channel: "feishu".to_string(),
         chat_id: "22222".to_string(),
@@ -207,10 +226,10 @@ async fn test_outbound_approval_request_formatting() {
         },
         reply_to: None,
     };
-    
+
     // 发送消息
     let _ = outbound_tx.send(msg);
-    
+
     // 验证消息格式（这里只是验证消息可以被创建和发送）
     // 实际的格式化在 outbound dispatcher 中完成
 }
@@ -220,13 +239,13 @@ async fn test_pending_approval_tracking() {
     // 创建消息通道
     let (inbound_tx, _inbound_rx) = mpsc::channel(10);
     let (_outbound_tx, outbound_rx) = broadcast::channel(10);
-    
+
     // 创建审批管理器
     let manager = Arc::new(ApprovalManager::new());
-    
+
     // 创建飞书渠道
     let _channel = create_test_channel(inbound_tx, outbound_rx, Some(manager.clone()));
-    
+
     // Note: The pending approval tracking methods are private and used internally
     // This test verifies that the channel can be created with an approval manager
     // The actual tracking is tested through integration with the approval flow
@@ -236,16 +255,16 @@ async fn test_pending_approval_tracking() {
 async fn test_concurrent_approval_requests() {
     // 创建审批管理器
     let manager = Arc::new(ApprovalManager::new());
-    
+
     // 创建多个并发审批请求
     let mut handles = vec![];
-    
+
     for i in 0..5 {
         let manager_clone = manager.clone();
         let handle = tokio::spawn(async move {
             let request_id = format!("concurrent_request_{}", i);
             let user_id = format!("user_{}", i);
-            
+
             // 在后台响应
             let manager_inner = manager_clone.clone();
             let request_id_clone = request_id.clone();
@@ -259,7 +278,7 @@ async fn test_concurrent_approval_requests() {
                 };
                 let _ = manager_inner.submit_response(response).await;
             });
-            
+
             // 请求审批
             let outcome = manager_clone
                 .request_approval(
@@ -274,20 +293,28 @@ async fn test_concurrent_approval_requests() {
                 )
                 .await
                 .unwrap();
-            
+
             (i, outcome)
         });
         handles.push(handle);
     }
-    
+
     // 等待所有请求完成
     for handle in handles {
         let result = handle.await;
         let (i, outcome) = result.unwrap();
         if i % 2 == 0 {
-            assert_eq!(outcome, ApprovalOutcome::Approved, "Even numbered requests should be approved");
+            assert_eq!(
+                outcome,
+                ApprovalOutcome::Approved,
+                "Even numbered requests should be approved"
+            );
         } else {
-            assert_eq!(outcome, ApprovalOutcome::Rejected, "Odd numbered requests should be rejected");
+            assert_eq!(
+                outcome,
+                ApprovalOutcome::Rejected,
+                "Odd numbered requests should be rejected"
+            );
         }
     }
 }
@@ -296,12 +323,12 @@ async fn test_concurrent_approval_requests() {
 async fn test_approval_history() {
     // 创建审批管理器
     let manager = Arc::new(ApprovalManager::new());
-    
+
     // 创建并处理多个审批请求
     for i in 0..3 {
         let request_id = format!("history_request_{}", i);
         let manager_clone = manager.clone();
-        
+
         tokio::spawn(async move {
             tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
             let response = ApprovalResponse {
@@ -312,7 +339,7 @@ async fn test_approval_history() {
             };
             let _ = manager_clone.submit_response(response).await;
         });
-        
+
         let _ = manager
             .request_approval(
                 format!("session_{}", i),
@@ -326,41 +353,52 @@ async fn test_approval_history() {
             )
             .await;
     }
-    
+
     // 获取审批历史
     let history = manager.get_history().await;
-    
+
     // 验证历史记录数量
-    assert_eq!(history.len(), 3, "Should have 3 approval records in history");
+    assert_eq!(
+        history.len(),
+        3,
+        "Should have 3 approval records in history"
+    );
 }
 
 #[tokio::test]
 async fn test_feishu_message_chunking() {
     // 测试飞书消息分块（飞书限制约 150KB，使用 30000 字符作为安全边界）
     let long_text = "a".repeat(35000);
-    
+
     // 验证长消息会被分块
     const CHUNK_SIZE: usize = 30_000;
     let chunks: Vec<&str> = if long_text.len() <= CHUNK_SIZE {
         vec![long_text.as_str()]
     } else {
-        long_text.as_bytes()
+        long_text
+            .as_bytes()
             .chunks(CHUNK_SIZE)
             .map(|c| std::str::from_utf8(c).unwrap_or(""))
             .collect()
     };
-    
+
     // 验证分块数量
     assert_eq!(chunks.len(), 2, "Should split into 2 chunks");
-    
+
     // 验证每个分块都不超过限制
     for chunk in &chunks {
-        assert!(chunk.len() <= CHUNK_SIZE, "Each chunk should be <= 30000 characters");
+        assert!(
+            chunk.len() <= CHUNK_SIZE,
+            "Each chunk should be <= 30000 characters"
+        );
     }
-    
+
     // 验证拼接后等于原始消息
     let rejoined: String = chunks.into_iter().collect();
-    assert_eq!(rejoined, long_text, "Rejoined chunks should equal original message");
+    assert_eq!(
+        rejoined, long_text,
+        "Rejoined chunks should equal original message"
+    );
 }
 
 #[tokio::test]
@@ -369,12 +407,21 @@ async fn test_feishu_approval_feedback_messages() {
     let approved_feedback = "✅ 审批已通过\n\n命令将继续执行。";
     let rejected_feedback = "🚫 审批已拒绝\n\n命令执行已取消。";
     let error_feedback = "❌ 审批响应提交失败，请重试。";
-    
+
     // 验证反馈消息长度合理
-    assert!(approved_feedback.len() < 200, "Approved feedback should be concise");
-    assert!(rejected_feedback.len() < 200, "Rejected feedback should be concise");
-    assert!(error_feedback.len() < 200, "Error feedback should be concise");
-    
+    assert!(
+        approved_feedback.len() < 200,
+        "Approved feedback should be concise"
+    );
+    assert!(
+        rejected_feedback.len() < 200,
+        "Rejected feedback should be concise"
+    );
+    assert!(
+        error_feedback.len() < 200,
+        "Error feedback should be concise"
+    );
+
     // 验证反馈消息包含关键信息
     assert!(approved_feedback.contains("审批已通过"));
     assert!(rejected_feedback.contains("审批已拒绝"));
@@ -396,7 +443,7 @@ async fn test_feishu_approval_request_format() {
         timeout_secs: 300,
         display_message: None,
     };
-    
+
     let formatted = format!(
         "🔐 命令执行审批请求\n\n\
         命令：{}\n\
@@ -413,7 +460,7 @@ async fn test_feishu_approval_request_format() {
         request.timestamp.format("%Y-%m-%d %H:%M:%S UTC"),
         request.timeout_secs
     );
-    
+
     // 验证格式包含所有必要信息
     assert!(formatted.contains("🔐 命令执行审批请求"));
     assert!(formatted.contains(&request.command));

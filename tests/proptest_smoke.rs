@@ -4,7 +4,6 @@
 /// 1. The proptest crate is properly configured as a dev-dependency
 /// 2. The common test utilities module is accessible
 /// 3. Property-based tests can run with the configured iteration count
-
 mod common;
 
 use proptest::prelude::*;

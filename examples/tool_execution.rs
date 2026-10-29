@@ -6,8 +6,8 @@
 //! - Handle execution results
 //! - Transfer results safely between sandboxes
 
-use synbot::sandbox::*;
 use std::time::Duration;
+use synbot::sandbox::*;
 
 #[tokio::main]
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
@@ -61,16 +61,16 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     // Note: In a real implementation, you would execute commands through the sandbox
     // This is a conceptual example showing the API usage
     println!("4. Executing commands (conceptual)...");
-    
+
     // Example 1: Simple command
     println!("   Example 1: echo 'Hello from sandbox'");
     // let result = sandbox.execute("echo", &["Hello from sandbox".to_string()], Duration::from_secs(5))?;
     // println!("   Output: {}", String::from_utf8_lossy(&result.stdout));
-    
+
     // Example 2: Command with timeout
     println!("   Example 2: ls -la /workspace");
     // let result = sandbox.execute("ls", &["-la".to_string(), "/workspace".to_string()], Duration::from_secs(10))?;
-    
+
     // Example 3: Handling execution result
     println!("   Example 3: Creating a mock execution result");
     let mock_result = ExecutionResult {
@@ -80,16 +80,22 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         duration: Duration::from_secs(1),
         error: None,
     };
-    
+
     println!("   Exit code: {}", mock_result.exit_code);
-    println!("   Output: {}", String::from_utf8_lossy(&mock_result.stdout));
+    println!(
+        "   Output: {}",
+        String::from_utf8_lossy(&mock_result.stdout)
+    );
     println!("   Duration: {:?}\n", mock_result.duration);
 
     // Transfer result safely
     println!("5. Transferring result safely...");
     let safe_result = manager.transfer_result(mock_result)?;
     println!("   ✓ Result transferred and sanitized");
-    println!("   Safe output: {}\n", String::from_utf8_lossy(&safe_result.stdout));
+    println!(
+        "   Safe output: {}\n",
+        String::from_utf8_lossy(&safe_result.stdout)
+    );
 
     // Example with malicious content
     println!("6. Testing security filtering...");
@@ -100,7 +106,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         duration: Duration::from_secs(1),
         error: None,
     };
-    
+
     match manager.transfer_result(malicious_result) {
         Ok(_) => println!("   ⚠ Malicious content was not filtered!"),
         Err(e) => println!("   ✓ Malicious content blocked: {:?}\n", e),

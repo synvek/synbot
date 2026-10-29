@@ -1,12 +1,12 @@
 //! Start command - Start the full daemon (channels + heartbeat + cron).
 
+use super::helpers::{build_default_tools, build_rig_completion_model, resolve_provider};
+use crate::config;
+use crate::logging;
 use anyhow::Result;
 use std::io::Write;
 use std::path::PathBuf;
 use tracing::{info, warn};
-use crate::config;
-use crate::logging;
-use super::helpers::{resolve_provider, build_rig_completion_model, build_default_tools};
 
 /// Removes the PID file when the daemon process exits (e.g. Ctrl+C).
 struct PidFileGuard(PathBuf);
@@ -49,7 +49,7 @@ pub async fn cmd_start() -> Result<()> {
             guard.push(entry);
         }
     });
-    
+
     // Initialize logging with config (and feed events to log buffer for web UI)
     logging::init_logging(&cfg, Some(std::sync::Arc::new(log_tx)))?;
 
@@ -73,24 +73,33 @@ pub async fn cmd_start() -> Result<()> {
             {
                 Ok(Ok(lookup)) => {
                     let addrs: Vec<_> = lookup.iter().take(3).collect();
-                    info!("App sandbox (macOS) DNS diagnostic: open.feishu.cn -> {:?}", addrs);
+                    info!(
+                        "App sandbox (macOS) DNS diagnostic: open.feishu.cn -> {:?}",
+                        addrs
+                    );
                 }
                 Ok(Err(e)) => {
-                    warn!("App sandbox (macOS) DNS diagnostic: open.feishu.cn resolve failed: {}", e);
+                    warn!(
+                        "App sandbox (macOS) DNS diagnostic: open.feishu.cn resolve failed: {}",
+                        e
+                    );
                 }
                 Err(_) => {
-                    warn!("App sandbox (macOS) DNS diagnostic: open.feishu.cn resolve timed out (3s)");
+                    warn!(
+                        "App sandbox (macOS) DNS diagnostic: open.feishu.cn resolve timed out (3s)"
+                    );
                 }
             }
         }
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            client.get(url).send(),
-        )
-        .await;
+        let result =
+            tokio::time::timeout(std::time::Duration::from_secs(10), client.get(url).send()).await;
         match result {
             Ok(Ok(resp)) => {
-                info!("App sandbox network diagnostic: GET {} -> {}", url, resp.status());
+                info!(
+                    "App sandbox network diagnostic: GET {} -> {}",
+                    url,
+                    resp.status()
+                );
             }
             Ok(Err(e)) => {
                 let ae = anyhow::Error::from(e);
@@ -112,14 +121,12 @@ pub async fn cmd_start() -> Result<()> {
     let ws = config::workspace_path(&cfg);
 
     // Subagent manager (shared via Arc<Mutex<>>)
-    let subagent_mgr = std::sync::Arc::new(
-        tokio::sync::Mutex::new(
-            crate::agent::subagent::SubagentManager::new(
-                cfg.main_agent.max_concurrent_subagents,
-                Some(cfg.main_agent.subagent_task_timeout_secs),
-            ),
+    let subagent_mgr = std::sync::Arc::new(tokio::sync::Mutex::new(
+        crate::agent::subagent::SubagentManager::new(
+            cfg.main_agent.max_concurrent_subagents,
+            Some(cfg.main_agent.subagent_task_timeout_secs),
         ),
-    );
+    ));
 
     // Message bus (create early so approval manager can broadcast to channels)
     let mut bus = crate::bus::MessageBus::new();
@@ -132,16 +139,20 @@ pub async fn cmd_start() -> Result<()> {
 
     // Load permission policy if enabled
     let permission_policy = if cfg.tools.exec.permissions.enabled {
-        Some(std::sync::Arc::new(crate::tools::permission::CommandPermissionPolicy::new(
-            cfg.tools.exec.permissions.rules.clone(),
-            cfg.tools.exec.permissions.default_level,
-        )))
+        Some(std::sync::Arc::new(
+            crate::tools::permission::CommandPermissionPolicy::new(
+                cfg.tools.exec.permissions.rules.clone(),
+                cfg.tools.exec.permissions.default_level,
+            ),
+        ))
     } else {
         None
     };
 
-    let heartbeat_cron_ctx: super::helpers::HeartbeatCronContext =
-        Some((std::sync::Arc::clone(&shared_config), Some(config::config_path())));
+    let heartbeat_cron_ctx: super::helpers::HeartbeatCronContext = Some((
+        std::sync::Arc::clone(&shared_config),
+        Some(config::config_path()),
+    ));
 
     // Optional sandbox: create and start app/tool sandboxes when configured.
     let sandbox_context = init_sandbox_if_configured(&cfg).await;
@@ -149,7 +160,8 @@ pub async fn cmd_start() -> Result<()> {
     let tool_sandbox_exec_kind = tool_sandbox_delegate.as_ref().map(|d| d.exec_kind());
 
     // Shared session state (in-memory + persistence); load before agent loop and tools
-    let session_store = crate::agent::session::SessionStore::new(crate::config::sessions_root().as_path());
+    let session_store =
+        crate::agent::session::SessionStore::new(crate::config::sessions_root().as_path());
     let shared_session_state = crate::agent::session_state::SharedSessionState::new(session_store);
     if let Err(e) = shared_session_state.load_persisted_sessions().await {
         tracing::warn!(error = %e, "Failed to load persisted sessions");
@@ -180,7 +192,8 @@ pub async fn cmd_start() -> Result<()> {
     if let Err(e) = std::fs::create_dir_all(&skills_dir) {
         tracing::warn!(path = %skills_dir.display(), error = %e, "Could not create skills dir");
     }
-    let mut skills_composite = crate::agent::skills::CompositeSkillProvider::default_with_fs(&skills_dir);
+    let mut skills_composite =
+        crate::agent::skills::CompositeSkillProvider::default_with_fs(&skills_dir);
 
     crate::plugin::load_extism_plugins(
         &cfg,
@@ -209,12 +222,8 @@ pub async fn cmd_start() -> Result<()> {
             provider_name,
         );
     }
-    let completion_model = build_rig_completion_model(
-        &provider_name,
-        &model,
-        &api_key,
-        api_base.as_deref(),
-    )?;
+    let completion_model =
+        build_rig_completion_model(&provider_name, &model, &api_key, api_base.as_deref())?;
 
     let tools = std::sync::Arc::new(tool_reg);
 
@@ -240,12 +249,9 @@ pub async fn cmd_start() -> Result<()> {
     let role_registry = std::sync::Arc::new(role_registry);
 
     let mut agent_registry = crate::agent::agent_registry::AgentRegistry::new();
-    if let Err(e) = agent_registry.load_from_config(
-        &cfg.main_agent,
-        &cfg.providers,
-        &role_registry,
-        &ws,
-    ) {
+    if let Err(e) =
+        agent_registry.load_from_config(&cfg.main_agent, &cfg.providers, &role_registry, &ws)
+    {
         tracing::warn!(error = %e, "Failed to load agent registry from config");
     }
     let agent_registry = std::sync::Arc::new(agent_registry);
@@ -267,13 +273,21 @@ pub async fn cmd_start() -> Result<()> {
     ));
 
     // Start agent loop (Arc<Mutex<>> so /stop or /cancel can cancel a running agent task)
-    let agent_loop = crate::agent::r#loop::AgentLoop::new(
+    // The event bus is shared with the web layer so `/ws/agent` can stream what the agent does.
+    let agent_events = crate::agent::events::EventBus::new();
+    // The team panel (`/api/subagents`) and the tools read and write one shared pool.
+    {
+        let mut mgr = subagent_mgr.lock().await;
+        mgr.set_events(std::sync::Arc::clone(&agent_events));
+    }
+    let mut agent_loop = crate::agent::r#loop::AgentLoop::new(
         std::sync::Arc::clone(&completion_model),
         ws.clone(),
         std::sync::Arc::clone(&skills_loader),
         tools,
         cfg.main_agent.max_tool_iterations,
         bus.outbound_tx_clone(),
+        std::sync::Arc::clone(&agent_events),
         &cfg,
         shared_session_state.clone(),
         std::sync::Arc::clone(&agent_registry),
@@ -282,6 +296,13 @@ pub async fn cmd_start() -> Result<()> {
         std::sync::Arc::clone(&shared_config),
     )
     .await;
+    // Directive routing and the team tools share one subagent pool.
+    agent_loop.set_subagent_manager(std::sync::Arc::clone(&subagent_mgr));
+    // One registry shared by the agent loop and `/api/projects`: opening a folder in the UI and
+    // the workspace used by the next turn are the same state.
+    let projects = agent_loop.projects();
+    // Turn snapshots, so `/api/checkpoints` sees exactly what the loop wrote.
+    let checkpoints = agent_loop.checkpoints();
     let loop_ref = std::sync::Arc::new(tokio::sync::Mutex::new(agent_loop));
     let runtime_status_for_agent = std::sync::Arc::clone(&runtime_status);
     tokio::spawn(async move {
@@ -396,9 +417,12 @@ pub async fn cmd_start() -> Result<()> {
         #[cfg(target_os = "windows")]
         if std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some() && web_config.host == "127.0.0.1" {
             web_config.host = "0.0.0.0".to_string();
-            info!("AppContainer: web server binding overridden to 0.0.0.0:{}", web_config.port);
+            info!(
+                "AppContainer: web server binding overridden to 0.0.0.0:{}",
+                web_config.port
+            );
         }
-        let web_state = crate::web::AppState::new(
+        let mut web_state = crate::web::AppState::new(
             std::sync::Arc::clone(&shared_config),
             config::config_path(),
             shared_session_state.session_manager.clone(),
@@ -407,11 +431,16 @@ pub async fn cmd_start() -> Result<()> {
             skills_loader,
             inbound_tx.clone(),
             bus.outbound_tx_clone(),
+            std::sync::Arc::clone(&agent_events),
             log_buffer,
             approval_manager,
             permission_policy,
             std::sync::Arc::clone(&runtime_status),
+            projects,
+            checkpoints,
         );
+        // The workbench team panel supervises the same pool the tools spawn into.
+        web_state.subagents = std::sync::Arc::clone(&subagent_mgr);
 
         // Run web server in the main task (it will block until Ctrl+C)
         tokio::select! {
@@ -487,30 +516,29 @@ pub(crate) async fn init_sandbox_if_configured(
     let workspace_path = config::workspace_path(cfg);
     let skills_dir = config::skills_dir();
     if let Some(ref tool_cfg) = cfg.tool_sandbox {
-        match config::build_tool_sandbox_config(tool_cfg, monitoring, &workspace_path, &skills_dir) {
-            Ok(sandbox_config) => {
-                match manager.create_tool_sandbox(sandbox_config).await {
-                    Ok(id) => {
-                        if let Err(e) = manager.start_sandbox(&id).await {
-                            warn!(sandbox_id = %id, error = %e, "Tool sandbox start failed (exec will be blocked in Safe mode)");
-                        } else {
-                            info!(sandbox_id = %id, "Tool sandbox started (exec runs in sandbox)");
-                            let kind = config::tool_sandbox_exec_kind(tool_cfg);
-                            return Some((manager, Some(id), kind));
-                        }
-                    }
-                    Err(e) => {
-                        let requested = tool_cfg.sandbox_type.as_deref().unwrap_or("gvisor-docker");
-                        warn!(
-                            error = %e,
-                            requested_type = %requested,
-                            "Tool sandbox creation failed (exec will be blocked in Safe mode; other profiles may run on host). \
-                             If you accept a less isolated backend, set toolSandbox.sandboxType in config \
-                             (e.g. \"plain-docker\" when gVisor is not available) and restart."
-                        );
+        match config::build_tool_sandbox_config(tool_cfg, monitoring, &workspace_path, &skills_dir)
+        {
+            Ok(sandbox_config) => match manager.create_tool_sandbox(sandbox_config).await {
+                Ok(id) => {
+                    if let Err(e) = manager.start_sandbox(&id).await {
+                        warn!(sandbox_id = %id, error = %e, "Tool sandbox start failed (exec will be blocked in Safe mode)");
+                    } else {
+                        info!(sandbox_id = %id, "Tool sandbox started (exec runs in sandbox)");
+                        let kind = config::tool_sandbox_exec_kind(tool_cfg);
+                        return Some((manager, Some(id), kind));
                     }
                 }
-            }
+                Err(e) => {
+                    let requested = tool_cfg.sandbox_type.as_deref().unwrap_or("gvisor-docker");
+                    warn!(
+                        error = %e,
+                        requested_type = %requested,
+                        "Tool sandbox creation failed (exec will be blocked in Safe mode; other profiles may run on host). \
+                         If you accept a less isolated backend, set toolSandbox.sandboxType in config \
+                         (e.g. \"plain-docker\" when gVisor is not available) and restart."
+                    );
+                }
+            },
             Err(e) => warn!(error = %e, "Tool sandbox config invalid"),
         }
     }

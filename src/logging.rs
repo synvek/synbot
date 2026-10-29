@@ -4,11 +4,11 @@ use anyhow::Result;
 use std::io::{self, Write};
 use std::sync::Arc;
 use tracing::field::Visit;
-use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use tracing_subscriber::fmt::time::{ChronoLocal, ChronoUtc, FormatTime};
 use tracing_subscriber::Layer;
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
-use crate::config::{Config, log_dir_path};
+use crate::config::{log_dir_path, Config};
 use crate::security::SecretMaskerLayer;
 
 /// Optional sender to push log entries to the in-memory buffer for the web UI.
@@ -128,26 +128,25 @@ pub fn init_logging(cfg: &Config, buffer_tx: LogBufferTx) -> Result<()> {
 
     // Parse log level
     let level = parse_log_level(&cfg.log.level)?;
-    
+
     // Create log directory
     let log_dir = log_dir_path(cfg);
     std::fs::create_dir_all(&log_dir)?;
-    
+
     // Build env filter with module-specific levels
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| {
-            let mut filter_str = format!("synbot={},open_lark={}", level, level);
-            
-            // Add module-specific levels
-            for (module, module_level) in &cfg.log.module_levels {
-                if let Ok(parsed_level) = parse_log_level(module_level) {
-                    filter_str.push_str(&format!(",{}={}", module, parsed_level));
-                }
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        let mut filter_str = format!("synbot={},open_lark={}", level, level);
+
+        // Add module-specific levels
+        for (module, module_level) in &cfg.log.module_levels {
+            if let Ok(parsed_level) = parse_log_level(module_level) {
+                filter_str.push_str(&format!(",{}={}", module, parsed_level));
             }
-            
-            EnvFilter::new(filter_str)
-        });
-    
+        }
+
+        EnvFilter::new(filter_str)
+    });
+
     // File name: synbot.yyyy-MM-dd.log or synbot.yyyy-MM-dd.json (date in the middle, suffix at the end)
     let log_file_suffix = match cfg.log.format.to_lowercase().as_str() {
         "json" => "json",
@@ -160,29 +159,57 @@ pub fn init_logging(cfg: &Config, buffer_tx: LogBufferTx) -> Result<()> {
         .build(&log_dir)
         .map_err(|e| anyhow::anyhow!("Failed to create rolling file appender: {}", e))?;
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-    
+
     // Determine timestamp format
     let timestamp_format = cfg.log.timestamp_format.to_lowercase();
-    
+
     // Determine format and configure layers
     match cfg.log.format.to_lowercase().as_str() {
         "json" => {
-            init_json_logging(cfg, env_filter, non_blocking, &timestamp_format, buffer_tx, masker)?;
+            init_json_logging(
+                cfg,
+                env_filter,
+                non_blocking,
+                &timestamp_format,
+                buffer_tx,
+                masker,
+            )?;
         }
         "compact" => {
-            init_compact_logging(cfg, env_filter, non_blocking, &timestamp_format, buffer_tx, masker)?;
+            init_compact_logging(
+                cfg,
+                env_filter,
+                non_blocking,
+                &timestamp_format,
+                buffer_tx,
+                masker,
+            )?;
         }
         "pretty" => {
-            init_pretty_logging(cfg, env_filter, non_blocking, &timestamp_format, buffer_tx, masker)?;
+            init_pretty_logging(
+                cfg,
+                env_filter,
+                non_blocking,
+                &timestamp_format,
+                buffer_tx,
+                masker,
+            )?;
         }
         _ => {
-            init_text_logging(cfg, env_filter, non_blocking, &timestamp_format, buffer_tx, masker)?;
+            init_text_logging(
+                cfg,
+                env_filter,
+                non_blocking,
+                &timestamp_format,
+                buffer_tx,
+                masker,
+            )?;
         }
     }
-    
+
     // Store guard to prevent it from being dropped
     std::mem::forget(_guard);
-    
+
     tracing::info!(
         level = %cfg.log.level,
         format = %cfg.log.format,
@@ -190,7 +217,7 @@ pub fn init_logging(cfg: &Config, buffer_tx: LogBufferTx) -> Result<()> {
         dir = %log_dir.display(),
         "Logging initialized"
     );
-    
+
     Ok(())
 }
 
@@ -252,16 +279,28 @@ pub fn init_stderr_logging(cfg: &Config) -> Result<()> {
     Ok(())
 }
 
-fn create_timer(timestamp_format: &str, custom_format: &Option<String>) -> Result<Box<dyn FormatTime + Send + Sync>> {
+fn create_timer(
+    timestamp_format: &str,
+    custom_format: &Option<String>,
+) -> Result<Box<dyn FormatTime + Send + Sync>> {
     match timestamp_format {
         "rfc3339" => Ok(Box::new(ChronoUtc::rfc_3339())),
-        "utc" => Ok(Box::new(ChronoUtc::new("%Y-%m-%d %H:%M:%S%.3f".to_string()))),
+        "utc" => Ok(Box::new(ChronoUtc::new(
+            "%Y-%m-%d %H:%M:%S%.3f".to_string(),
+        ))),
         "custom" => {
-            let format_str = custom_format.as_ref()
-                .ok_or_else(|| anyhow::anyhow!("custom_timestamp_format is required when timestamp_format is 'custom'"))?;
-            Ok(Box::new(CustomTimeFormat { format: format_str.clone() }))
+            let format_str = custom_format.as_ref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "custom_timestamp_format is required when timestamp_format is 'custom'"
+                )
+            })?;
+            Ok(Box::new(CustomTimeFormat {
+                format: format_str.clone(),
+            }))
         }
-        _ => Ok(Box::new(ChronoLocal::new("%Y-%m-%d %H:%M:%S%.3f".to_string()))), // "local" or default
+        _ => Ok(Box::new(ChronoLocal::new(
+            "%Y-%m-%d %H:%M:%S%.3f".to_string(),
+        ))), // "local" or default
     }
 }
 
@@ -286,7 +325,7 @@ fn init_json_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
+
             let stdout_layer = fmt::layer()
                 .json()
                 .with_writer(move || MaskingWriter::new(io::stdout(), masker2.clone()))
@@ -297,7 +336,7 @@ fn init_json_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
+
             tracing_subscriber::registry()
                 .with(env_filter)
                 .with(LogBufferLayer::new(buffer_tx))
@@ -317,7 +356,7 @@ fn init_json_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
+
             let stdout_layer = fmt::layer()
                 .json()
                 .with_writer(move || MaskingWriter::new(io::stdout(), masker2.clone()))
@@ -328,7 +367,7 @@ fn init_json_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
+
             tracing_subscriber::registry()
                 .with(env_filter)
                 .with(LogBufferLayer::new(buffer_tx.clone()))
@@ -337,10 +376,15 @@ fn init_json_logging(
                 .init();
         }
         "custom" => {
-            let format_str = cfg.log.custom_timestamp_format.as_ref()
-                .ok_or_else(|| anyhow::anyhow!("custom_timestamp_format is required when timestamp_format is 'custom'"))?;
-            
-            let custom_timer = CustomTimeFormat { format: format_str.clone() };
+            let format_str = cfg.log.custom_timestamp_format.as_ref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "custom_timestamp_format is required when timestamp_format is 'custom'"
+                )
+            })?;
+
+            let custom_timer = CustomTimeFormat {
+                format: format_str.clone(),
+            };
             let masker2 = masker.clone();
             let file_layer = fmt::layer()
                 .json()
@@ -352,8 +396,10 @@ fn init_json_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
-            let custom_timer2 = CustomTimeFormat { format: format_str.clone() };
+
+            let custom_timer2 = CustomTimeFormat {
+                format: format_str.clone(),
+            };
             let stdout_layer = fmt::layer()
                 .json()
                 .with_writer(move || MaskingWriter::new(io::stdout(), masker2.clone()))
@@ -364,7 +410,7 @@ fn init_json_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
+
             tracing_subscriber::registry()
                 .with(env_filter)
                 .with(LogBufferLayer::new(buffer_tx.clone()))
@@ -372,7 +418,8 @@ fn init_json_logging(
                 .with(stdout_layer)
                 .init();
         }
-        _ => { // "local" or default
+        _ => {
+            // "local" or default
             let masker2 = masker.clone();
             let file_layer = fmt::layer()
                 .json()
@@ -384,7 +431,7 @@ fn init_json_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
+
             let stdout_layer = fmt::layer()
                 .json()
                 .with_writer(move || MaskingWriter::new(io::stdout(), masker2.clone()))
@@ -395,7 +442,7 @@ fn init_json_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
+
             tracing_subscriber::registry()
                 .with(env_filter)
                 .with(LogBufferLayer::new(buffer_tx.clone()))
@@ -404,7 +451,7 @@ fn init_json_logging(
                 .init();
         }
     }
-    
+
     Ok(())
 }
 
@@ -430,7 +477,7 @@ fn init_compact_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
+
             let stdout_layer = fmt::layer()
                 .compact()
                 .with_writer(move || MaskingWriter::new(io::stdout(), masker2.clone()))
@@ -441,7 +488,7 @@ fn init_compact_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
+
             tracing_subscriber::registry()
                 .with(env_filter)
                 .with(LogBufferLayer::new(buffer_tx.clone()))
@@ -462,7 +509,7 @@ fn init_compact_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
+
             let stdout_layer = fmt::layer()
                 .compact()
                 .with_writer(move || MaskingWriter::new(io::stdout(), masker2.clone()))
@@ -473,7 +520,7 @@ fn init_compact_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
+
             tracing_subscriber::registry()
                 .with(env_filter)
                 .with(LogBufferLayer::new(buffer_tx.clone()))
@@ -482,10 +529,15 @@ fn init_compact_logging(
                 .init();
         }
         "custom" => {
-            let format_str = cfg.log.custom_timestamp_format.as_ref()
-                .ok_or_else(|| anyhow::anyhow!("custom_timestamp_format is required when timestamp_format is 'custom'"))?;
-            
-            let custom_timer = CustomTimeFormat { format: format_str.clone() };
+            let format_str = cfg.log.custom_timestamp_format.as_ref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "custom_timestamp_format is required when timestamp_format is 'custom'"
+                )
+            })?;
+
+            let custom_timer = CustomTimeFormat {
+                format: format_str.clone(),
+            };
             let masker2 = masker.clone();
             let file_layer = fmt::layer()
                 .compact()
@@ -498,8 +550,10 @@ fn init_compact_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
-            let custom_timer2 = CustomTimeFormat { format: format_str.clone() };
+
+            let custom_timer2 = CustomTimeFormat {
+                format: format_str.clone(),
+            };
             let stdout_layer = fmt::layer()
                 .compact()
                 .with_writer(move || MaskingWriter::new(io::stdout(), masker2.clone()))
@@ -510,7 +564,7 @@ fn init_compact_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
+
             tracing_subscriber::registry()
                 .with(env_filter)
                 .with(LogBufferLayer::new(buffer_tx.clone()))
@@ -518,7 +572,8 @@ fn init_compact_logging(
                 .with(stdout_layer)
                 .init();
         }
-        _ => { // "local" or default
+        _ => {
+            // "local" or default
             let masker2 = masker.clone();
             let file_layer = fmt::layer()
                 .compact()
@@ -531,7 +586,7 @@ fn init_compact_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
+
             let stdout_layer = fmt::layer()
                 .compact()
                 .with_writer(move || MaskingWriter::new(io::stdout(), masker2.clone()))
@@ -542,7 +597,7 @@ fn init_compact_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
+
             tracing_subscriber::registry()
                 .with(env_filter)
                 .with(LogBufferLayer::new(buffer_tx.clone()))
@@ -551,7 +606,7 @@ fn init_compact_logging(
                 .init();
         }
     }
-    
+
     Ok(())
 }
 
@@ -576,7 +631,7 @@ fn init_pretty_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
+
             let stdout_layer = fmt::layer()
                 .pretty()
                 .with_writer(move || MaskingWriter::new(io::stdout(), masker2.clone()))
@@ -587,7 +642,7 @@ fn init_pretty_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
+
             tracing_subscriber::registry()
                 .with(env_filter)
                 .with(LogBufferLayer::new(buffer_tx.clone()))
@@ -607,7 +662,7 @@ fn init_pretty_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
+
             let stdout_layer = fmt::layer()
                 .pretty()
                 .with_writer(move || MaskingWriter::new(io::stdout(), masker2.clone()))
@@ -618,7 +673,7 @@ fn init_pretty_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
+
             tracing_subscriber::registry()
                 .with(env_filter)
                 .with(LogBufferLayer::new(buffer_tx.clone()))
@@ -627,10 +682,15 @@ fn init_pretty_logging(
                 .init();
         }
         "custom" => {
-            let format_str = cfg.log.custom_timestamp_format.as_ref()
-                .ok_or_else(|| anyhow::anyhow!("custom_timestamp_format is required when timestamp_format is 'custom'"))?;
-            
-            let custom_timer = CustomTimeFormat { format: format_str.clone() };
+            let format_str = cfg.log.custom_timestamp_format.as_ref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "custom_timestamp_format is required when timestamp_format is 'custom'"
+                )
+            })?;
+
+            let custom_timer = CustomTimeFormat {
+                format: format_str.clone(),
+            };
             let masker2 = masker.clone();
             let file_layer = fmt::layer()
                 .with_writer(move || MaskingWriter::new(non_blocking.clone(), masker.clone()))
@@ -642,8 +702,10 @@ fn init_pretty_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
-            let custom_timer2 = CustomTimeFormat { format: format_str.clone() };
+
+            let custom_timer2 = CustomTimeFormat {
+                format: format_str.clone(),
+            };
             let stdout_layer = fmt::layer()
                 .pretty()
                 .with_writer(move || MaskingWriter::new(io::stdout(), masker2.clone()))
@@ -654,7 +716,7 @@ fn init_pretty_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
+
             tracing_subscriber::registry()
                 .with(env_filter)
                 .with(LogBufferLayer::new(buffer_tx.clone()))
@@ -662,7 +724,8 @@ fn init_pretty_logging(
                 .with(stdout_layer)
                 .init();
         }
-        _ => { // "local" or default
+        _ => {
+            // "local" or default
             let masker2 = masker.clone();
             let file_layer = fmt::layer()
                 .with_writer(move || MaskingWriter::new(non_blocking.clone(), masker.clone()))
@@ -674,7 +737,7 @@ fn init_pretty_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
+
             let stdout_layer = fmt::layer()
                 .pretty()
                 .with_writer(move || MaskingWriter::new(io::stdout(), masker2.clone()))
@@ -685,7 +748,7 @@ fn init_pretty_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
+
             tracing_subscriber::registry()
                 .with(env_filter)
                 .with(LogBufferLayer::new(buffer_tx.clone()))
@@ -694,7 +757,7 @@ fn init_pretty_logging(
                 .init();
         }
     }
-    
+
     Ok(())
 }
 
@@ -719,7 +782,7 @@ fn init_text_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
+
             let stdout_layer = fmt::layer()
                 .with_writer(move || MaskingWriter::new(io::stdout(), masker2.clone()))
                 .with_timer(ChronoUtc::rfc_3339())
@@ -729,7 +792,7 @@ fn init_text_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
+
             tracing_subscriber::registry()
                 .with(env_filter)
                 .with(LogBufferLayer::new(buffer_tx.clone()))
@@ -749,7 +812,7 @@ fn init_text_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
+
             let stdout_layer = fmt::layer()
                 .with_writer(move || MaskingWriter::new(io::stdout(), masker2.clone()))
                 .with_timer(ChronoUtc::new("%Y-%m-%d %H:%M:%S%.3f".to_string()))
@@ -759,7 +822,7 @@ fn init_text_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
+
             tracing_subscriber::registry()
                 .with(env_filter)
                 .with(LogBufferLayer::new(buffer_tx.clone()))
@@ -768,10 +831,15 @@ fn init_text_logging(
                 .init();
         }
         "custom" => {
-            let format_str = cfg.log.custom_timestamp_format.as_ref()
-                .ok_or_else(|| anyhow::anyhow!("custom_timestamp_format is required when timestamp_format is 'custom'"))?;
-            
-            let custom_timer = CustomTimeFormat { format: format_str.clone() };
+            let format_str = cfg.log.custom_timestamp_format.as_ref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "custom_timestamp_format is required when timestamp_format is 'custom'"
+                )
+            })?;
+
+            let custom_timer = CustomTimeFormat {
+                format: format_str.clone(),
+            };
             let masker2 = masker.clone();
             let file_layer = fmt::layer()
                 .with_writer(move || MaskingWriter::new(non_blocking.clone(), masker.clone()))
@@ -783,8 +851,10 @@ fn init_text_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
-            let custom_timer2 = CustomTimeFormat { format: format_str.clone() };
+
+            let custom_timer2 = CustomTimeFormat {
+                format: format_str.clone(),
+            };
             let stdout_layer = fmt::layer()
                 .with_writer(move || MaskingWriter::new(io::stdout(), masker2.clone()))
                 .with_timer(custom_timer2)
@@ -794,7 +864,7 @@ fn init_text_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
+
             tracing_subscriber::registry()
                 .with(env_filter)
                 .with(LogBufferLayer::new(buffer_tx.clone()))
@@ -802,7 +872,8 @@ fn init_text_logging(
                 .with(stdout_layer)
                 .init();
         }
-        _ => { // "local" or default
+        _ => {
+            // "local" or default
             let masker2 = masker.clone();
             let file_layer = fmt::layer()
                 .with_writer(move || MaskingWriter::new(non_blocking.clone(), masker.clone()))
@@ -814,7 +885,7 @@ fn init_text_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
+
             let stdout_layer = fmt::layer()
                 .with_writer(move || MaskingWriter::new(io::stdout(), masker2.clone()))
                 .with_timer(ChronoLocal::new("%Y-%m-%d %H:%M:%S%.3f".to_string()))
@@ -824,7 +895,7 @@ fn init_text_logging(
                 .with_thread_ids(cfg.log.show_thread_ids)
                 .with_file(cfg.log.show_file)
                 .with_line_number(cfg.log.show_file);
-            
+
             tracing_subscriber::registry()
                 .with(env_filter)
                 .with(LogBufferLayer::new(buffer_tx.clone()))
@@ -833,7 +904,7 @@ fn init_text_logging(
                 .init();
         }
     }
-    
+
     Ok(())
 }
 

@@ -27,4 +27,3 @@ pub mod rfc3339_local {
         Ok(parsed.with_timezone(&Utc))
     }
 }
-

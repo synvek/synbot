@@ -125,15 +125,13 @@ const IGNORED_DIRS: &[&str] = &[
 ];
 
 /// Source file extensions eligible for symbol extraction.
-const SOURCE_EXTENSIONS: &[&str] = &[
-    "rs", "py", "js", "ts", "go", "java", "cpp", "c", "h",
-];
+const SOURCE_EXTENSIONS: &[&str] = &["rs", "py", "js", "ts", "go", "java", "cpp", "c", "h"];
 
 /// File type priority for truncation (lower index = higher priority).
 /// Source code files are kept over non-source files.
 const PRIORITY_EXTENSIONS: &[&str] = &[
-    "rs", "py", "js", "ts", "go", "java", "cpp", "c", "h",
-    "toml", "json", "yaml", "yml", "xml", "md", "txt",
+    "rs", "py", "js", "ts", "go", "java", "cpp", "c", "h", "toml", "json", "yaml", "yml", "xml",
+    "md", "txt",
 ];
 
 /// Returns the priority of a file extension (lower = higher priority).
@@ -218,7 +216,10 @@ fn extract_symbols(file_path: &str, content: &str) -> Vec<SymbolInfo> {
 
     for (line_idx, line) in content.lines().enumerate() {
         let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with("//") || (trimmed.starts_with('#') && ext != "c" && ext != "cpp" && ext != "h") {
+        if trimmed.is_empty()
+            || trimmed.starts_with("//")
+            || (trimmed.starts_with('#') && ext != "c" && ext != "cpp" && ext != "h")
+        {
             continue;
         }
 
@@ -449,12 +450,20 @@ pub fn scan_project(
     max_file_size: u64,
     max_scan_files: usize,
 ) -> anyhow::Result<String> {
-    let workspace = workspace.canonicalize().unwrap_or_else(|_| workspace.to_path_buf());
+    let workspace = workspace
+        .canonicalize()
+        .unwrap_or_else(|_| workspace.to_path_buf());
 
     // 1. Collect all files recursively
     let mut all_files: Vec<(String, u64)> = Vec::new();
     let mut skipped_large_files: usize = 0;
-    collect_files(&workspace, &workspace, max_file_size, &mut all_files, &mut skipped_large_files);
+    collect_files(
+        &workspace,
+        &workspace,
+        max_file_size,
+        &mut all_files,
+        &mut skipped_large_files,
+    );
 
     let total_files = all_files.len() + skipped_large_files;
 
@@ -729,8 +738,7 @@ pub fn search_context(
 
             if kw_match_count > 0 {
                 // Content match: base 0.5, boost for multiple keywords
-                let relevance =
-                    0.5 + 0.1 * (kw_match_count as f32 - 1.0).max(0.0);
+                let relevance = 0.5 + 0.1 * (kw_match_count as f32 - 1.0).max(0.0);
                 raw_matches.push(RawMatch {
                     line_idx,
                     relevance,
@@ -742,8 +750,7 @@ pub fn search_context(
         if filename_matches && raw_matches.is_empty() {
             let end = context_lines.min(total_lines.saturating_sub(1));
             let snippet_lines = &lines[0..=end];
-            let relevance =
-                0.8 + 0.1 * (filename_keyword_matches as f32 - 1.0).max(0.0);
+            let relevance = 0.8 + 0.1 * (filename_keyword_matches as f32 - 1.0).max(0.0);
             all_snippets.push(CodeSnippet {
                 file: rel_path.clone(),
                 start_line: 1,
@@ -864,7 +871,6 @@ pub fn search_context(
     serde_json::to_string(&ctx).map_err(|e| anyhow::anyhow!("Failed to serialize: {}", e))
 }
 
-
 // ---- CodeAnalyzerTool (DynTool) ----
 
 /// Tool registered as `analyze_code` that dispatches to `scan_project` or `search_context`.
@@ -879,6 +885,10 @@ pub struct CodeAnalyzerTool {
 impl DynTool for CodeAnalyzerTool {
     fn name(&self) -> &str {
         "analyze_code"
+    }
+
+    fn read_only(&self) -> bool {
+        true
     }
 
     fn description(&self) -> &str {
@@ -913,21 +923,23 @@ impl DynTool for CodeAnalyzerTool {
 
     async fn call(&self, args: Value) -> anyhow::Result<String> {
         // Determine effective workspace from tool context (agent scope) or fallback
-        let effective_workspace = context::current_allowed_roots()
-            .unwrap_or_else(|| self.workspace.clone());
+        let effective_workspace =
+            context::current_allowed_roots().unwrap_or_else(|| self.workspace.clone());
 
         let action = args["action"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("'action' is required and must be a string"))?;
 
         match action {
-            "scan_project" => {
-                scan_project(&effective_workspace, self.max_file_size, self.max_scan_files)
-            }
+            "scan_project" => scan_project(
+                &effective_workspace,
+                self.max_file_size,
+                self.max_scan_files,
+            ),
             "search_context" => {
-                let query = args["query"]
-                    .as_str()
-                    .ok_or_else(|| anyhow::anyhow!("'query' is required for search_context action"))?;
+                let query = args["query"].as_str().ok_or_else(|| {
+                    anyhow::anyhow!("'query' is required for search_context action")
+                })?;
                 let max_results = args["max_results"].as_u64().unwrap_or(20) as usize;
                 let context_lines = args["context_lines"].as_u64().unwrap_or(5) as usize;
 

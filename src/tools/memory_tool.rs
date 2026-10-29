@@ -21,7 +21,10 @@ pub struct RememberTool {
 
 impl RememberTool {
     #[cfg(feature = "memory-index")]
-    pub fn new(agent_id: impl Into<String>, shared_config: Arc<tokio::sync::RwLock<config::Config>>) -> Self {
+    pub fn new(
+        agent_id: impl Into<String>,
+        shared_config: Arc<tokio::sync::RwLock<config::Config>>,
+    ) -> Self {
         Self {
             agent_id: agent_id.into(),
             shared_config,
@@ -96,7 +99,10 @@ impl DynTool for RememberTool {
         let agent_id = context::current_agent_id().unwrap_or_else(|| self.agent_id.clone());
         let content = args["content"].as_str().unwrap_or("").trim();
         if content.is_empty() {
-            return Ok("No content to remember. Please provide 'content' with the fact to save.".to_string());
+            return Ok(
+                "No content to remember. Please provide 'content' with the fact to save."
+                    .to_string(),
+            );
         }
         let daily = args["daily"].as_bool().unwrap_or(false);
         if daily {
@@ -123,9 +129,7 @@ impl DynTool for RememberTool {
 #[cfg(feature = "memory-index")]
 async fn trigger_reindex_if_needed(agent_id: &str, cfg: &config::Config) {
     if cfg.memory.auto_index {
-        if let Err(e) =
-            crate::agent::memory_index::reindex_if_changed_async(agent_id, cfg).await
-        {
+        if let Err(e) = crate::agent::memory_index::reindex_if_changed_async(agent_id, cfg).await {
             tracing::warn!(error = %e, agent_id = %agent_id, "memory reindex after remember failed");
         }
     }
@@ -182,9 +186,7 @@ impl DynTool for ListMemoryTool {
             let mut entries: Vec<_> = std::fs::read_dir(&notes_dir)
                 .map_err(|e| anyhow::anyhow!("read memory dir: {}", e))?
                 .filter_map(|e| e.ok())
-                .filter(|e| {
-                    e.path().extension().map_or(false, |x| x == "md")
-                })
+                .filter(|e| e.path().extension().map_or(false, |x| x == "md"))
                 .collect();
             entries.sort_by_key(|e| e.file_name());
             for e in entries {
@@ -193,9 +195,16 @@ impl DynTool for ListMemoryTool {
             }
         }
         if lines.is_empty() {
-            Ok(format!("Memory dir: {}. No MEMORY.md or memory/*.md yet.", dir.display()))
+            Ok(format!(
+                "Memory dir: {}. No MEMORY.md or memory/*.md yet.",
+                dir.display()
+            ))
         } else {
-            Ok(format!("Memory dir: {}\n\n{}", dir.display(), lines.join("\n")))
+            Ok(format!(
+                "Memory dir: {}\n\n{}",
+                dir.display(),
+                lines.join("\n")
+            ))
         }
     }
 }
@@ -213,7 +222,10 @@ pub struct SearchMemoryTool {
 
 #[cfg(feature = "memory-index")]
 impl SearchMemoryTool {
-    pub fn new(agent_id: impl Into<String>, config: Arc<tokio::sync::RwLock<config::Config>>) -> Self {
+    pub fn new(
+        agent_id: impl Into<String>,
+        config: Arc<tokio::sync::RwLock<config::Config>>,
+    ) -> Self {
         Self {
             agent_id: agent_id.into(),
             config,
@@ -261,7 +273,10 @@ impl DynTool for SearchMemoryTool {
         let lines: Vec<String> = hits
             .into_iter()
             .map(|c| {
-                let score = c.score.map(|s| format!(" (score {:.3})", s)).unwrap_or_default();
+                let score = c
+                    .score
+                    .map(|s| format!(" (score {:.3})", s))
+                    .unwrap_or_default();
                 format!("- [{}]{} {}", c.source, score, c.content)
             })
             .collect();

@@ -1,8 +1,8 @@
+use crate::web::state::AppState;
 use actix_web::{error::ResponseError, http::StatusCode, web, HttpResponse, Result};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use crate::web::state::AppState;
-use chrono::{DateTime, Utc};
 
 /// Standard API response wrapper
 #[derive(Serialize)]
@@ -202,10 +202,10 @@ pub async fn get_sessions(
     query: web::Query<SessionQuery>,
 ) -> Result<HttpResponse> {
     let sm = state.session_manager.read().await;
-    
+
     // Get all sessions from SessionManager
     let all_sessions = sm.get_all_sessions();
-    
+
     // Convert to SessionSummary and apply filters
     let filtered: Vec<SessionSummary> = all_sessions
         .into_iter()
@@ -216,7 +216,7 @@ pub async fn get_sessions(
                     return None;
                 }
             }
-            
+
             // Apply scope filter
             if let Some(ref scope_str) = query.scope {
                 let scope_match = match meta.id.scope.as_ref() {
@@ -234,19 +234,20 @@ pub async fn get_sessions(
                     return None;
                 }
             }
-            
+
             // Build SessionSummary
             let scope = match meta.id.scope.as_ref() {
                 Some(s) => match s {
                     crate::agent::session_id::SessionScope::Dm => "dm",
                     crate::agent::session_id::SessionScope::Group => "group",
                     crate::agent::session_id::SessionScope::Topic => "topic",
-                }.to_string(),
+                }
+                .to_string(),
                 None => String::new(),
             };
-            
+
             let identifier = meta.id.identifier.clone().unwrap_or_default();
-            
+
             Some(SessionSummary {
                 id: meta.id.format(),
                 channel: meta.id.channel.clone(),
@@ -258,25 +259,21 @@ pub async fn get_sessions(
             })
         })
         .collect();
-    
+
     let total = filtered.len();
     let page = query.page.max(1);
     let page_size = query.page_size.min(100).max(1);
     let start = (page - 1) * page_size;
-    
-    let items = filtered
-        .into_iter()
-        .skip(start)
-        .take(page_size)
-        .collect();
-    
+
+    let items = filtered.into_iter().skip(start).take(page_size).collect();
+
     let response = PaginatedResponse {
         items,
         total,
         page,
         page_size,
     };
-    
+
     Ok(HttpResponse::Ok().json(ApiResponse::success(response)))
 }
 
@@ -312,21 +309,23 @@ pub async fn get_session_by_id(
     path: web::Path<String>,
 ) -> Result<HttpResponse> {
     let session_id_str = path.into_inner();
-    
+
     // Parse the session ID
     let session_id = crate::agent::session_id::SessionId::parse(&session_id_str)
         .map_err(|e| ApiError::BadRequest(format!("Invalid session ID: {}", e)))?;
-    
+
     let sm = state.session_manager.read().await;
-    
+
     // Get session metadata
-    let meta = sm.get_meta(&session_id)
+    let meta = sm
+        .get_meta(&session_id)
         .ok_or_else(|| ApiError::NotFound(format!("Session not found: {}", session_id_str)))?;
-    
+
     // Get message history
-    let messages = sm.get_history(&session_id)
+    let messages = sm
+        .get_history(&session_id)
         .ok_or_else(|| ApiError::NotFound(format!("Session not found: {}", session_id_str)))?;
-    
+
     // Convert messages to DTOs
     let message_dtos: Vec<SessionMessageDto> = messages
         .iter()
@@ -336,19 +335,20 @@ pub async fn get_session_by_id(
             timestamp: msg.timestamp,
         })
         .collect();
-    
+
     // Build scope string
     let scope = match meta.id.scope.as_ref() {
         Some(s) => match s {
             crate::agent::session_id::SessionScope::Dm => "dm",
             crate::agent::session_id::SessionScope::Group => "group",
             crate::agent::session_id::SessionScope::Topic => "topic",
-        }.to_string(),
+        }
+        .to_string(),
         None => String::new(),
     };
-    
+
     let identifier = meta.id.identifier.clone().unwrap_or_default();
-    
+
     let meta_dto = SessionMetaDto {
         id: meta.id.format(),
         channel: meta.id.channel.clone(),
@@ -357,12 +357,12 @@ pub async fn get_session_by_id(
         created_at: meta.created_at,
         updated_at: meta.updated_at,
     };
-    
+
     let detail = SessionDetail {
         meta: meta_dto,
         messages: message_dtos,
     };
-    
+
     Ok(HttpResponse::Ok().json(ApiResponse::success(detail)))
 }
 
@@ -399,14 +399,14 @@ pub struct CronJobStateDto {
 /// GET /api/cron - Returns list of cron jobs
 pub async fn get_cron_jobs(state: web::Data<AppState>) -> Result<HttpResponse> {
     let cron = state.cron_service.read().await;
-    
+
     let jobs: Vec<CronJobInfo> = cron
         .list_jobs()
         .iter()
         .map(|job| {
             let schedule = serde_json::to_value(&job.schedule).unwrap_or(serde_json::Value::Null);
             let payload = serde_json::to_value(&job.payload).unwrap_or(serde_json::Value::Null);
-            
+
             CronJobInfo {
                 id: job.id.clone(),
                 name: job.name.clone(),
@@ -424,7 +424,7 @@ pub async fn get_cron_jobs(state: web::Data<AppState>) -> Result<HttpResponse> {
             }
         })
         .collect();
-    
+
     Ok(HttpResponse::Ok().json(ApiResponse::success(jobs)))
 }
 
@@ -441,27 +441,27 @@ pub async fn update_cron_job(
     body: web::Json<UpdateCronJobRequest>,
 ) -> Result<HttpResponse> {
     let job_id = path.into_inner();
-    
+
     let mut cron = state.cron_service.write().await;
-    
+
     let updated = cron
         .update_job_enabled(&job_id, body.enabled)
         .map_err(|e| ApiError::InternalError(format!("Failed to update job: {}", e)))?;
-    
+
     if !updated {
         return Err(ApiError::NotFound(format!("Cron job not found: {}", job_id)).into());
     }
-    
+
     // Get the updated job
     let job = cron
         .list_jobs()
         .iter()
         .find(|j| j.id == job_id)
         .ok_or_else(|| ApiError::NotFound(format!("Cron job not found: {}", job_id)))?;
-    
+
     let schedule = serde_json::to_value(&job.schedule).unwrap_or(serde_json::Value::Null);
     let payload = serde_json::to_value(&job.payload).unwrap_or(serde_json::Value::Null);
-    
+
     let job_info = CronJobInfo {
         id: job.id.clone(),
         name: job.name.clone(),
@@ -477,7 +477,7 @@ pub async fn update_cron_job(
         created_at_ms: job.created_at_ms,
         updated_at_ms: job.updated_at_ms,
     };
-    
+
     Ok(HttpResponse::Ok().json(ApiResponse::success(job_info)))
 }
 
@@ -494,6 +494,7 @@ pub struct AgentInfo {
     pub max_tokens: u32,
     pub temperature: f32,
     pub max_iterations: u32,
+    pub max_idle_iterations: u32,
     pub max_consecutive_tool_errors: u32,
     pub max_chat_history_messages: u32,
     pub workspace_dir: String,
@@ -517,6 +518,7 @@ pub async fn get_agents(state: web::Data<AppState>) -> Result<HttpResponse> {
                 max_tokens: ctx.params.max_tokens,
                 temperature: ctx.params.temperature,
                 max_iterations: ctx.params.max_iterations,
+                max_idle_iterations: ctx.params.max_idle_iterations,
                 max_consecutive_tool_errors: ctx.params.max_consecutive_tool_errors,
                 max_chat_history_messages: ctx.params.max_chat_history_messages,
                 workspace_dir: ctx.workspace_dir.to_string_lossy().to_string(),
@@ -632,9 +634,8 @@ pub async fn get_config(state: web::Data<AppState>) -> Result<HttpResponse> {
     use crate::web::handlers::config_redact::config_to_redacted_value;
 
     let cfg = state.config.read().await;
-    let config = config_to_redacted_value(&cfg).map_err(|e| {
-        ApiError::InternalError(format!("Failed to serialize config: {}", e))
-    })?;
+    let config = config_to_redacted_value(&cfg)
+        .map_err(|e| ApiError::InternalError(format!("Failed to serialize config: {}", e)))?;
 
     let payload = ConfigApiPayload {
         config,
@@ -656,33 +657,31 @@ pub async fn put_config(
     use crate::web::handlers::config_redact::merge_incoming_preserving_secrets;
 
     let old = state.config.read().await.clone();
-    let merged = merge_incoming_preserving_secrets(&old, body.into_inner()).map_err(|e| {
-        ApiError::BadRequest(format!("Invalid config JSON: {}", e))
-    })?;
+    let merged = merge_incoming_preserving_secrets(&old, body.into_inner())
+        .map_err(|e| ApiError::BadRequest(format!("Invalid config JSON: {}", e)))?;
 
     if let Err(errors) = validate_config(&merged) {
-        return Ok(
-            HttpResponse::BadRequest().json(serde_json::json!({
-                "success": false,
-                "error": "Config validation failed",
-                "data": { "validationErrors": errors }
-            })),
-        );
+        return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+            "success": false,
+            "error": "Config validation failed",
+            "data": { "validationErrors": errors }
+        })));
     }
 
-    save_config(&merged, Some(state.config_path.as_path())).map_err(|e| {
-        ApiError::InternalError(format!("Failed to write config file: {}", e))
-    })?;
+    save_config(&merged, Some(state.config_path.as_path()))
+        .map_err(|e| ApiError::InternalError(format!("Failed to write config file: {}", e)))?;
 
     {
         let mut w = state.config.write().await;
         *w = merged;
     }
 
-    Ok(HttpResponse::Ok().json(ApiResponse::success(PutConfigResponse {
-        config_path: state.config_path.display().to_string(),
-        restart_notice: CONFIG_RESTART_NOTICE,
-    })))
+    Ok(
+        HttpResponse::Ok().json(ApiResponse::success(PutConfigResponse {
+            config_path: state.config_path.display().to_string(),
+            restart_notice: CONFIG_RESTART_NOTICE,
+        })),
+    )
 }
 
 /// Query parameters for log filtering
@@ -702,31 +701,28 @@ pub async fn get_logs(
     query: web::Query<LogQuery>,
 ) -> Result<HttpResponse> {
     let log_buffer = state.log_buffer.read().await;
-    
+
     // Get filtered logs
-    let filtered_logs = log_buffer.get_filtered(
-        query.level.as_deref(),
-        query.keyword.as_deref(),
-    );
-    
+    let filtered_logs = log_buffer.get_filtered(query.level.as_deref(), query.keyword.as_deref());
+
     let total = filtered_logs.len();
     let page = query.page.max(1);
     let page_size = query.page_size.min(100).max(1);
     let start = (page - 1) * page_size;
-    
+
     let items = filtered_logs
         .into_iter()
         .skip(start)
         .take(page_size)
         .collect();
-    
+
     let response = PaginatedResponse {
         items,
         total,
         page,
         page_size,
     };
-    
+
     Ok(HttpResponse::Ok().json(ApiResponse::success(response)))
 }
 
@@ -765,10 +761,10 @@ pub async fn get_approval_history(
     query: web::Query<ApprovalHistoryQuery>,
 ) -> Result<HttpResponse> {
     use crate::tools::approval::ApprovalStatus;
-    
+
     // Get approval history from manager
     let history = state.approval_manager.get_history().await;
-    
+
     // Apply filters
     let filtered: Vec<ApprovalHistoryDto> = history
         .into_iter()
@@ -779,14 +775,14 @@ pub async fn get_approval_history(
                     return false;
                 }
             }
-            
+
             // Filter by channel
             if let Some(ref ch) = query.channel {
                 if &request.channel != ch {
                     return false;
                 }
             }
-            
+
             // Filter by status
             if let Some(ref st) = query.status {
                 let status_str = match status {
@@ -799,21 +795,25 @@ pub async fn get_approval_history(
                     return false;
                 }
             }
-            
+
             true
         })
         .map(|(request, status)| {
             let (status_str, responder, completed_at) = match status {
                 ApprovalStatus::Pending => ("pending".to_string(), None, None),
-                ApprovalStatus::Approved(response) => {
-                    ("approved".to_string(), Some(response.responder.clone()), Some(response.timestamp))
-                }
-                ApprovalStatus::Rejected(response) => {
-                    ("rejected".to_string(), Some(response.responder.clone()), Some(response.timestamp))
-                }
+                ApprovalStatus::Approved(response) => (
+                    "approved".to_string(),
+                    Some(response.responder.clone()),
+                    Some(response.timestamp),
+                ),
+                ApprovalStatus::Rejected(response) => (
+                    "rejected".to_string(),
+                    Some(response.responder.clone()),
+                    Some(response.timestamp),
+                ),
                 ApprovalStatus::Timeout => ("timeout".to_string(), None, None),
             };
-            
+
             ApprovalHistoryDto {
                 id: request.id.clone(),
                 session_id: request.session_id.clone(),
@@ -830,25 +830,21 @@ pub async fn get_approval_history(
             }
         })
         .collect();
-    
+
     let total = filtered.len();
     let page = query.page.max(1);
     let page_size = query.page_size.min(100).max(1);
     let start = (page - 1) * page_size;
-    
-    let items = filtered
-        .into_iter()
-        .skip(start)
-        .take(page_size)
-        .collect();
-    
+
+    let items = filtered.into_iter().skip(start).take(page_size).collect();
+
     let response = PaginatedResponse {
         items,
         total,
         page,
         page_size,
     };
-    
+
     Ok(HttpResponse::Ok().json(ApiResponse::success(response)))
 }
 
@@ -867,35 +863,29 @@ pub struct PendingApprovalDto {
 }
 
 /// GET /api/approvals/pending - Returns pending approval requests
-pub async fn get_pending_approvals(
-    state: web::Data<AppState>,
-) -> Result<HttpResponse> {
+pub async fn get_pending_approvals(state: web::Data<AppState>) -> Result<HttpResponse> {
     // Get all pending requests from approval manager
     let history = state.approval_manager.get_history().await;
-    
+
     // Filter only pending requests
     let pending: Vec<PendingApprovalDto> = history
         .into_iter()
-        .filter_map(|(request, status)| {
-            match status {
-                crate::tools::approval::ApprovalStatus::Pending => {
-                    Some(PendingApprovalDto {
-                        id: request.id.clone(),
-                        session_id: request.session_id.clone(),
-                        channel: request.channel.clone(),
-                        chat_id: request.chat_id.clone(),
-                        command: request.command.clone(),
-                        working_dir: request.working_dir.clone(),
-                        context: request.context.clone(),
-                        timestamp: request.timestamp,
-                        timeout_secs: request.timeout_secs,
-                    })
-                }
-                _ => None,
-            }
+        .filter_map(|(request, status)| match status {
+            crate::tools::approval::ApprovalStatus::Pending => Some(PendingApprovalDto {
+                id: request.id.clone(),
+                session_id: request.session_id.clone(),
+                channel: request.channel.clone(),
+                chat_id: request.chat_id.clone(),
+                command: request.command.clone(),
+                working_dir: request.working_dir.clone(),
+                context: request.context.clone(),
+                timestamp: request.timestamp,
+                timeout_secs: request.timeout_secs,
+            }),
+            _ => None,
         })
         .collect();
-    
+
     Ok(HttpResponse::Ok().json(ApiResponse::success(pending)))
 }
 
@@ -913,14 +903,21 @@ pub async fn submit_approval_response(
     body: web::Json<ApprovalResponseRequest>,
 ) -> Result<HttpResponse> {
     let request_id = path.into_inner();
-    
+
     // Check if the request exists and is pending
-    let pending_request = state.approval_manager.get_pending_request(&request_id).await;
-    
+    let pending_request = state
+        .approval_manager
+        .get_pending_request(&request_id)
+        .await;
+
     if pending_request.is_none() {
-        return Err(ApiError::NotFound(format!("Approval request not found or already processed: {}", request_id)).into());
+        return Err(ApiError::NotFound(format!(
+            "Approval request not found or already processed: {}",
+            request_id
+        ))
+        .into());
     }
-    
+
     // Create approval response
     let response = crate::tools::approval::ApprovalResponse {
         request_id: request_id.clone(),
@@ -928,17 +925,22 @@ pub async fn submit_approval_response(
         responder: body.responder.clone(),
         timestamp: Utc::now(),
     };
-    
+
     // Submit response to approval manager
-    state.approval_manager.submit_response(response).await
-        .map_err(|e| ApiError::InternalError(format!("Failed to submit approval response: {}", e)))?;
-    
+    state
+        .approval_manager
+        .submit_response(response)
+        .await
+        .map_err(|e| {
+            ApiError::InternalError(format!("Failed to submit approval response: {}", e))
+        })?;
+
     #[derive(Serialize)]
     struct ResponseResult {
         success: bool,
         message: String,
     }
-    
+
     let result = ResponseResult {
         success: true,
         message: if body.approved {
@@ -947,6 +949,6 @@ pub async fn submit_approval_response(
             "Approval rejected".to_string()
         },
     };
-    
+
     Ok(HttpResponse::Ok().json(ApiResponse::success(result)))
 }

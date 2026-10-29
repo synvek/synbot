@@ -23,9 +23,9 @@ use agent_client_protocol as acp;
 use agent_client_protocol::schema::{
     AgentCapabilities, CancelNotification, ContentBlock, ContentChunk, Implementation,
     InitializeRequest, InitializeResponse, NewSessionRequest, NewSessionResponse, PermissionOption,
-    PermissionOptionKind, PromptRequest, PromptResponse, ProtocolVersion,
-    RequestPermissionOutcome, RequestPermissionRequest, SessionNotification, SessionUpdate,
-    StopReason, ToolCall, ToolCallStatus, ToolKind,
+    PermissionOptionKind, PromptRequest, PromptResponse, ProtocolVersion, RequestPermissionOutcome,
+    RequestPermissionRequest, SessionNotification, SessionUpdate, StopReason, ToolCall,
+    ToolCallStatus, ToolKind,
 };
 use async_trait::async_trait;
 use tokio::sync::{broadcast, mpsc, oneshot};
@@ -161,17 +161,12 @@ pub fn prompt_to_text(prompt: &[ContentBlock]) -> String {
         match block {
             ContentBlock::Text(t) => parts.push(t.text.clone()),
             ContentBlock::ResourceLink(link) => parts.push(format!("[Resource: {}]", link.uri)),
-            ContentBlock::Resource(res) => {
-                match &res.resource {
-                    acp::schema::EmbeddedResourceResource::TextResourceContents(text) => {
-                        parts.push(format!(
-                            "[Resource: {}]\n{}",
-                            text.uri, text.text
-                        ));
-                    }
-                    _ => debug!("Skipping non-text embedded resource in prompt"),
+            ContentBlock::Resource(res) => match &res.resource {
+                acp::schema::EmbeddedResourceResource::TextResourceContents(text) => {
+                    parts.push(format!("[Resource: {}]\n{}", text.uri, text.text));
                 }
-            }
+                _ => debug!("Skipping non-text embedded resource in prompt"),
+            },
             _ => debug!("Skipping unsupported content block in prompt"),
         }
     }
@@ -231,8 +226,7 @@ pub fn approval_to_permission_request(
             "working_dir": request.working_dir,
             "context": request.context,
         }));
-    let tool_call =
-        acp::schema::ToolCallUpdate::new(format!("approval-{}", request.id), fields);
+    let tool_call = acp::schema::ToolCallUpdate::new(format!("approval-{}", request.id), fields);
     RequestPermissionRequest::new(
         acp_session_id.to_string(),
         tool_call,
@@ -249,7 +243,9 @@ pub fn permission_outcome_to_approval(
     outcome: &RequestPermissionOutcome,
 ) -> ApprovalResponse {
     let approved = match outcome {
-        RequestPermissionOutcome::Selected(selected) => selected.option_id.0.as_ref() == OPTION_ALLOW,
+        RequestPermissionOutcome::Selected(selected) => {
+            selected.option_id.0.as_ref() == OPTION_ALLOW
+        }
         _ => false,
     };
     ApprovalResponse {
@@ -270,7 +266,10 @@ pub async fn serve_stdio(bridge: AcpBridge) -> anyhow::Result<()> {
     use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
     serve(
         bridge,
-        acp::ByteStreams::new(tokio::io::stdout().compat_write(), tokio::io::stdin().compat()),
+        acp::ByteStreams::new(
+            tokio::io::stdout().compat_write(),
+            tokio::io::stdin().compat(),
+        ),
     )
     .await
 }
@@ -349,8 +348,7 @@ impl AcpBridge {
 
         let text = prompt_to_text(&request.prompt);
         if text.trim().is_empty() {
-            return responder
-                .respond_with_error(acp::Error::invalid_params().data("empty prompt"));
+            return responder.respond_with_error(acp::Error::invalid_params().data("empty prompt"));
         }
 
         // Control commands (e.g. "/status") are answered by the agent loop with a
@@ -537,7 +535,11 @@ impl AcpBridge {
                     }
                     match msg.message_type {
                         OutboundMessageType::Chat { content, .. } => {
-                            self.send_session_update(cx, session_id, chat_to_session_update(content));
+                            self.send_session_update(
+                                cx,
+                                session_id,
+                                chat_to_session_update(content),
+                            );
                         }
                         OutboundMessageType::ToolProgress {
                             tool_name,
@@ -547,7 +549,11 @@ impl AcpBridge {
                             self.send_session_update(
                                 cx,
                                 session_id,
-                                tool_progress_to_session_update(&tool_name, &status, &result_preview),
+                                tool_progress_to_session_update(
+                                    &tool_name,
+                                    &status,
+                                    &result_preview,
+                                ),
                             );
                         }
                         // Approvals after the run ended cannot be answered meaningfully.

@@ -24,6 +24,8 @@ pub struct ResolvedAgentParams {
     pub max_tokens: u32,
     pub temperature: f32,
     pub max_iterations: u32,
+    /// Consecutive rounds without new progress before the turn stops.
+    pub max_idle_iterations: u32,
     /// Maximum consecutive tool failures before stopping.
     pub max_consecutive_tool_errors: u32,
     /// Maximum number of chat history messages to send to the model (most recent N).
@@ -46,12 +48,17 @@ impl ResolvedAgentParams {
             max_tokens: apply_max_tokens_cap(main_agent.max_tokens, max_tokens_cap),
             temperature: main_agent.temperature,
             max_iterations: main_agent.max_tool_iterations,
+            max_idle_iterations: main_agent.max_idle_iterations,
             max_consecutive_tool_errors: main_agent.max_consecutive_tool_errors,
             max_chat_history_messages: main_agent.max_chat_history_messages,
         }
     }
 
-    pub fn from_config(agent: &AgentConfig, defaults: &MainAgent, max_tokens_cap: Option<u32>) -> Self {
+    pub fn from_config(
+        agent: &AgentConfig,
+        defaults: &MainAgent,
+        max_tokens_cap: Option<u32>,
+    ) -> Self {
         let max_tokens = agent.max_tokens.unwrap_or(defaults.max_tokens);
         Self {
             provider: agent
@@ -65,6 +72,7 @@ impl ResolvedAgentParams {
             max_tokens: apply_max_tokens_cap(max_tokens, max_tokens_cap),
             temperature: agent.temperature.unwrap_or(defaults.temperature),
             max_iterations: agent.max_iterations.unwrap_or(defaults.max_tool_iterations),
+            max_idle_iterations: defaults.max_idle_iterations,
             max_consecutive_tool_errors: defaults.max_consecutive_tool_errors,
             max_chat_history_messages: defaults.max_chat_history_messages,
         }
@@ -134,16 +142,15 @@ impl AgentRegistry {
         // Register additional agents (config forbids name "main").
         for agent in &main_agent.agents {
             if agent.name == "main" {
-                anyhow::bail!("agent name 'main' is reserved (main agent is implicit from mainAgent)");
+                anyhow::bail!(
+                    "agent name 'main' is reserved (main agent is implicit from mainAgent)"
+                );
             }
             let role_ctx = role_registry.get(&agent.role).with_context(|| {
                 format!("agent '{}' references unknown role '{}' (add a subdir under ~/.synbot/roles/ for this role)", agent.name, agent.role)
             })?;
             let system_prompt = role_ctx.system_prompt.clone();
-            let provider_for_cap = agent
-                .provider
-                .as_ref()
-                .unwrap_or(&main_agent.provider);
+            let provider_for_cap = agent.provider.as_ref().unwrap_or(&main_agent.provider);
             let cap = resolve_provider_max_tokens_cap(providers, provider_for_cap);
             let params = ResolvedAgentParams::from_config(agent, main_agent, cap);
             let ctx = AgentContext {
@@ -205,6 +212,7 @@ mod tests {
             max_tokens: 4096,
             temperature: 0.5,
             max_tool_iterations: 10,
+            max_idle_iterations: 4,
             max_consecutive_tool_errors: 8,
             max_chat_history_messages: 20,
             max_concurrent_subagents: 3,
@@ -228,7 +236,12 @@ mod tests {
         let main_agent = test_defaults();
         let mut agent_reg = AgentRegistry::new();
         agent_reg
-            .load_from_config(&main_agent, &ProvidersConfig::default(), &role_reg, tmp.path())
+            .load_from_config(
+                &main_agent,
+                &ProvidersConfig::default(),
+                &role_reg,
+                tmp.path(),
+            )
             .unwrap();
 
         let ctx = agent_reg.get("main").unwrap();
@@ -255,7 +268,12 @@ mod tests {
         main_agent.agents = vec![make_agent("dev", "dev")];
         let mut agent_reg = AgentRegistry::new();
         agent_reg
-            .load_from_config(&main_agent, &ProvidersConfig::default(), &role_reg, tmp.path())
+            .load_from_config(
+                &main_agent,
+                &ProvidersConfig::default(),
+                &role_reg,
+                tmp.path(),
+            )
             .unwrap();
 
         let ctx = agent_reg.get("dev").unwrap();

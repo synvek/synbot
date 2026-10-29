@@ -12,9 +12,9 @@ use std::sync::{Arc, Mutex as StdMutex};
 
 use agent_client_protocol as acp;
 use agent_client_protocol::schema::{
-    InitializeRequest, NewSessionRequest, PromptRequest, ProtocolVersion,
-    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-    SelectedPermissionOutcome, SessionNotification, SessionUpdate, StopReason,
+    InitializeRequest, NewSessionRequest, PromptRequest, ProtocolVersion, RequestPermissionOutcome,
+    RequestPermissionRequest, RequestPermissionResponse, SelectedPermissionOutcome,
+    SessionNotification, SessionUpdate, StopReason,
 };
 
 use synbot::acp::AcpBridge;

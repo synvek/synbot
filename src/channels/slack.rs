@@ -20,7 +20,7 @@ use tracing::{error, info, warn};
 
 use crate::bus::{InboundMessage, OutboundMessage};
 use crate::channels::file_handler;
-use crate::channels::{Channel, ChannelStatusHandle, approval_formatter};
+use crate::channels::{approval_formatter, Channel, ChannelStatusHandle};
 use crate::config::{
     pairing_allows, pairing_message, pairings_from_config_file_cached, AllowlistEntry, SlackConfig,
 };
@@ -109,7 +109,10 @@ async fn slack_upload_file_v2(
         .await
         .map_err(|e: reqwest::Error| e.to_string())?;
     if !status.is_success() || json.get("ok").and_then(|v| v.as_bool()) != Some(true) {
-        let err = json.get("error").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let err = json
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
         return Err(format!("Slack getUploadURLExternal: {} ({})", status, err));
     }
     let upload_url = json
@@ -155,17 +158,20 @@ async fn slack_upload_file_v2(
         .await
         .map_err(|e: reqwest::Error| e.to_string())?;
     if !status.is_success() || json.get("ok").and_then(|v| v.as_bool()) != Some(true) {
-        let err = json.get("error").and_then(|v| v.as_str()).unwrap_or("unknown");
-        return Err(format!("Slack completeUploadExternal: {} ({})", status, err));
+        let err = json
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        return Err(format!(
+            "Slack completeUploadExternal: {} ({})",
+            status, err
+        ));
     }
     Ok(())
 }
 
 /// Download a Slack file from its private download URL (requires Bearer token).
-async fn slack_download_attachment(
-    token: &str,
-    url: &url::Url,
-) -> Result<Vec<u8>, String> {
+async fn slack_download_attachment(token: &str, url: &url::Url) -> Result<Vec<u8>, String> {
     let client = reqwest::Client::builder()
         .build()
         .map_err(|e: reqwest::Error| e.to_string())?;
@@ -173,11 +179,15 @@ async fn slack_download_attachment(
         .get(url.as_str())
         .header("Authorization", format!("Bearer {}", token))
         .send()
-        .await.map_err(|e: reqwest::Error| e.to_string())?;
+        .await
+        .map_err(|e: reqwest::Error| e.to_string())?;
     if !resp.status().is_success() {
         return Err(format!("Slack file download: HTTP {}", resp.status()));
     }
-    let bytes = resp.bytes().await.map_err(|e: reqwest::Error| e.to_string())?;
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e: reqwest::Error| e.to_string())?;
     Ok(bytes.to_vec())
 }
 
@@ -424,7 +434,9 @@ async fn slack_push_events_handler(
         state_inner.workspace_dir.as_deref(),
         Some(state_inner.token.as_str()),
         state_inner.config_path.as_deref(),
-    ).await {
+    )
+    .await
+    {
         SlackInboundOutcome::Accepted(inbound) => {
             info!(
                 channel = %inbound.channel,
@@ -474,9 +486,7 @@ fn slack_push_event_type_name(event: &SlackPushEventCallback) -> &'static str {
 /// Returns ignored/denied/accepted outcome.
 enum SlackInboundOutcome {
     Accepted(InboundMessage),
-    Denied {
-        chat_id: String,
-    },
+    Denied { chat_id: String },
     Ignored,
 }
 
@@ -494,7 +504,9 @@ async fn slack_push_to_inbound(
 ) -> SlackInboundOutcome {
     use slack_morphism::events::SlackEventCallbackBody;
 
-    let (chat_id, sender_id, mut content, is_group, files_opt, channel_dedupe_ts) = match &event.event {
+    let (chat_id, sender_id, mut content, is_group, files_opt, channel_dedupe_ts) = match &event
+        .event
+    {
         SlackEventCallbackBody::Message(msg) => {
             if msg.sender.bot_id.is_some() || msg.hidden == Some(true) {
                 info!("Slack: ignoring message (from bot or hidden)");
@@ -546,20 +558,19 @@ async fn slack_push_to_inbound(
             } else {
                 None
             };
-            let files = msg
-                .content
-                .as_ref()
-                .and_then(|c| c.files.as_ref());
-            (channel_id, sender_id, content, is_group, files, channel_dedupe_ts)
+            let files = msg.content.as_ref().and_then(|c| c.files.as_ref());
+            (
+                channel_id,
+                sender_id,
+                content,
+                is_group,
+                files,
+                channel_dedupe_ts,
+            )
         }
         SlackEventCallbackBody::AppMention(mention) => {
             let sender_id = mention.user.to_slack_format();
-            let text = mention
-                .content
-                .text
-                .as_deref()
-                .unwrap_or("")
-                .trim();
+            let text = mention.content.text.as_deref().unwrap_or("").trim();
             if text.is_empty() {
                 return SlackInboundOutcome::Ignored;
             }
@@ -728,7 +739,13 @@ impl Channel for SlackChannel {
                         let preview = if result_preview.is_empty() {
                             String::new()
                         } else if result_preview.len() > tool_result_preview_chars {
-                            format!("{}...", result_preview.chars().take(tool_result_preview_chars).collect::<String>())
+                            format!(
+                                "{}...",
+                                result_preview
+                                    .chars()
+                                    .take(tool_result_preview_chars)
+                                    .collect::<String>()
+                            )
                         } else {
                             result_preview.clone()
                         };
@@ -744,7 +761,9 @@ impl Channel for SlackChannel {
                             .display_message
                             .clone()
                             .filter(|s| !s.is_empty())
-                            .unwrap_or_else(|| approval_formatter::format_approval_request(request));
+                            .unwrap_or_else(|| {
+                                approval_formatter::format_approval_request(request)
+                            });
                         (content, vec![])
                     }
                 };
@@ -767,7 +786,8 @@ impl Channel for SlackChannel {
                         );
                         let started = Instant::now();
                         if let Err(e) = session.chat_post_message(&req).await {
-                            runtime_status.record_error(format!("Slack outbound send failed: {e:#}"));
+                            runtime_status
+                                .record_error(format!("Slack outbound send failed: {e:#}"));
                             error!("Slack outbound send error: {e:#}");
                         } else {
                             runtime_status.record_sent();
@@ -802,10 +822,12 @@ impl Channel for SlackChannel {
                                 {
                                     Ok(()) => {
                                         runtime_status.record_sent();
-                                        runtime_status.record_latency(started.elapsed().as_millis() as u64);
+                                        runtime_status
+                                            .record_latency(started.elapsed().as_millis() as u64);
                                     }
                                     Err(e) => {
-                                        runtime_status.record_error(format!("Slack file upload failed: {e}"));
+                                        runtime_status
+                                            .record_error(format!("Slack file upload failed: {e}"));
                                         error!("Slack file upload error: {e}");
                                     }
                                 }
@@ -850,7 +872,13 @@ impl Channel for SlackChannel {
                 let preview = if result_preview.is_empty() {
                     String::new()
                 } else if result_preview.len() > self.tool_result_preview_chars {
-                    format!("{}...", result_preview.chars().take(self.tool_result_preview_chars).collect::<String>())
+                    format!(
+                        "{}...",
+                        result_preview
+                            .chars()
+                            .take(self.tool_result_preview_chars)
+                            .collect::<String>()
+                    )
                 } else {
                     result_preview.clone()
                 };

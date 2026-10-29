@@ -112,9 +112,8 @@ impl ToolSandboxIpcClient {
             timeout_ms: timeout.as_millis() as u64,
             working_dir: working_dir.map(|s| s.to_string()),
         };
-        let json = serde_json::to_vec(&req).map_err(|e| {
-            SandboxError::ExecutionFailed(format!("IPC request serialize: {}", e))
-        })?;
+        let json = serde_json::to_vec(&req)
+            .map_err(|e| SandboxError::ExecutionFailed(format!("IPC request serialize: {}", e)))?;
 
         let mut client = ClientOptions::new()
             .open(&self.pipe_path)
@@ -128,13 +127,13 @@ impl ToolSandboxIpcClient {
             .await
             .map_err(|e| SandboxError::ExecutionFailed(format!("IPC read: {}", e)))?;
 
-        let resp: ToolSandboxIpcResponse = serde_json::from_slice(&body).map_err(|e| {
-            SandboxError::ExecutionFailed(format!("IPC response parse: {}", e))
-        })?;
+        let resp: ToolSandboxIpcResponse = serde_json::from_slice(&body)
+            .map_err(|e| SandboxError::ExecutionFailed(format!("IPC response parse: {}", e)))?;
 
         if !resp.ok {
             return Err(SandboxError::ExecutionFailed(
-                resp.error.unwrap_or_else(|| "unknown IPC error".to_string()),
+                resp.error
+                    .unwrap_or_else(|| "unknown IPC error".to_string()),
             ));
         }
 
@@ -238,16 +237,19 @@ pub async fn dispatch_connected_request(
 /// Pipe name is unguessable (UUID) and requests still require [`ToolSandboxIpcRequest::auth`].
 const TOOL_SANDBOX_PIPE_SDDL: &str = concat!(
     "D:",
-    "(A;;GA;;;WD)",           // Everyone — broad connect (name + auth bound exposure)
-    "(A;;GA;;;AC)",          // ALL APPLICATION PACKAGES (SDDL_ALL_APP_PACKAGES)
-    "(A;;GA;;;S-1-15-2-2)",  // ALL RESTRICTED APPLICATION PACKAGES
+    "(A;;GA;;;WD)",         // Everyone — broad connect (name + auth bound exposure)
+    "(A;;GA;;;AC)",         // ALL APPLICATION PACKAGES (SDDL_ALL_APP_PACKAGES)
+    "(A;;GA;;;S-1-15-2-2)", // ALL RESTRICTED APPLICATION PACKAGES
 );
 
 /// Create a named pipe instance for tool-sandbox IPC.
 ///
 /// `first_instance=true` sets `FILE_FLAG_FIRST_PIPE_INSTANCE` to ensure we don't accidentally
 /// connect to a stale/other server when starting up.
-pub fn create_tool_sandbox_pipe(pipe_path: &str, first_instance: bool) -> std::io::Result<NamedPipeServer> {
+pub fn create_tool_sandbox_pipe(
+    pipe_path: &str,
+    first_instance: bool,
+) -> std::io::Result<NamedPipeServer> {
     // Do **not** call `max_instances(255)`: tokio's builder panics for `>= 255` (`usize`).
     // Default is `PIPE_UNLIMITED_INSTANCES` (255) passed straight to `CreateNamedPipeW`, which is valid.
     unsafe {
@@ -265,7 +267,10 @@ pub fn create_tool_sandbox_pipe(pipe_path: &str, first_instance: bool) -> std::i
         .map_err(|e| {
             std::io::Error::new(
                 std::io::ErrorKind::Other,
-                format!("ConvertStringSecurityDescriptorToSecurityDescriptorW: {}", e),
+                format!(
+                    "ConvertStringSecurityDescriptorToSecurityDescriptorW: {}",
+                    e
+                ),
             )
         })?;
 

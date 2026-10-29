@@ -122,9 +122,9 @@ fn approval_uses_display_message_as_title_when_present() {
 
 #[test]
 fn permission_allow_outcome_approves() {
-    let outcome = RequestPermissionOutcome::Selected(
-        acp::schema::SelectedPermissionOutcome::new(OPTION_ALLOW),
-    );
+    let outcome = RequestPermissionOutcome::Selected(acp::schema::SelectedPermissionOutcome::new(
+        OPTION_ALLOW,
+    ));
     let response = permission_outcome_to_approval("req-1", &outcome);
     assert!(response.approved);
     assert_eq!(response.request_id, "req-1");
@@ -133,9 +133,9 @@ fn permission_allow_outcome_approves() {
 
 #[test]
 fn permission_reject_outcome_rejects() {
-    let outcome = RequestPermissionOutcome::Selected(
-        acp::schema::SelectedPermissionOutcome::new(OPTION_REJECT),
-    );
+    let outcome = RequestPermissionOutcome::Selected(acp::schema::SelectedPermissionOutcome::new(
+        OPTION_REJECT,
+    ));
     assert!(!permission_outcome_to_approval("req-1", &outcome).approved);
 }
 

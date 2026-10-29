@@ -142,7 +142,10 @@ impl DynTool for ReadSystemSkillTool {
             .unwrap_or("")
             .trim();
         if name.is_empty() {
-            return Ok("Error: name is required. Use list_system_skills to see available names.".to_string());
+            return Ok(
+                "Error: name is required. Use list_system_skills to see available names."
+                    .to_string(),
+            );
         }
         let path = config::skills_dir().join(name).join("SKILL.md");
         if !path.exists() {
@@ -253,9 +256,8 @@ impl DynTool for InstallSystemSkillTool {
         }
 
         let mut copied: Vec<String> = Vec::new();
-        let entries = std::fs::read_dir(&agents_skills).with_context(|| {
-            format!("read_dir {}", agents_skills.display())
-        })?;
+        let entries = std::fs::read_dir(&agents_skills)
+            .with_context(|| format!("read_dir {}", agents_skills.display()))?;
         for entry in entries.flatten() {
             let path = entry.path();
             if !path.is_dir() {

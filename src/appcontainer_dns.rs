@@ -72,14 +72,10 @@ pub struct GoogleDnsResolver;
 impl Resolve for GoogleDnsResolver {
     fn resolve(&self, name: Name) -> Resolving {
         Box::pin(async move {
-            let lookup = global_resolver()
-                .lookup_ip(name.as_str())
-                .await
-                .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
-                    e.to_string().into()
-                })?;
-            let addrs: Addrs =
-                Box::new(lookup.into_iter().map(|addr| SocketAddr::new(addr, 0)));
+            let lookup = global_resolver().lookup_ip(name.as_str()).await.map_err(
+                |e| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() },
+            )?;
+            let addrs: Addrs = Box::new(lookup.into_iter().map(|addr| SocketAddr::new(addr, 0)));
             Ok(addrs)
         })
     }

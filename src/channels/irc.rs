@@ -15,9 +15,7 @@ use tracing::{error, info, warn};
 
 use crate::bus::{InboundMessage, OutboundMessage};
 use crate::channels::{Channel, ChannelStatusHandle, RetryPolicy, RetryState};
-use crate::config::{
-    pairing_allows, pairing_message, pairings_from_config_file_cached, IrcConfig,
-};
+use crate::config::{pairing_allows, pairing_message, pairings_from_config_file_cached, IrcConfig};
 
 // ---------------------------------------------------------------------------
 // IrcChannel
@@ -98,10 +96,7 @@ impl IrcChannel {
 
     /// True if PRIVMSG `target` is a channel (RFC 2812: `#`, `&`, `+`, `!` prefixes).
     fn is_channel_target(target: &str) -> bool {
-        matches!(
-            target.chars().next(),
-            Some('#' | '&' | '+' | '!')
-        )
+        matches!(target.chars().next(), Some('#' | '&' | '+' | '!'))
     }
 
     /// Derive the chat_id for a message: for channel messages use the channel
@@ -215,7 +210,9 @@ impl Channel for IrcChannel {
                 Err(e) => {
                     let err_msg = format!("{e:#}");
                     self.runtime_status.mark_reconnecting(Some(&err_msg));
-                    let should_retry = self.retry_state.record_failure(&retry_policy, err_msg.clone());
+                    let should_retry = self
+                        .retry_state
+                        .record_failure(&retry_policy, err_msg.clone());
                     if should_retry {
                         let delay = self.retry_state.next_delay(&retry_policy);
                         warn!(
@@ -339,8 +336,8 @@ impl crate::channels::ChannelFactory for IrcChannelFactory {
         config: serde_json::Value,
         ctx: crate::channels::ChannelStartContext,
     ) -> Result<Box<dyn Channel>> {
-        let cfg: IrcConfig = serde_json::from_value(config)
-            .map_err(|e| anyhow!("Invalid IRC config: {e}"))?;
+        let cfg: IrcConfig =
+            serde_json::from_value(config).map_err(|e| anyhow!("Invalid IRC config: {e}"))?;
 
         if cfg.server.is_none() {
             warn!("IRC channel '{}' created without server address", cfg.name);
@@ -389,7 +386,13 @@ mod tests {
     fn make_channel() -> IrcChannel {
         let (inbound_tx, _) = mpsc::channel(16);
         let (_, outbound_rx) = broadcast::channel(16);
-        IrcChannel::new(make_config(), inbound_tx, outbound_rx, None, ChannelStatusHandle::detached())
+        IrcChannel::new(
+            make_config(),
+            inbound_tx,
+            outbound_rx,
+            None,
+            ChannelStatusHandle::detached(),
+        )
     }
 
     #[test]
@@ -401,8 +404,12 @@ mod tests {
     #[test]
     fn is_target_allowed_when_allowlist_disabled() {
         let allowlist = vec![];
-        assert!(IrcChannel::is_target_allowed(false, &allowlist, "#general", "anyone"));
-        assert!(IrcChannel::is_target_allowed(false, &allowlist, "synbot", "alice"));
+        assert!(IrcChannel::is_target_allowed(
+            false, &allowlist, "#general", "anyone"
+        ));
+        assert!(IrcChannel::is_target_allowed(
+            false, &allowlist, "synbot", "alice"
+        ));
     }
 
     #[test]
@@ -412,17 +419,27 @@ mod tests {
             chat_alias: "General".to_string(),
             my_name: None,
         }];
-        assert!(IrcChannel::is_target_allowed(true, &allowlist, "#general", "anyone"));
-        assert!(!IrcChannel::is_target_allowed(true, &allowlist, "#random", "anyone"));
+        assert!(IrcChannel::is_target_allowed(
+            true, &allowlist, "#general", "anyone"
+        ));
+        assert!(!IrcChannel::is_target_allowed(
+            true, &allowlist, "#random", "anyone"
+        ));
         // DM (target = bot nick): not in list by channel; sender not listed
-        assert!(!IrcChannel::is_target_allowed(true, &allowlist, "synbot", "alice"));
+        assert!(!IrcChannel::is_target_allowed(
+            true, &allowlist, "synbot", "alice"
+        ));
     }
 
     #[test]
     fn is_target_allowed_empty_allowlist_denies_when_enabled() {
         let allowlist = vec![];
-        assert!(!IrcChannel::is_target_allowed(true, &allowlist, "#general", "anyone"));
-        assert!(!IrcChannel::is_target_allowed(true, &allowlist, "synbot", "alice"));
+        assert!(!IrcChannel::is_target_allowed(
+            true, &allowlist, "#general", "anyone"
+        ));
+        assert!(!IrcChannel::is_target_allowed(
+            true, &allowlist, "synbot", "alice"
+        ));
     }
 
     #[test]
@@ -432,9 +449,15 @@ mod tests {
             chat_alias: "General".to_string(),
             my_name: None,
         }];
-        assert!(IrcChannel::is_target_allowed(true, &allowlist, "#general", "anyone"));
-        assert!(!IrcChannel::is_target_allowed(true, &allowlist, "#random", "anyone"));
-        assert!(!IrcChannel::is_target_allowed(true, &allowlist, "synbot", "alice"));
+        assert!(IrcChannel::is_target_allowed(
+            true, &allowlist, "#general", "anyone"
+        ));
+        assert!(!IrcChannel::is_target_allowed(
+            true, &allowlist, "#random", "anyone"
+        ));
+        assert!(!IrcChannel::is_target_allowed(
+            true, &allowlist, "synbot", "alice"
+        ));
     }
 
     #[test]
@@ -444,8 +467,15 @@ mod tests {
             chat_alias: "user".to_string(),
             my_name: None,
         }];
-        assert!(IrcChannel::is_target_allowed(true, &allowlist, "synbot", "halloy1905"));
-        assert!(!IrcChannel::is_target_allowed(true, &allowlist, "synbot", "stranger"));
+        assert!(IrcChannel::is_target_allowed(
+            true,
+            &allowlist,
+            "synbot",
+            "halloy1905"
+        ));
+        assert!(!IrcChannel::is_target_allowed(
+            true, &allowlist, "synbot", "stranger"
+        ));
     }
 
     #[test]
@@ -478,7 +508,13 @@ mod tests {
             enable_allowlist: true,
             agent: "main".to_string(),
         };
-        let ch = IrcChannel::new(cfg, inbound_tx, outbound_rx, None, ChannelStatusHandle::detached());
+        let ch = IrcChannel::new(
+            cfg,
+            inbound_tx,
+            outbound_rx,
+            None,
+            ChannelStatusHandle::detached(),
+        );
         let irc_cfg = ch.build_irc_config();
         assert_eq!(irc_cfg.server.as_deref(), Some("irc.libera.chat"));
         assert_eq!(irc_cfg.nickname.as_deref(), Some("synbot"));

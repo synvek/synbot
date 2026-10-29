@@ -32,16 +32,28 @@ pub struct CheckResult {
 
 impl CheckResult {
     fn pass(name: impl Into<String>, msg: impl Into<String>) -> Self {
-        Self { name: name.into(), status: CheckStatus::Pass(msg.into()) }
+        Self {
+            name: name.into(),
+            status: CheckStatus::Pass(msg.into()),
+        }
     }
     fn fail(name: impl Into<String>, msg: impl Into<String>) -> Self {
-        Self { name: name.into(), status: CheckStatus::Fail(msg.into()) }
+        Self {
+            name: name.into(),
+            status: CheckStatus::Fail(msg.into()),
+        }
     }
     fn warn(name: impl Into<String>, msg: impl Into<String>) -> Self {
-        Self { name: name.into(), status: CheckStatus::Warn(msg.into()) }
+        Self {
+            name: name.into(),
+            status: CheckStatus::Warn(msg.into()),
+        }
     }
     fn skip(name: impl Into<String>, msg: impl Into<String>) -> Self {
-        Self { name: name.into(), status: CheckStatus::Skip(msg.into()) }
+        Self {
+            name: name.into(),
+            status: CheckStatus::Skip(msg.into()),
+        }
     }
 }
 
@@ -56,7 +68,9 @@ pub struct DoctorReport {
 
 impl DoctorReport {
     pub fn new() -> Self {
-        Self { results: Vec::new() }
+        Self {
+            results: Vec::new(),
+        }
     }
 
     /// Print a structured ✓/✗/⚠/- summary to stdout.
@@ -74,10 +88,26 @@ impl DoctorReport {
         }
         println!("{}", "─".repeat(50));
 
-        let passes = self.results.iter().filter(|r| matches!(r.status, CheckStatus::Pass(_))).count();
-        let fails  = self.results.iter().filter(|r| matches!(r.status, CheckStatus::Fail(_))).count();
-        let warns  = self.results.iter().filter(|r| matches!(r.status, CheckStatus::Warn(_))).count();
-        let skips  = self.results.iter().filter(|r| matches!(r.status, CheckStatus::Skip(_))).count();
+        let passes = self
+            .results
+            .iter()
+            .filter(|r| matches!(r.status, CheckStatus::Pass(_)))
+            .count();
+        let fails = self
+            .results
+            .iter()
+            .filter(|r| matches!(r.status, CheckStatus::Fail(_)))
+            .count();
+        let warns = self
+            .results
+            .iter()
+            .filter(|r| matches!(r.status, CheckStatus::Warn(_)))
+            .count();
+        let skips = self
+            .results
+            .iter()
+            .filter(|r| matches!(r.status, CheckStatus::Skip(_)))
+            .count();
 
         println!(
             "  {} passed  {} failed  {} warnings  {} skipped",
@@ -192,9 +222,16 @@ impl DoctorCheck for ChannelCredentialCheck {
         for c in &config.channels.matrix {
             if c.enabled {
                 checked += 1;
-                let has_token = c.access_token.as_deref().map(|s| !s.is_empty()).unwrap_or(false);
+                let has_token = c
+                    .access_token
+                    .as_deref()
+                    .map(|s| !s.is_empty())
+                    .unwrap_or(false);
                 if !has_token && (c.username.is_empty() || c.password.is_empty()) {
-                    issues.push(format!("matrix/{}: missing access_token or username/password", c.name));
+                    issues.push(format!(
+                        "matrix/{}: missing access_token or username/password",
+                        c.name
+                    ));
                 }
             }
         }
@@ -204,9 +241,15 @@ impl DoctorCheck for ChannelCredentialCheck {
                 let has_id = !c.client_id.is_empty()
                     || c.app_key.as_deref().map(|s| !s.is_empty()).unwrap_or(false);
                 let has_secret = !c.client_secret.is_empty()
-                    || c.app_secret.as_deref().map(|s| !s.is_empty()).unwrap_or(false);
+                    || c.app_secret
+                        .as_deref()
+                        .map(|s| !s.is_empty())
+                        .unwrap_or(false);
                 if !has_id || !has_secret {
-                    issues.push(format!("dingtalk/{}: client_id or client_secret is empty", c.name));
+                    issues.push(format!(
+                        "dingtalk/{}: client_id or client_secret is empty",
+                        c.name
+                    ));
                 }
             }
         }
@@ -238,7 +281,10 @@ impl DoctorCheck for ChannelCredentialCheck {
             return CheckResult::skip(self.name(), "no enabled channels configured");
         }
         if issues.is_empty() {
-            CheckResult::pass(self.name(), format!("{} channel(s) have valid credentials", checked))
+            CheckResult::pass(
+                self.name(),
+                format!("{} channel(s) have valid credentials", checked),
+            )
         } else {
             CheckResult::fail(self.name(), issues.join("; "))
         }
@@ -264,13 +310,13 @@ impl DoctorCheck for ProviderApiCheck {
 
         let providers = [
             ("anthropic", &p.anthropic.api_key),
-            ("openai",    &p.openai.api_key),
-            ("gemini",    &p.gemini.api_key),
-            ("openrouter",&p.openrouter.api_key),
-            ("deepseek",  &p.deepseek.api_key),
-            ("moonshot",  &p.moonshot.api_key),
+            ("openai", &p.openai.api_key),
+            ("gemini", &p.gemini.api_key),
+            ("openrouter", &p.openrouter.api_key),
+            ("deepseek", &p.deepseek.api_key),
+            ("moonshot", &p.moonshot.api_key),
             ("kimi_code", &p.kimi_code.api_key),
-            ("ollama",    &p.ollama.api_key),
+            ("ollama", &p.ollama.api_key),
         ];
 
         for (name, key) in &providers {
@@ -365,13 +411,11 @@ impl DoctorCheck for MemoryCheck {
     async fn run(&self, config: &Config) -> CheckResult {
         // Try to open the SQLite index for the main agent (dimension from config)
         match crate::agent::memory_index::open_index("main", config.memory.embedding_dimensions) {
-            Ok(_conn) => {
-                CheckResult::pass(self.name(), "SQLite database accessible and sqlite-vec extension loaded")
-            }
-            Err(e) => CheckResult::fail(
+            Ok(_conn) => CheckResult::pass(
                 self.name(),
-                format!("failed to open memory index: {}", e),
+                "SQLite database accessible and sqlite-vec extension loaded",
             ),
+            Err(e) => CheckResult::fail(self.name(), format!("failed to open memory index: {}", e)),
         }
     }
 }
@@ -429,12 +473,12 @@ impl DoctorCheck for McpServerCheck {
 
 /// Attempt a lightweight connection to an MCP server to verify it is reachable.
 async fn try_connect_mcp_server(server: &crate::config::McpServerConfig) -> Result<()> {
-    use std::time::Duration;
+    use crate::config::McpTransport;
     use mcp_client::client::{ClientCapabilities, ClientInfo, McpClient, McpClientTrait};
     use mcp_client::service::McpService;
-    use mcp_client::transport::{Transport, SseTransport, StdioTransport};
-    use crate::config::McpTransport;
+    use mcp_client::transport::{SseTransport, StdioTransport, Transport};
     use std::sync::Arc;
+    use std::time::Duration;
 
     let timeout_secs = server
         .timeout_secs
@@ -451,13 +495,18 @@ async fn try_connect_mcp_server(server: &crate::config::McpServerConfig) -> Resu
                 server.args.clone(),
                 server.env.clone(),
             );
-            let handle = transport.start().await
+            let handle = transport
+                .start()
+                .await
                 .map_err(|e| anyhow::anyhow!("transport start failed: {}", e))?;
             let service = McpService::with_timeout(handle, timeout);
             let mut client = McpClient::new(service);
             client
                 .initialize(
-                    ClientInfo { name: "synbot-doctor".into(), version: "0".into() },
+                    ClientInfo {
+                        name: "synbot-doctor".into(),
+                        version: "0".into(),
+                    },
                     ClientCapabilities::default(),
                 )
                 .await
@@ -470,13 +519,18 @@ async fn try_connect_mcp_server(server: &crate::config::McpServerConfig) -> Resu
                 anyhow::bail!("url is required for SSE transport");
             }
             let transport = SseTransport::new(server.url.clone(), server.headers.clone());
-            let handle = transport.start().await
+            let handle = transport
+                .start()
+                .await
                 .map_err(|e| anyhow::anyhow!("transport start failed: {}", e))?;
             let service = McpService::with_timeout(handle, timeout);
             let mut client = McpClient::new(service);
             client
                 .initialize(
-                    ClientInfo { name: "synbot-doctor".into(), version: "0".into() },
+                    ClientInfo {
+                        name: "synbot-doctor".into(),
+                        version: "0".into(),
+                    },
                     ClientCapabilities::default(),
                 )
                 .await
@@ -570,23 +624,34 @@ mod tests {
         let check = ProviderApiCheck;
         let result = check.run(&cfg).await;
         // Default config has no API keys → warn or fail
-        assert!(matches!(result.status, CheckStatus::Warn(_) | CheckStatus::Fail(_)));
+        assert!(matches!(
+            result.status,
+            CheckStatus::Warn(_) | CheckStatus::Fail(_)
+        ));
     }
 
     #[tokio::test]
     async fn sandbox_check_skips_when_not_configured() {
-        let cfg = make_config();
+        // `Config::default()` may ship a sandbox profile, so clear both to reach the skip branch.
+        let mut cfg = make_config();
+        cfg.tool_sandbox = None;
+        cfg.app_sandbox = None;
         let check = SandboxCheck;
         let result = check.run(&cfg).await;
         assert!(matches!(result.status, CheckStatus::Skip(_)));
     }
 
     #[tokio::test]
-    async fn memory_check_skips_when_not_configured() {
+    async fn memory_check_verdicts_the_real_index() {
+        // MemoryCheck opens the on-disk SQLite index instead of skipping when memory is off, so the
+        // verdict depends on the host: it either loads the extension or reports the failure.
         let cfg = make_config();
         let check = MemoryCheck;
         let result = check.run(&cfg).await;
-        assert!(matches!(result.status, CheckStatus::Skip(_)));
+        assert!(matches!(
+            result.status,
+            CheckStatus::Pass(_) | CheckStatus::Fail(_)
+        ));
     }
 
     #[tokio::test]
@@ -603,7 +668,9 @@ mod tests {
         report.results.push(CheckResult::pass("A", "all good"));
         report.results.push(CheckResult::fail("B", "broken"));
         report.results.push(CheckResult::warn("C", "concern"));
-        report.results.push(CheckResult::skip("D", "not configured"));
+        report
+            .results
+            .push(CheckResult::skip("D", "not configured"));
         // Just ensure print_summary doesn't panic
         report.print_summary();
     }

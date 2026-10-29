@@ -190,7 +190,10 @@ impl ChannelStatusRegistry {
         } else {
             RuntimeChannelStatus::Disabled
         };
-        let mut entries = self.entries.write().expect("channel status registry poisoned");
+        let mut entries = self
+            .entries
+            .write()
+            .expect("channel status registry poisoned");
         entries.insert(
             instance_id.clone(),
             RuntimeChannelEntry {
@@ -314,8 +317,22 @@ mod tests {
     #[test]
     fn shutdown_stops_active_channels_but_keeps_disabled_channels_disabled() {
         let registry = Arc::new(ChannelStatusRegistry::new());
-        let active = registry.register("active".into(), "x".into(), "active".into(), true, true, true);
-        let _disabled = registry.register("disabled".into(), "x".into(), "disabled".into(), false, true, true);
+        let active = registry.register(
+            "active".into(),
+            "x".into(),
+            "active".into(),
+            true,
+            true,
+            true,
+        );
+        let _disabled = registry.register(
+            "disabled".into(),
+            "x".into(),
+            "disabled".into(),
+            false,
+            true,
+            true,
+        );
         active.mark_connected();
         registry.mark_shutdown();
         let snapshots = registry.snapshots();

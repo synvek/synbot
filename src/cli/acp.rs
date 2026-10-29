@@ -31,12 +31,8 @@ pub async fn cmd_acp(provider: Option<String>, model: Option<String>) -> Result<
         );
     }
 
-    let completion_model = build_rig_completion_model(
-        &provider_name,
-        &model_name,
-        &api_key,
-        api_base.as_deref(),
-    )?;
+    let completion_model =
+        build_rig_completion_model(&provider_name, &model_name, &api_key, api_base.as_deref())?;
 
     let subagent_mgr = std::sync::Arc::new(tokio::sync::Mutex::new(
         crate::agent::subagent::SubagentManager::new(
@@ -74,8 +70,7 @@ pub async fn cmd_acp(provider: Option<String>, model: Option<String>) -> Result<
     let shared_config = std::sync::Arc::new(tokio::sync::RwLock::new(cfg.clone()));
 
     let sandbox_context = super::start::init_sandbox_if_configured(&cfg).await;
-    let tool_sandbox_delegate =
-        super::start::tool_sandbox_delegate_from_startup(&sandbox_context);
+    let tool_sandbox_delegate = super::start::tool_sandbox_delegate_from_startup(&sandbox_context);
 
     let (mut tool_reg, spawn_context) = build_default_tools(
         &cfg,
@@ -84,7 +79,7 @@ pub async fn cmd_acp(provider: Option<String>, model: Option<String>) -> Result<
         std::sync::Arc::clone(&subagent_mgr),
         std::sync::Arc::clone(&approval_manager),
         permission_policy,
-        None, // no heartbeat/cron tools in ACP mode
+        None,                   // no heartbeat/cron tools in ACP mode
         &tool_sandbox_delegate, // use the configured sandbox; Safe mode fails closed if unavailable
         shared_session_state.clone(),
         bus.outbound_tx_clone(),
@@ -147,12 +142,9 @@ pub async fn cmd_acp(provider: Option<String>, model: Option<String>) -> Result<
     }
     let role_registry = std::sync::Arc::new(role_registry);
     let mut agent_registry = crate::agent::agent_registry::AgentRegistry::new();
-    if let Err(e) = agent_registry.load_from_config(
-        &cfg.main_agent,
-        &cfg.providers,
-        &role_registry,
-        &ws,
-    ) {
+    if let Err(e) =
+        agent_registry.load_from_config(&cfg.main_agent, &cfg.providers, &role_registry, &ws)
+    {
         tracing::warn!(error = %e, "Failed to load agent registry");
     }
     let agent_registry = std::sync::Arc::new(agent_registry);
@@ -164,6 +156,7 @@ pub async fn cmd_acp(provider: Option<String>, model: Option<String>) -> Result<
         tools,
         cfg.main_agent.max_tool_iterations,
         bus.outbound_tx_clone(),
+        crate::agent::events::EventBus::new(),
         &cfg,
         shared_session_state,
         agent_registry,

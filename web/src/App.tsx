@@ -9,6 +9,8 @@ import Sessions from './pages/Sessions'
 import CronJobs from './pages/CronJobs'
 import Roles from './pages/Roles'
 import Skills from './pages/Skills'
+import Plugins from './pages/Plugins'
+import Security from './pages/Security'
 import Config from './pages/Config'
 import Logs from './pages/Logs'
 import Chat from './pages/Chat'
@@ -33,6 +35,8 @@ function App() {
             <Route path="cron" element={<CronJobs />} />
             <Route path="roles" element={<Roles />} />
             <Route path="skills" element={<Skills />} />
+            <Route path="plugins" element={<Plugins />} />
+            <Route path="security" element={<Security />} />
             <Route path="config" element={<Config />} />
             <Route path="logs" element={<Logs />} />
             <Route path="chat" element={<Chat />} />

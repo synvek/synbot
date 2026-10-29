@@ -15,7 +15,10 @@ async fn test_e2e_config_reload_basic() {
         PermissionLevel::Deny,
     ));
 
-    assert_eq!(policy1.check_permission("echo test"), PermissionLevel::Allow);
+    assert_eq!(
+        policy1.check_permission("echo test"),
+        PermissionLevel::Allow
+    );
     assert_eq!(policy1.check_permission("ls -la"), PermissionLevel::Deny);
 
     let policy2 = Arc::new(CommandPermissionPolicy::new(
@@ -64,7 +67,10 @@ async fn test_e2e_config_reload_rule_changes() {
 #[tokio::test]
 async fn test_e2e_config_reload_default_level_change() {
     let policy1 = Arc::new(CommandPermissionPolicy::new(vec![], PermissionLevel::Allow));
-    assert_eq!(policy1.check_permission("any command"), PermissionLevel::Allow);
+    assert_eq!(
+        policy1.check_permission("any command"),
+        PermissionLevel::Allow
+    );
 
     let policy2 = Arc::new(CommandPermissionPolicy::new(
         vec![],
@@ -75,9 +81,11 @@ async fn test_e2e_config_reload_default_level_change() {
         PermissionLevel::RequireApproval
     );
 
-    let policy3 =
-        Arc::new(CommandPermissionPolicy::new(vec![], PermissionLevel::Deny));
-    assert_eq!(policy3.check_permission("any command"), PermissionLevel::Deny);
+    let policy3 = Arc::new(CommandPermissionPolicy::new(vec![], PermissionLevel::Deny));
+    assert_eq!(
+        policy3.check_permission("any command"),
+        PermissionLevel::Deny
+    );
 }
 
 #[tokio::test]
@@ -91,9 +99,15 @@ async fn test_e2e_config_reload_add_rules() {
         PermissionLevel::Deny,
     ));
 
-    assert_eq!(policy1.check_permission("echo test"), PermissionLevel::Allow);
+    assert_eq!(
+        policy1.check_permission("echo test"),
+        PermissionLevel::Allow
+    );
     assert_eq!(policy1.check_permission("ls -la"), PermissionLevel::Deny);
-    assert_eq!(policy1.check_permission("git status"), PermissionLevel::Deny);
+    assert_eq!(
+        policy1.check_permission("git status"),
+        PermissionLevel::Deny
+    );
 
     let policy2 = Arc::new(CommandPermissionPolicy::new(
         vec![
@@ -116,7 +130,10 @@ async fn test_e2e_config_reload_add_rules() {
         PermissionLevel::Deny,
     ));
 
-    assert_eq!(policy2.check_permission("echo test"), PermissionLevel::Allow);
+    assert_eq!(
+        policy2.check_permission("echo test"),
+        PermissionLevel::Allow
+    );
     assert_eq!(policy2.check_permission("ls -la"), PermissionLevel::Allow);
     assert_eq!(
         policy2.check_permission("git status"),
@@ -142,7 +159,10 @@ async fn test_e2e_config_reload_rule_order_change() {
         PermissionLevel::RequireApproval,
     ));
 
-    assert_eq!(policy1.check_permission("git status"), PermissionLevel::Deny);
+    assert_eq!(
+        policy1.check_permission("git status"),
+        PermissionLevel::Deny
+    );
 
     let policy2 = Arc::new(CommandPermissionPolicy::new(
         vec![
@@ -160,7 +180,10 @@ async fn test_e2e_config_reload_rule_order_change() {
         PermissionLevel::RequireApproval,
     ));
 
-    assert_eq!(policy2.check_permission("git status"), PermissionLevel::Allow);
+    assert_eq!(
+        policy2.check_permission("git status"),
+        PermissionLevel::Allow
+    );
     assert_eq!(policy2.check_permission("git push"), PermissionLevel::Deny);
 }
 
@@ -182,7 +205,10 @@ async fn test_e2e_config_reload_complex_scenario() {
         PermissionLevel::RequireApproval,
     ));
 
-    assert_eq!(policy1.check_permission("echo test"), PermissionLevel::Allow);
+    assert_eq!(
+        policy1.check_permission("echo test"),
+        PermissionLevel::Allow
+    );
     assert_eq!(policy1.check_permission("rm -rf /"), PermissionLevel::Deny);
     assert_eq!(
         policy1.check_permission("ls -la"),

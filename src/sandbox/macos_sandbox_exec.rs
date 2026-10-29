@@ -115,15 +115,25 @@ impl MacosSandboxExecToolSandbox {
         let dir = std::env::temp_dir();
         let name = format!(
             "synbot-seatbelt-{}.sb",
-            self.config.sandbox_id.replace(|c: char| !c.is_alphanumeric(), "_")
+            self.config
+                .sandbox_id
+                .replace(|c: char| !c.is_alphanumeric(), "_")
         );
         let path = dir.join(name);
         let body = build_seatbelt_profile(&self.config);
         let mut f = fs::File::create(&path).map_err(|e| {
-            SandboxError::CreationFailed(format!("seatbelt profile create {}: {}", path.display(), e))
+            SandboxError::CreationFailed(format!(
+                "seatbelt profile create {}: {}",
+                path.display(),
+                e
+            ))
         })?;
         f.write_all(body.as_bytes()).map_err(|e| {
-            SandboxError::CreationFailed(format!("seatbelt profile write {}: {}", path.display(), e))
+            SandboxError::CreationFailed(format!(
+                "seatbelt profile write {}: {}",
+                path.display(),
+                e
+            ))
         })?;
         self.profile_path = Some(path.clone());
         Ok(path)
@@ -178,10 +188,9 @@ impl Sandbox for MacosSandboxExecToolSandbox {
         if self.status.state != SandboxState::Running {
             return Err(SandboxError::NotStarted);
         }
-        let profile = self
-            .profile_path
-            .as_ref()
-            .ok_or_else(|| SandboxError::ExecutionFailed("seatbelt profile missing; call start()".to_string()))?;
+        let profile = self.profile_path.as_ref().ok_or_else(|| {
+            SandboxError::ExecutionFailed("seatbelt profile missing; call start()".to_string())
+        })?;
 
         let mut cmd = Command::new(Self::sandbox_exec_path());
         cmd.arg("-f").arg(profile).arg("--").arg(command);

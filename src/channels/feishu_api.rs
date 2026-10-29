@@ -58,12 +58,7 @@ impl FeishuApiClient {
             "app_id": self.app_id,
             "app_secret": self.app_secret,
         });
-        let resp = self
-            .http_client
-            .post(&url)
-            .json(&body)
-            .send()
-            .await?;
+        let resp = self.http_client.post(&url).json(&body).send().await?;
         let status = resp.status();
         let json: serde_json::Value = resp.json().await?;
         if !status.is_success() {
@@ -75,7 +70,9 @@ impl FeishuApiClient {
             .map(String::from)
             .ok_or_else(|| anyhow::anyhow!("missing tenant_access_token in response"))?;
         let expire_secs = json.get("expire").and_then(|v| v.as_u64()).unwrap_or(7200);
-        let ttl = Duration::from_secs(expire_secs.saturating_sub(TOKEN_CACHE_TTL_SECS.min(expire_secs / 2)));
+        let ttl = Duration::from_secs(
+            expire_secs.saturating_sub(TOKEN_CACHE_TTL_SECS.min(expire_secs / 2)),
+        );
         self.token_cache.write().await.replace(TokenCache {
             token: token.clone(),
             expires_at: Instant::now() + ttl,
@@ -102,13 +99,16 @@ impl FeishuApiClient {
         if code != 0 {
             anyhow::bail!("Feishu bot info code {}: {:?}", code, json);
         }
-        let bot = json
-            .get("bot")
-            .cloned()
-            .unwrap_or(serde_json::Value::Null);
+        let bot = json.get("bot").cloned().unwrap_or(serde_json::Value::Null);
         Ok(BotInfoResponse {
-            app_name: bot.get("app_name").and_then(|v| v.as_str()).map(String::from),
-            open_id: bot.get("open_id").and_then(|v| v.as_str()).map(String::from),
+            app_name: bot
+                .get("app_name")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            open_id: bot
+                .get("open_id")
+                .and_then(|v| v.as_str())
+                .map(String::from),
         })
     }
 
@@ -121,7 +121,10 @@ impl FeishuApiClient {
         content: &str,
     ) -> Result<()> {
         let token = self.tenant_access_token().await?;
-        let url = format!("{}/im/v1/messages?receive_id_type={}", FEISHU_BASE, receive_id_type);
+        let url = format!(
+            "{}/im/v1/messages?receive_id_type={}",
+            FEISHU_BASE, receive_id_type
+        );
         let body = serde_json::json!({
             "receive_id": receive_id,
             "msg_type": msg_type,
@@ -202,7 +205,12 @@ pub async fn get_tenant_access_token(app_id: &str, app_secret: &str) -> Result<S
         "app_id": app_id,
         "app_secret": app_secret,
     });
-    let resp = client.post(&url).json(&body).send().await.map_err(|e| e.to_string())?;
+    let resp = client
+        .post(&url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
     let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
     let token = json
         .get("tenant_access_token")

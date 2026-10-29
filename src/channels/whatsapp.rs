@@ -14,7 +14,8 @@ use tracing::{info, warn};
 use crate::bus::{InboundMessage, OutboundMessage};
 use crate::channels::{Channel, ChannelStatusHandle};
 use crate::config::{
-    pairing_allows, pairings_from_config_file_cached, pairing_message, AllowlistEntry, WhatsAppConfig,
+    pairing_allows, pairing_message, pairings_from_config_file_cached, AllowlistEntry,
+    WhatsAppConfig,
 };
 
 use wa_rs::bot::Bot;

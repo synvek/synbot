@@ -1,5 +1,8 @@
 use crate::config::WebConfig;
-use crate::web::handlers::{api, static_files, ws};
+use crate::web::handlers::{
+    api, checkpoints, commands, git, index, plugins, projects, security, static_files, tasks, team,
+    ws, ws_agent, ws_terminal,
+};
 use crate::web::state::AppState;
 use crate::web::{BasicAuth, Cors};
 use actix_web::{web, App, HttpServer};
@@ -30,8 +33,64 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig, state: AppState, auth: Bas
                 .route("/config", web::get().to(api::get_config))
                 .route("/config", web::put().to(api::put_config))
                 .route("/logs", web::get().to(api::get_logs))
-                .route("/approvals/history", web::get().to(api::get_approval_history))
-                .route("/approvals/pending", web::get().to(api::get_pending_approvals))
+                .route(
+                    "/approvals/history",
+                    web::get().to(api::get_approval_history),
+                )
+                .route(
+                    "/approvals/pending",
+                    web::get().to(api::get_pending_approvals),
+                )
+                .route("/projects", web::get().to(projects::get_projects))
+                .route("/projects", web::post().to(projects::open_project))
+                .route("/projects/{id}", web::delete().to(projects::delete_project))
+                .route(
+                    "/projects/{id}/files",
+                    web::get().to(projects::get_project_files),
+                )
+                .route(
+                    "/projects/{id}/file",
+                    web::get().to(projects::get_project_file),
+                )
+                .route("/checkpoints", web::get().to(checkpoints::list_checkpoints))
+                .route(
+                    "/checkpoints/{turn_id}",
+                    web::get().to(checkpoints::get_checkpoint),
+                )
+                .route(
+                    "/checkpoints/{turn_id}/undo",
+                    web::post().to(checkpoints::undo_checkpoint),
+                )
+                .route("/git/status", web::get().to(git::get_status))
+                .route("/git/diff", web::get().to(git::get_diff))
+                .route("/git/log", web::get().to(git::get_log))
+                .route("/tasks", web::get().to(tasks::list_tasks))
+                .route("/tasks", web::put().to(tasks::replace_tasks))
+                .route("/tasks/{id}", web::patch().to(tasks::update_task))
+                .route("/commands", web::get().to(commands::list_commands))
+                .route("/plugins", web::get().to(plugins::list_plugins))
+                .route("/plugins/install", web::post().to(plugins::install_plugin))
+                .route("/plugins/{id}", web::delete().to(plugins::uninstall_plugin))
+                .route(
+                    "/plugins/{id}/enabled",
+                    web::post().to(plugins::set_enabled),
+                )
+                .route("/plugin-keys", web::get().to(plugins::list_keys))
+                .route("/plugin-keys", web::post().to(plugins::add_key))
+                .route("/plugin-keys/{name}", web::delete().to(plugins::remove_key))
+                .route("/security/overview", web::get().to(security::overview))
+                .route("/security/events", web::get().to(security::list_events))
+                .route("/security/events", web::delete().to(security::clear_events))
+                .route("/security/policy", web::post().to(security::explain_policy))
+                .route("/subagents", web::get().to(team::list_subagents))
+                .route(
+                    "/subagents/{id}/cancel",
+                    web::post().to(team::cancel_subagent),
+                )
+                .route("/index", web::get().to(index::get_index))
+                .route("/index/refresh", web::post().to(index::refresh_index))
+                .route("/index/symbols", web::get().to(index::search_symbols))
+                .route("/index/wiki", web::post().to(index::write_wiki))
                 .route(
                     "/approvals/{id}/respond",
                     web::post().to(api::submit_approval_response),
@@ -41,6 +100,8 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig, state: AppState, auth: Bas
             web::scope("/ws")
                 .wrap(auth)
                 .route("/chat", web::get().to(ws::ws_chat))
+                .route("/agent", web::get().to(ws_agent::ws_agent))
+                .route("/terminal", web::get().to(ws_terminal::ws_terminal))
                 .route("/logs", web::get().to(ws::ws_logs)),
         )
         .route("/", web::get().to(static_files::serve_index))

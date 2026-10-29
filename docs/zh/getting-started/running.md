@@ -11,7 +11,7 @@ description: 如何启动、停止和管理 Synbot
 
 若希望使用**原生桌面窗口**（Tauri + 自动 `synbot start`），无需分别启动 CLI 与浏览器，请参阅 [桌面应用](/zh/getting-started/desktop-app)。
 
-开发 Dashboard 前端时，可在两个终端分别运行：`SYNBOT_DESKTOP=1 synbot start` 与 `cd desktop && npm run dev`。
+开发 Dashboard 前端时，只需 `cd desktop && npm run dev`：桌面应用会自动拉起 `synbot start`（18888 已有守护进程时直接复用）。
 
 ## 启动 Synbot
 

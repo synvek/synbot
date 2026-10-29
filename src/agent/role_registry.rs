@@ -65,7 +65,9 @@ impl RoleRegistry {
         if !roles_dir.is_dir() {
             return Ok(());
         }
-        for entry in std::fs::read_dir(roles_dir).with_context(|| format!("reading roles dir {}", roles_dir.display()))? {
+        for entry in std::fs::read_dir(roles_dir)
+            .with_context(|| format!("reading roles dir {}", roles_dir.display()))?
+        {
             let entry = entry?;
             let path = entry.path();
             if path.is_dir() {

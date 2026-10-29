@@ -100,7 +100,10 @@ mod tests {
     #[test]
     fn stop_matches() {
         assert_eq!(parse_control_command("/stop"), Some(ControlCommand::Stop));
-        assert_eq!(parse_control_command("  /stop  "), Some(ControlCommand::Stop));
+        assert_eq!(
+            parse_control_command("  /stop  "),
+            Some(ControlCommand::Stop)
+        );
         assert_eq!(parse_control_command("/STOP"), Some(ControlCommand::Stop));
         assert_eq!(parse_control_command("/stop  "), Some(ControlCommand::Stop));
         assert_eq!(parse_control_command("/stop x"), None);
@@ -109,36 +112,72 @@ mod tests {
     #[test]
     fn cancel_is_alias_for_stop() {
         assert_eq!(parse_control_command("/cancel"), Some(ControlCommand::Stop));
-        assert_eq!(parse_control_command("  /cancel  "), Some(ControlCommand::Stop));
+        assert_eq!(
+            parse_control_command("  /cancel  "),
+            Some(ControlCommand::Stop)
+        );
         assert_eq!(parse_control_command("/CANCEL"), Some(ControlCommand::Stop));
-        assert_eq!(parse_control_command("/cancel  "), Some(ControlCommand::Stop));
+        assert_eq!(
+            parse_control_command("/cancel  "),
+            Some(ControlCommand::Stop)
+        );
         assert_eq!(parse_control_command("/cancel x"), None);
     }
 
     #[test]
     fn resume_status_clear() {
-        assert_eq!(parse_control_command("/resume"), Some(ControlCommand::Resume));
-        assert_eq!(parse_control_command("/status"), Some(ControlCommand::Status));
+        assert_eq!(
+            parse_control_command("/resume"),
+            Some(ControlCommand::Resume)
+        );
+        assert_eq!(
+            parse_control_command("/status"),
+            Some(ControlCommand::Status)
+        );
         assert_eq!(parse_control_command("/clear"), Some(ControlCommand::Clear));
     }
 
     #[test]
     fn commands_and_help() {
-        assert_eq!(parse_control_command("/commands"), Some(ControlCommand::Commands));
-        assert_eq!(parse_control_command("/help"), Some(ControlCommand::Commands));
-        assert_eq!(parse_control_command("  /commands  "), Some(ControlCommand::Commands));
-        assert_eq!(parse_control_command("/help  "), Some(ControlCommand::Commands));
+        assert_eq!(
+            parse_control_command("/commands"),
+            Some(ControlCommand::Commands)
+        );
+        assert_eq!(
+            parse_control_command("/help"),
+            Some(ControlCommand::Commands)
+        );
+        assert_eq!(
+            parse_control_command("  /commands  "),
+            Some(ControlCommand::Commands)
+        );
+        assert_eq!(
+            parse_control_command("/help  "),
+            Some(ControlCommand::Commands)
+        );
         assert_eq!(parse_control_command("/commands now"), None);
     }
 
     #[test]
     fn skills_and_tools() {
-        assert_eq!(parse_control_command("/skills"), Some(ControlCommand::Skills));
-        assert_eq!(parse_control_command("  /skills  "), Some(ControlCommand::Skills));
-        assert_eq!(parse_control_command("/SKILLS"), Some(ControlCommand::Skills));
+        assert_eq!(
+            parse_control_command("/skills"),
+            Some(ControlCommand::Skills)
+        );
+        assert_eq!(
+            parse_control_command("  /skills  "),
+            Some(ControlCommand::Skills)
+        );
+        assert_eq!(
+            parse_control_command("/SKILLS"),
+            Some(ControlCommand::Skills)
+        );
         assert_eq!(parse_control_command("/skills extra"), None);
         assert_eq!(parse_control_command("/tools"), Some(ControlCommand::Tools));
-        assert_eq!(parse_control_command("/TOOLS "), Some(ControlCommand::Tools));
+        assert_eq!(
+            parse_control_command("/TOOLS "),
+            Some(ControlCommand::Tools)
+        );
         assert_eq!(parse_control_command("/tools x"), None);
     }
 

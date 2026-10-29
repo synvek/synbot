@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tracing::warn;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock, RwLock};
 use std::time::SystemTime;
+use tracing::warn;
 
 // ---------------------------------------------------------------------------
 // Channel configs
@@ -633,7 +633,10 @@ pub fn resolve_provider(cfg: &Config, provider_name: &str) -> (String, Option<St
 
 /// Optional per-provider ceiling for completion `max_tokens` (see [`ProviderEntry::max_tokens_cap`]).
 /// Aligns provider name resolution with [`resolve_provider`] (extra entry first, then built-in blocks).
-pub fn resolve_provider_max_tokens_cap(providers: &ProvidersConfig, provider_name: &str) -> Option<u32> {
+pub fn resolve_provider_max_tokens_cap(
+    providers: &ProvidersConfig,
+    provider_name: &str,
+) -> Option<u32> {
     let trimmed = provider_name.trim();
     let lower = trimmed.to_lowercase();
 
@@ -724,8 +727,13 @@ pub struct MainAgent {
     pub max_tokens: u32,
     #[serde(default = "default_temperature")]
     pub temperature: f32,
+    /// Productive model rounds per turn. Rounds that only repeat a call already made in the turn,
+    /// or re-poll unchanged status, are counted by `max_idle_iterations` instead. Default 99.
     #[serde(default = "default_max_iterations")]
     pub max_tool_iterations: u32,
+    /// Consecutive rounds that make no new progress before the turn stops. Default 6.
+    #[serde(default = "default_max_idle_iterations")]
+    pub max_idle_iterations: u32,
     /// Maximum consecutive tool failures before stopping. Default 8.
     #[serde(default = "default_max_consecutive_tool_errors")]
     pub max_consecutive_tool_errors: u32,
@@ -761,6 +769,9 @@ fn default_temperature() -> f32 {
 fn default_max_iterations() -> u32 {
     99
 }
+fn default_max_idle_iterations() -> u32 {
+    6
+}
 fn default_max_consecutive_tool_errors() -> u32 {
     8
 }
@@ -783,6 +794,7 @@ impl Default for MainAgent {
             max_tokens: default_max_tokens(),
             temperature: default_temperature(),
             max_tool_iterations: default_max_iterations(),
+            max_idle_iterations: default_max_idle_iterations(),
             max_consecutive_tool_errors: default_max_consecutive_tool_errors(),
             max_chat_history_messages: default_max_chat_history_messages(),
             max_concurrent_subagents: default_max_concurrent_subagents(),
@@ -1762,14 +1774,19 @@ fn default_tool_result_preview_chars() -> u32 {
     2048
 }
 
-fn object_field<'a>(object: &'a mut serde_json::Map<String, serde_json::Value>, key: &str) -> &'a mut serde_json::Map<String, serde_json::Value> {
+fn object_field<'a>(
+    object: &'a mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> &'a mut serde_json::Map<String, serde_json::Value> {
     let value = object
         .entry(key.to_string())
         .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
     if !value.is_object() {
         *value = serde_json::Value::Object(serde_json::Map::new());
     }
-    value.as_object_mut().expect("object field was just initialized")
+    value
+        .as_object_mut()
+        .expect("object field was just initialized")
 }
 
 /// Apply only missing profile defaults to a raw config value. Explicit values
@@ -1948,7 +1965,11 @@ fn expand_sandbox_paths(paths: &[String]) -> Vec<String> {
             let s = p.trim();
             let expanded = if s.starts_with("~/") || s == "~" {
                 home.as_ref()
-                    .map(|h| h.join(s.trim_start_matches('~').trim_start_matches('/')).display().to_string())
+                    .map(|h| {
+                        h.join(s.trim_start_matches('~').trim_start_matches('/'))
+                            .display()
+                            .to_string()
+                    })
                     .unwrap_or_else(|| p.to_string())
             } else if s.starts_with("~\\") || (cfg!(windows) && s.starts_with('~')) {
                 home.as_ref()
@@ -1966,7 +1987,9 @@ fn expand_sandbox_paths(paths: &[String]) -> Vec<String> {
 }
 
 /// Docker-backed tool sandboxes use `workspace_mount` / `skills_mount`; host-native backends use expanded paths in `writable_paths` / `readonly_paths`.
-pub fn tool_sandbox_exec_kind(cfg: &ToolSandboxConfig) -> crate::sandbox::types::ToolSandboxExecKind {
+pub fn tool_sandbox_exec_kind(
+    cfg: &ToolSandboxConfig,
+) -> crate::sandbox::types::ToolSandboxExecKind {
     let s = cfg.sandbox_type.as_deref().unwrap_or("gvisor-docker");
     if tool_sandbox_backend_is_docker(s) {
         crate::sandbox::types::ToolSandboxExecKind::Docker
@@ -1997,7 +2020,9 @@ fn sandbox_path_list_contains(paths: &[String], candidate: &str) -> bool {
     paths.iter().any(|p| norm(p) == n)
 }
 
-fn build_sandbox_monitoring(mon: &Option<SandboxMonitoringConfig>) -> crate::sandbox::types::MonitoringConfig {
+fn build_sandbox_monitoring(
+    mon: &Option<SandboxMonitoringConfig>,
+) -> crate::sandbox::types::MonitoringConfig {
     match mon {
         None => crate::sandbox::types::MonitoringConfig::default(),
         Some(m) => crate::sandbox::types::MonitoringConfig {
@@ -2043,31 +2068,25 @@ pub fn build_app_sandbox_config(
     full: &Config,
     monitoring: &Option<SandboxMonitoringConfig>,
 ) -> anyhow::Result<crate::sandbox::types::SandboxConfig> {
-    let platform = cfg
-        .platform
-        .as_deref()
-        .unwrap_or("auto")
-        .to_string();
-    let fs = cfg.filesystem.as_ref().map(|f| SandboxFilesystemConfig {
-        readonly_paths: f.readonly_paths.clone(),
-        writable_paths: f.writable_paths.clone(),
-        hidden_paths: f.hidden_paths.clone(),
-        mount_skills_dir: f.mount_skills_dir,
-    }).unwrap_or_default();
-    let net = cfg
-        .network
+    let platform = cfg.platform.as_deref().unwrap_or("auto").to_string();
+    let fs = cfg
+        .filesystem
         .as_ref()
-        .cloned()
+        .map(|f| SandboxFilesystemConfig {
+            readonly_paths: f.readonly_paths.clone(),
+            writable_paths: f.writable_paths.clone(),
+            hidden_paths: f.hidden_paths.clone(),
+            mount_skills_dir: f.mount_skills_dir,
+        })
         .unwrap_or_default();
+    let net = cfg.network.as_ref().cloned().unwrap_or_default();
     let res = cfg.resources.as_ref();
     let max_memory = res
         .and_then(|r| r.max_memory.as_ref())
         .map(|v| parse_sandbox_size_bytes(v))
         .transpose()?
         .unwrap_or(2 * 1024 * 1024 * 1024);
-    let max_cpu = res
-        .and_then(|r| r.max_cpu)
-        .unwrap_or(2.0);
+    let max_cpu = res.and_then(|r| r.max_cpu).unwrap_or(2.0);
     let max_disk = res
         .and_then(|r| r.max_disk.as_ref())
         .map(|v| parse_sandbox_size_bytes(v))
@@ -2089,8 +2108,10 @@ pub fn build_app_sandbox_config(
                 .map(rewrite_legacy_synbot_path_string)
         }
     };
-    let mut readonly_paths = rewrite_legacy_synbot_paths_for_root_override(expand_sandbox_paths(&fs.readonly_paths));
-    let mut writable_paths = rewrite_legacy_synbot_paths_for_root_override(expand_sandbox_paths(&fs.writable_paths));
+    let mut readonly_paths =
+        rewrite_legacy_synbot_paths_for_root_override(expand_sandbox_paths(&fs.readonly_paths));
+    let mut writable_paths =
+        rewrite_legacy_synbot_paths_for_root_override(expand_sandbox_paths(&fs.writable_paths));
     merge_implicit_app_sandbox_host_paths(full, &mut writable_paths);
     Ok(crate::sandbox::types::SandboxConfig {
         sandbox_id: "synbot-app".to_string(),
@@ -2098,7 +2119,9 @@ pub fn build_app_sandbox_config(
         filesystem: crate::sandbox::types::FilesystemConfig {
             readonly_paths,
             writable_paths,
-            hidden_paths: rewrite_legacy_synbot_paths_for_root_override(expand_sandbox_paths(&fs.hidden_paths)),
+            hidden_paths: rewrite_legacy_synbot_paths_for_root_override(expand_sandbox_paths(
+                &fs.hidden_paths,
+            )),
             ..Default::default()
         },
         network: crate::sandbox::types::NetworkConfig {
@@ -2135,15 +2158,21 @@ pub fn build_tool_sandbox_config(
     let platform = "auto".to_string();
     let tool_type = cfg.sandbox_type.as_deref().unwrap_or("gvisor-docker");
     let is_docker = tool_sandbox_backend_is_docker(tool_type);
-    let fs = cfg.filesystem.as_ref().map(|f| SandboxFilesystemConfig {
-        readonly_paths: f.readonly_paths.clone(),
-        writable_paths: f.writable_paths.clone(),
-        hidden_paths: f.hidden_paths.clone(),
-        mount_skills_dir: f.mount_skills_dir,
-    }).unwrap_or_default();
+    let fs = cfg
+        .filesystem
+        .as_ref()
+        .map(|f| SandboxFilesystemConfig {
+            readonly_paths: f.readonly_paths.clone(),
+            writable_paths: f.writable_paths.clone(),
+            hidden_paths: f.hidden_paths.clone(),
+            mount_skills_dir: f.mount_skills_dir,
+        })
+        .unwrap_or_default();
     let mount_skills = fs.mount_skills_dir != Some(false) && skills_dir.exists();
-    let mut readonly_paths = rewrite_legacy_synbot_paths_for_root_override(expand_sandbox_paths(&fs.readonly_paths));
-    let mut writable_paths = rewrite_legacy_synbot_paths_for_root_override(expand_sandbox_paths(&fs.writable_paths));
+    let mut readonly_paths =
+        rewrite_legacy_synbot_paths_for_root_override(expand_sandbox_paths(&fs.readonly_paths));
+    let mut writable_paths =
+        rewrite_legacy_synbot_paths_for_root_override(expand_sandbox_paths(&fs.writable_paths));
     let workspace_host = workspace_path.to_string_lossy().to_string();
     let workspace_expanded = rewrite_legacy_synbot_path_string(
         expand_sandbox_paths(&[workspace_host.clone()])
@@ -2159,10 +2188,7 @@ pub fn build_tool_sandbox_config(
         if mount_skills {
             let sk = skills_dir.to_string_lossy().to_string();
             let sk_exp = rewrite_legacy_synbot_path_string(
-                expand_sandbox_paths(&[sk])
-                    .into_iter()
-                    .next()
-                    .unwrap(),
+                expand_sandbox_paths(&[sk]).into_iter().next().unwrap(),
             );
             if !sandbox_path_list_contains(&readonly_paths, &sk_exp) {
                 readonly_paths.push(sk_exp);
@@ -2170,11 +2196,7 @@ pub fn build_tool_sandbox_config(
         }
     }
 
-    let net = cfg
-        .network
-        .as_ref()
-        .cloned()
-        .unwrap_or_default();
+    let net = cfg.network.as_ref().cloned().unwrap_or_default();
     let res = cfg.resources.as_ref();
     let max_memory = res
         .and_then(|r| r.max_memory.as_ref())
@@ -2222,7 +2244,9 @@ pub fn build_tool_sandbox_config(
         filesystem: crate::sandbox::types::FilesystemConfig {
             readonly_paths,
             writable_paths,
-            hidden_paths: rewrite_legacy_synbot_paths_for_root_override(expand_sandbox_paths(&fs.hidden_paths)),
+            hidden_paths: rewrite_legacy_synbot_paths_for_root_override(expand_sandbox_paths(
+                &fs.hidden_paths,
+            )),
             workspace_mount,
             skills_mount,
         },
@@ -2280,6 +2304,7 @@ impl std::fmt::Display for ValidationError {
 /// - `mainAgent.max_tokens > 0`
 /// - `mainAgent.temperature` in `[0.0, 2.0]`
 /// - `mainAgent.max_tool_iterations > 0`
+/// - `mainAgent.max_idle_iterations > 0`
 /// - `tools.exec.timeout_secs > 0`
 /// - Enabled channels must have non-empty credentials
 pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
@@ -2306,6 +2331,14 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
         errors.push(ValidationError {
             field: "mainAgent.max_tool_iterations".into(),
             value: config.main_agent.max_tool_iterations.to_string(),
+            constraint: "must be greater than 0".into(),
+        });
+    }
+
+    if config.main_agent.max_idle_iterations == 0 {
+        errors.push(ValidationError {
+            field: "mainAgent.max_idle_iterations".into(),
+            value: config.main_agent.max_idle_iterations.to_string(),
             constraint: "must be greater than 0".into(),
         });
     }
@@ -2386,7 +2419,12 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
         if config.tools.exec.permissions.approval_timeout_secs == 0 {
             errors.push(ValidationError {
                 field: "tools.exec.permissions.approval_timeout_secs".into(),
-                value: config.tools.exec.permissions.approval_timeout_secs.to_string(),
+                value: config
+                    .tools
+                    .exec
+                    .permissions
+                    .approval_timeout_secs
+                    .to_string(),
                 constraint: "must be greater than 0".into(),
             });
         }
@@ -2603,12 +2641,17 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
                     constraint: "must be non-empty when enabled".into(),
                 });
             }
-            let has_token = c.access_token.as_deref().map(|s| !s.trim().is_empty()).unwrap_or(false);
+            let has_token = c
+                .access_token
+                .as_deref()
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false);
             if !has_token && c.password.is_empty() && c.username.trim().is_empty() {
                 errors.push(ValidationError {
                     field: format!("channels.matrix[{}]", i),
                     value: String::new(),
-                    constraint: "when enabled, set accessToken or both username and password".into(),
+                    constraint: "when enabled, set accessToken or both username and password"
+                        .into(),
                 });
             }
         }
@@ -2782,15 +2825,16 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
             errors.push(ValidationError {
                 field: format!("{}.name", agent_label),
                 value: agent.name.clone(),
-                constraint: "agent name must contain only letters, digits, and underscores"
-                    .into(),
+                constraint: "agent name must contain only letters, digits, and underscores".into(),
             });
         }
         if agent.role.trim().is_empty() {
             errors.push(ValidationError {
                 field: format!("{}.role", agent_label),
                 value: agent.role.clone(),
-                constraint: "agent role must be non-empty (must match a subdir under ~/.synbot/roles/)".into(),
+                constraint:
+                    "agent role must be non-empty (must match a subdir under ~/.synbot/roles/)"
+                        .into(),
             });
         }
         if !agent.role.is_empty()
@@ -2827,7 +2871,7 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
 
 /// Per-process root directory override (set from CLI --root-dir). When set, config_dir() returns this path
 /// instead of ~/.synbot. Enables multiple synbot instances with different workspaces.
-static ROOT_DIR_OVERRIDE: OnceLock<RwLock<Option<PathBuf>> > = OnceLock::new();
+static ROOT_DIR_OVERRIDE: OnceLock<RwLock<Option<PathBuf>>> = OnceLock::new();
 
 fn root_dir_guard() -> &'static RwLock<Option<PathBuf>> {
     ROOT_DIR_OVERRIDE.get_or_init(|| RwLock::new(None))
@@ -2953,11 +2997,7 @@ fn rewrite_legacy_synbot_paths_for_root_override(paths: Vec<String>) -> Vec<Stri
                 .to_string_lossy()
                 .into_owned();
             if out != s {
-                log::info!(
-                    "sandbox path remapped (--root-dir): {} -> {}",
-                    trimmed,
-                    out
-                );
+                log::info!("sandbox path remapped (--root-dir): {} -> {}", trimmed, out);
             }
             out
         })
@@ -3022,20 +3062,32 @@ pub fn skills_dir() -> PathBuf {
     config_dir().join("skills")
 }
 
-pub fn workspace_path(cfg: &Config) -> PathBuf {
-    let raw = &cfg.main_agent.workspace;
-    if raw.starts_with('~') {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-        let rest = raw
-            .trim_start_matches('~')
-            .trim_start_matches('/')
-            .trim_start_matches('\\');
-        // Avoid `C:\Users\you\.\.synbot` when config has `~/.\.synbot` — collapse `.` segments.
-        let tail: PathBuf = Path::new(rest).components().collect();
-        home.join(tail)
-    } else {
-        PathBuf::from(raw)
+/// Expand a leading `~` (bare or `~/…`) to the user's home directory; other paths pass through.
+///
+/// Config files store paths like `~/.synbot/workspace`. Without this expansion such a value is
+/// just a relative directory named `~`, so it gets joined onto the process cwd and every lookup
+/// lands in `<cwd>/~/.synbot/workspace`.
+fn expand_tilde(path: &Path) -> PathBuf {
+    let Some(raw) = path.to_str() else {
+        return path.to_path_buf();
+    };
+    if raw != "~" && !raw.starts_with("~/") && !raw.starts_with("~\\") {
+        return path.to_path_buf();
     }
+    let Some(home) = dirs::home_dir() else {
+        return path.to_path_buf();
+    };
+    let rest = raw
+        .trim_start_matches('~')
+        .trim_start_matches('/')
+        .trim_start_matches('\\');
+    // Collecting components drops `.` segments, so a config value like `~/.`
+    // never produces a doubled separator under the home directory.
+    home.join(Path::new(rest).components().collect::<PathBuf>())
+}
+
+pub fn workspace_path(cfg: &Config) -> PathBuf {
+    expand_tilde(Path::new(&cfg.main_agent.workspace))
 }
 
 /// Collapse redundant `.` / `..` segments (e.g. `C:\Users\x\.\.synbot` → `C:\Users\x\.synbot`).
@@ -3045,15 +3097,18 @@ fn collapse_path_components(path: &Path) -> PathBuf {
 
 /// Resolve a workspace or exec `cwd` to an absolute path (canonicalize when possible).
 ///
-/// Relative paths (e.g. `.\.synbot\...`) break Windows `CreateProcessW` current directory and
-/// AppContainer ACL grants; tool sandbox + exec should use a stable absolute path.
+/// A leading `~` is expanded first, so config values such as `~/.synbot/workspace` resolve to the
+/// home directory instead of a literal `~` folder under the process cwd. Relative paths (e.g.
+/// `.\.synbot\...`) break Windows `CreateProcessW` current directory and AppContainer ACL grants;
+/// tool sandbox + exec should use a stable absolute path.
 pub fn normalize_workspace_path(path: &Path) -> PathBuf {
+    let path = expand_tilde(path);
     let absolute = if path.is_absolute() {
-        path.to_path_buf()
+        path
     } else {
         std::env::current_dir()
             .unwrap_or_else(|_| PathBuf::from("."))
-            .join(path)
+            .join(&path)
     };
     let resolved = std::fs::canonicalize(&absolute).unwrap_or(absolute);
     let resolved = {
@@ -3227,15 +3282,20 @@ impl EnvSubstitutor {
 
         while i < len {
             // Check for escape sequence: \${
-            if chars[i] == '\\' && i + 1 < len && chars[i + 1] == '$' && i + 2 < len && chars[i + 2] == '{' {
+            if chars[i] == '\\'
+                && i + 1 < len
+                && chars[i + 1] == '$'
+                && i + 2 < len
+                && chars[i + 2] == '{'
+            {
                 // Escaped: preserve as literal ${...}
                 // Skip the backslash, emit the rest literally until closing '}'
                 i += 1; // skip backslash
-                // Emit '${' and everything up to and including '}'
+                        // Emit '${' and everything up to and including '}'
                 result.push('$');
                 result.push('{');
                 i += 2; // skip '${'
-                // Find the closing '}'
+                        // Find the closing '}'
                 while i < len && chars[i] != '}' {
                     result.push(chars[i]);
                     i += 1;
@@ -3337,10 +3397,7 @@ impl ConfigMigrator {
         let backup_path = Self::backup_path(config_path);
         if config_path.exists() {
             std::fs::copy(config_path, &backup_path).with_context(|| {
-                format!(
-                    "creating migration backup at {}",
-                    backup_path.display()
-                )
+                format!("creating migration backup at {}", backup_path.display())
             })?;
         }
 
@@ -3351,7 +3408,9 @@ impl ConfigMigrator {
             if from == current && to <= self.current_version {
                 // Use a sentinel to avoid partial-move issues: replace value with null temporarily
                 let old_value = std::mem::replace(&mut value, serde_json::Value::Null);
-                match f(old_value).with_context(|| format!("migration step {} -> {} failed", from, to)) {
+                match f(old_value)
+                    .with_context(|| format!("migration step {} -> {} failed", from, to))
+                {
                     Ok(new_value) => {
                         value = new_value;
                         current = to;
@@ -3385,9 +3444,8 @@ impl ConfigMigrator {
             std::fs::create_dir_all(parent)?;
         }
         let json = serde_json::to_string_pretty(&value)?;
-        std::fs::write(config_path, json).with_context(|| {
-            format!("writing migrated config to {}", config_path.display())
-        })?;
+        std::fs::write(config_path, json)
+            .with_context(|| format!("writing migrated config to {}", config_path.display()))?;
         Ok(value)
     }
 
@@ -3429,15 +3487,17 @@ fn build_config_migrator() -> ConfigMigrator {
 }
 
 pub fn load_config(path: Option<&Path>) -> Result<Config> {
-    let p = path
-        .map(PathBuf::from)
-        .unwrap_or_else(config_path);
+    let p = path.map(PathBuf::from).unwrap_or_else(config_path);
 
     let cfg = if p.exists() {
         let text = std::fs::read_to_string(&p)
             .with_context(|| format!("reading config from {}", p.display()))?;
-        let text = EnvSubstitutor::substitute(&text)
-            .with_context(|| format!("substituting environment variables in config from {}", p.display()))?;
+        let text = EnvSubstitutor::substitute(&text).with_context(|| {
+            format!(
+                "substituting environment variables in config from {}",
+                p.display()
+            )
+        })?;
 
         // Run config migration if needed
         let mut value: serde_json::Value = serde_json::from_str(&text)
@@ -3515,9 +3575,7 @@ fn backup_config_before_save(config_path: &Path) -> Result<()> {
                 let bak = bak_path_for(i);
                 if let Ok(meta) = std::fs::metadata(&bak) {
                     if let Ok(mtime) = meta.modified() {
-                        let use_this = oldest
-                            .map(|(_, t)| mtime < t)
-                            .unwrap_or(true);
+                        let use_this = oldest.map(|(_, t)| mtime < t).unwrap_or(true);
                         if use_this {
                             oldest = Some((i, mtime));
                         }
@@ -3533,9 +3591,7 @@ fn backup_config_before_save(config_path: &Path) -> Result<()> {
 }
 
 pub fn save_config(cfg: &Config, path: Option<&Path>) -> Result<()> {
-    let p = path
-        .map(PathBuf::from)
-        .unwrap_or_else(config_path);
+    let p = path.map(PathBuf::from).unwrap_or_else(config_path);
 
     backup_config_before_save(&p)?;
 
@@ -3562,10 +3618,7 @@ pub fn is_pairing_channel_provider(name: &str) -> bool {
 /// 12 lowercase hex chars: MD5(chat_id) prefix.
 pub fn pairing_code_from_chat_id(chat_id: &str) -> String {
     let digest = md5::compute(chat_id.as_bytes());
-    format!("{:x}", digest)
-        .chars()
-        .take(12)
-        .collect()
+    format!("{:x}", digest).chars().take(12).collect()
 }
 
 /// User-facing hint when allowlist blocks the chat (English, single line breaks avoided).
@@ -3586,10 +3639,9 @@ pub fn pairing_allows(chat_id: &str, provider: &str, pairings: &[PairingEntry]) 
 }
 
 fn read_pairings_from_file(path: &Path) -> Result<Vec<PairingEntry>> {
-    let text =
-        std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-    let v: serde_json::Value = serde_json::from_str(&text)
-        .with_context(|| format!("parse JSON {}", path.display()))?;
+    let text = std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+    let v: serde_json::Value =
+        serde_json::from_str(&text).with_context(|| format!("parse JSON {}", path.display()))?;
     match v.get("pairings") {
         Some(p) => Ok(serde_json::from_value(p.clone()).unwrap_or_default()),
         None => Ok(Vec::new()),
@@ -3796,7 +3848,9 @@ mod tests {
             ],
         });
         let errors = validate_config(&cfg).unwrap_err();
-        assert!(errors.iter().any(|e| e.constraint.contains("unique among tools.mcp.servers")));
+        assert!(errors
+            .iter()
+            .any(|e| e.constraint.contains("unique among tools.mcp.servers")));
     }
 
     #[test]
@@ -3848,7 +3902,8 @@ mod tests {
         let mut cfg = valid_config();
         cfg.main_agent.max_tokens = 0;
         let errors = validate_config(&cfg).unwrap_err();
-        let err = find_error(&errors, "mainAgent.max_tokens").expect("expected error for max_tokens");
+        let err =
+            find_error(&errors, "mainAgent.max_tokens").expect("expected error for max_tokens");
         assert_eq!(err.value, "0");
         assert!(err.constraint.contains("greater than 0"));
     }
@@ -3898,6 +3953,22 @@ mod tests {
         assert!(find_error(&errors, "mainAgent.max_tool_iterations").is_some());
     }
 
+    #[test]
+    fn max_idle_iterations_zero_is_rejected() {
+        let mut cfg = valid_config();
+        cfg.main_agent.max_idle_iterations = 0;
+        let errors = validate_config(&cfg).unwrap_err();
+        assert!(find_error(&errors, "mainAgent.max_idle_iterations").is_some());
+    }
+
+    #[test]
+    fn max_idle_iterations_defaults_to_six() {
+        let cfg: Config =
+            serde_json::from_str(r#"{"mainAgent":{"maxTokens":4096,"temperature":0.5}}"#).unwrap();
+        assert_eq!(cfg.main_agent.max_idle_iterations, 6);
+        assert_eq!(cfg.main_agent.max_tool_iterations, 99);
+    }
+
     // --- tools.exec.timeout_secs ---
 
     #[test]
@@ -3920,7 +3991,9 @@ mod tests {
             ..Default::default()
         }];
         let errors = validate_config(&cfg).unwrap_err();
-        assert!(errors.iter().any(|e| e.field == "channels.telegram[0].token"));
+        assert!(errors
+            .iter()
+            .any(|e| e.field == "channels.telegram[0].token"));
     }
 
     #[test]
@@ -3956,7 +4029,9 @@ mod tests {
             ..Default::default()
         }];
         let errors = validate_config(&cfg).unwrap_err();
-        assert!(errors.iter().any(|e| e.field == "channels.discord[0].token"));
+        assert!(errors
+            .iter()
+            .any(|e| e.field == "channels.discord[0].token"));
     }
 
     #[test]
@@ -3983,8 +4058,12 @@ mod tests {
             ..Default::default()
         }];
         let errors = validate_config(&cfg).unwrap_err();
-        assert!(errors.iter().any(|e| e.field == "channels.feishu[0].app_id"));
-        assert!(errors.iter().any(|e| e.field == "channels.feishu[0].app_secret"));
+        assert!(errors
+            .iter()
+            .any(|e| e.field == "channels.feishu[0].app_id"));
+        assert!(errors
+            .iter()
+            .any(|e| e.field == "channels.feishu[0].app_secret"));
     }
 
     #[test]
@@ -4017,11 +4096,17 @@ mod tests {
         }];
 
         let errors = validate_config(&cfg).unwrap_err();
-        assert!(errors.len() >= 4, "expected at least 4 errors, got {}", errors.len());
+        assert!(
+            errors.len() >= 4,
+            "expected at least 4 errors, got {}",
+            errors.len()
+        );
         assert!(find_error(&errors, "mainAgent.max_tokens").is_some());
         assert!(find_error(&errors, "mainAgent.temperature").is_some());
         assert!(find_error(&errors, "tools.exec.timeout_secs").is_some());
-        assert!(errors.iter().any(|e| e.field == "channels.telegram[0].token"));
+        assert!(errors
+            .iter()
+            .any(|e| e.field == "channels.telegram[0].token"));
     }
 
     // --- load_config integration ---
@@ -4030,11 +4115,7 @@ mod tests {
     fn load_config_with_invalid_values_returns_error() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("bad_config.json");
-        std::fs::write(
-            &path,
-            r#"{"mainAgent":{"maxTokens":0,"temperature":3.0}}"#,
-        )
-        .unwrap();
+        std::fs::write(&path, r#"{"mainAgent":{"maxTokens":0,"temperature":3.0}}"#).unwrap();
 
         let result = load_config(Some(&path));
         assert!(result.is_err());
@@ -4131,7 +4212,9 @@ mod tests {
         let mut cfg = config_with_telegram();
         cfg.main_agent.agents = vec![make_agent("main", "main")];
         let errors = validate_config(&cfg).unwrap_err();
-        assert!(errors.iter().any(|e| e.constraint.contains("must not be 'main'")));
+        assert!(errors
+            .iter()
+            .any(|e| e.constraint.contains("must not be 'main'")));
     }
 
     #[test]
@@ -4139,7 +4222,9 @@ mod tests {
         let mut cfg = config_with_telegram();
         cfg.main_agent.agents = vec![make_agent("helper", "bad-role!")];
         let errors = validate_config(&cfg).unwrap_err();
-        assert!(errors.iter().any(|e| e.constraint.contains("letters, digits, and underscores")));
+        assert!(errors
+            .iter()
+            .any(|e| e.constraint.contains("letters, digits, and underscores")));
     }
 
     #[test]
@@ -4152,11 +4237,21 @@ mod tests {
     #[test]
     fn agent_role_empty_is_rejected() {
         let mut cfg = config_with_telegram();
-        cfg.main_agent.agents = vec![
-            AgentConfig { name: "helper".into(), role: String::new(), provider: None, model: None, max_tokens: None, temperature: None, max_iterations: None, skills: Vec::new(), tools: Vec::new() },
-        ];
+        cfg.main_agent.agents = vec![AgentConfig {
+            name: "helper".into(),
+            role: String::new(),
+            provider: None,
+            model: None,
+            max_tokens: None,
+            temperature: None,
+            max_iterations: None,
+            skills: Vec::new(),
+            tools: Vec::new(),
+        }];
         let errors = validate_config(&cfg).unwrap_err();
-        assert!(errors.iter().any(|e| e.constraint.contains("role must be non-empty")));
+        assert!(errors
+            .iter()
+            .any(|e| e.constraint.contains("role must be non-empty")));
     }
 
     // --- ValidationError Display ---
@@ -4183,7 +4278,10 @@ mod tests {
         assert!(cfg.tools.exec.permissions.enabled);
         assert!(cfg.tools.exec.restrict_to_workspace);
         assert!(cfg.tool_sandbox.is_some());
-        assert_eq!(cfg.tools.exec.permissions.default_level, PermissionLevel::RequireApproval);
+        assert_eq!(
+            cfg.tools.exec.permissions.default_level,
+            PermissionLevel::RequireApproval
+        );
         assert_eq!(cfg.tools.exec.permissions.approval_timeout_secs, 300);
         assert!(cfg.tools.exec.permissions.rules.is_empty());
     }
@@ -4218,13 +4316,22 @@ mod tests {
 
         let cfg = load_config(Some(&path)).unwrap();
         assert!(cfg.tools.exec.permissions.enabled);
-        assert_eq!(cfg.tools.exec.permissions.default_level, PermissionLevel::RequireApproval);
+        assert_eq!(
+            cfg.tools.exec.permissions.default_level,
+            PermissionLevel::RequireApproval
+        );
         assert_eq!(cfg.tools.exec.permissions.approval_timeout_secs, 600);
         assert_eq!(cfg.tools.exec.permissions.rules.len(), 2);
         assert_eq!(cfg.tools.exec.permissions.rules[0].pattern, "ls*");
-        assert_eq!(cfg.tools.exec.permissions.rules[0].level, PermissionLevel::Allow);
+        assert_eq!(
+            cfg.tools.exec.permissions.rules[0].level,
+            PermissionLevel::Allow
+        );
         assert_eq!(cfg.tools.exec.permissions.rules[1].pattern, "rm*");
-        assert_eq!(cfg.tools.exec.permissions.rules[1].level, PermissionLevel::Deny);
+        assert_eq!(
+            cfg.tools.exec.permissions.rules[1].level,
+            PermissionLevel::Deny
+        );
     }
 
     #[test]
@@ -4244,7 +4351,10 @@ mod tests {
 
         let cfg = load_config(Some(&path)).unwrap();
         assert!(cfg.tools.exec.permissions.enabled);
-        assert_eq!(cfg.tools.exec.permissions.default_level, PermissionLevel::RequireApproval);
+        assert_eq!(
+            cfg.tools.exec.permissions.default_level,
+            PermissionLevel::RequireApproval
+        );
         assert_eq!(cfg.tools.exec.permissions.approval_timeout_secs, 300);
         assert!(cfg.tools.exec.permissions.rules.is_empty());
     }
@@ -4273,10 +4383,22 @@ mod tests {
         save_config(&cfg, Some(&path)).unwrap();
         let loaded = load_config(Some(&path)).unwrap();
 
-        assert_eq!(loaded.tools.exec.permissions.enabled, cfg.tools.exec.permissions.enabled);
-        assert_eq!(loaded.tools.exec.permissions.default_level, cfg.tools.exec.permissions.default_level);
-        assert_eq!(loaded.tools.exec.permissions.approval_timeout_secs, cfg.tools.exec.permissions.approval_timeout_secs);
-        assert_eq!(loaded.tools.exec.permissions.rules.len(), cfg.tools.exec.permissions.rules.len());
+        assert_eq!(
+            loaded.tools.exec.permissions.enabled,
+            cfg.tools.exec.permissions.enabled
+        );
+        assert_eq!(
+            loaded.tools.exec.permissions.default_level,
+            cfg.tools.exec.permissions.default_level
+        );
+        assert_eq!(
+            loaded.tools.exec.permissions.approval_timeout_secs,
+            cfg.tools.exec.permissions.approval_timeout_secs
+        );
+        assert_eq!(
+            loaded.tools.exec.permissions.rules.len(),
+            cfg.tools.exec.permissions.rules.len()
+        );
     }
 
     // --- Permission config validation tests ---
@@ -4314,16 +4436,18 @@ mod tests {
     fn permission_rule_empty_pattern_is_rejected() {
         let mut cfg = valid_config();
         cfg.tools.exec.permissions.enabled = true;
-        cfg.tools.exec.permissions.rules = vec![
-            PermissionRule {
-                pattern: String::new(),
-                level: PermissionLevel::Allow,
-                description: None,
-            },
-        ];
+        cfg.tools.exec.permissions.rules = vec![PermissionRule {
+            pattern: String::new(),
+            level: PermissionLevel::Allow,
+            description: None,
+        }];
         let errors = validate_config(&cfg).unwrap_err();
-        assert!(errors.iter().any(|e| e.field.contains("tools.exec.permissions.rules[0].pattern")));
-        assert!(errors.iter().any(|e| e.constraint.contains("pattern must be non-empty")));
+        assert!(errors
+            .iter()
+            .any(|e| e.field.contains("tools.exec.permissions.rules[0].pattern")));
+        assert!(errors
+            .iter()
+            .any(|e| e.constraint.contains("pattern must be non-empty")));
     }
 
     #[test]
@@ -4363,17 +4487,27 @@ mod tests {
             },
         ];
         let errors = validate_config(&cfg).unwrap_err();
-        assert!(errors.len() >= 3, "expected at least 3 errors, got {}", errors.len());
+        assert!(
+            errors.len() >= 3,
+            "expected at least 3 errors, got {}",
+            errors.len()
+        );
         assert!(find_error(&errors, "tools.exec.permissions.approval_timeout_secs").is_some());
-        assert!(errors.iter().any(|e| e.field.contains("tools.exec.permissions.rules[0].pattern")));
-        assert!(errors.iter().any(|e| e.field.contains("tools.exec.permissions.rules[1].pattern")));
+        assert!(errors
+            .iter()
+            .any(|e| e.field.contains("tools.exec.permissions.rules[0].pattern")));
+        assert!(errors
+            .iter()
+            .any(|e| e.field.contains("tools.exec.permissions.rules[1].pattern")));
     }
 
     #[test]
     fn pairing_code_from_chat_id_is_twelve_lowercase_hex() {
         let code = pairing_code_from_chat_id("room!abc:example.org");
         assert_eq!(code.len(), 12);
-        assert!(code.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()));
+        assert!(code
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()));
     }
 
     #[test]
@@ -4397,5 +4531,36 @@ mod tests {
         assert!(m.contains(&pairing_code_from_chat_id("oc_xxx")));
         assert!(m.contains("synbot pairing approve"));
     }
-}
 
+    #[test]
+    fn workspace_path_expands_tilde_to_home() {
+        let Some(home) = dirs::home_dir() else {
+            return;
+        };
+        let mut cfg = valid_config();
+        cfg.main_agent.workspace = "~/.synbot/workspace".to_string();
+        assert_eq!(workspace_path(&cfg), home.join(".synbot").join("workspace"));
+    }
+
+    #[test]
+    fn normalize_workspace_path_expands_tilde_instead_of_treating_it_as_relative() {
+        let Some(home) = dirs::home_dir() else {
+            return;
+        };
+        let resolved = normalize_workspace_path(Path::new("~/.synbot/workspace"));
+        // The bug this guards: `~` stayed relative, so callers got `<cwd>/~/.synbot/workspace`.
+        assert!(resolved.is_absolute(), "{resolved:?}");
+        assert!(!resolved.to_string_lossy().contains("/~"), "{resolved:?}");
+        assert_eq!(
+            resolved,
+            normalize_workspace_path(&home.join(".synbot").join("workspace"))
+        );
+    }
+
+    #[test]
+    fn normalize_workspace_path_resolves_plain_absolute_paths() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let canonical = std::fs::canonicalize(dir.path()).expect("canonicalize");
+        assert_eq!(normalize_workspace_path(dir.path()), canonical);
+    }
+}

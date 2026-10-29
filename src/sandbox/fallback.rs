@@ -14,10 +14,10 @@ use tokio::sync::RwLock;
 pub struct FallbackConfig {
     /// Enable fallback to alternative implementations
     pub enable_fallback: bool,
-    
+
     /// Log warnings when falling back
     pub log_fallback_warnings: bool,
-    
+
     /// Allow fallback to less secure implementations
     pub allow_insecure_fallback: bool,
 }
@@ -37,10 +37,10 @@ impl Default for FallbackConfig {
 pub enum FallbackResult {
     /// Primary implementation succeeded
     Primary,
-    
+
     /// Fell back to alternative implementation
     Fallback(String),
-    
+
     /// All implementations failed
     Failed(String),
 }
@@ -69,7 +69,7 @@ impl FallbackManager {
             fallback_history: Arc::new(RwLock::new(Vec::new())),
         }
     }
-    
+
     /// Create a new fallback manager with custom configuration
     pub fn with_config(config: FallbackConfig) -> Self {
         Self {
@@ -77,18 +77,18 @@ impl FallbackManager {
             fallback_history: Arc::new(RwLock::new(Vec::new())),
         }
     }
-    
+
     /// Create an application sandbox with fallback support
-    /// 
+    ///
     /// On Windows: Tries AppContainer first, falls back to Sandboxie-Plus if available
     /// On Linux/macOS: Uses nono.sh (no fallback currently)
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `config` - Sandbox configuration
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// Returns a tuple of (Sandbox, FallbackResult)
     pub async fn create_app_sandbox_with_fallback(
         &self,
@@ -97,18 +97,21 @@ impl FallbackManager {
         #[cfg(target_os = "windows")]
         {
             use crate::sandbox::WindowsAppContainerSandbox;
-            
+
             // Try primary implementation: AppContainer
             match WindowsAppContainerSandbox::new(config.clone()) {
                 Ok(sandbox) => {
-                    log::info!("Using primary AppContainer sandbox for: {}", config.sandbox_id);
+                    log::info!(
+                        "Using primary AppContainer sandbox for: {}",
+                        config.sandbox_id
+                    );
                     return Ok((Box::new(sandbox), FallbackResult::Primary));
                 }
                 Err(e) => {
                     if !self.config.enable_fallback {
                         return Err(e);
                     }
-                    
+
                     if self.config.log_fallback_warnings {
                         log::warn!(
                             "AppContainer creation failed for {}: {}. Attempting fallback...",
@@ -116,7 +119,7 @@ impl FallbackManager {
                             e
                         );
                     }
-                    
+
                     // Try fallback: Sandboxie-Plus (if implemented)
                     // For now, return error as Sandboxie-Plus is not yet implemented
                     self.record_fallback_event(
@@ -124,19 +127,21 @@ impl FallbackManager {
                         "AppContainer",
                         "Sandboxie-Plus",
                         &format!("AppContainer failed: {}", e),
-                    ).await;
-                    
-                    return Err(SandboxError::CreationFailed(
-                        format!("Primary and fallback implementations failed: {}", e)
-                    ));
+                    )
+                    .await;
+
+                    return Err(SandboxError::CreationFailed(format!(
+                        "Primary and fallback implementations failed: {}",
+                        e
+                    )));
                 }
             }
         }
-        
+
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
             use crate::sandbox::NonoSandbox;
-            
+
             // Try nono.sh (no fallback currently)
             match NonoSandbox::new(config.clone()) {
                 Ok(sandbox) => {
@@ -149,23 +154,23 @@ impl FallbackManager {
                 }
             }
         }
-        
+
         #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
         {
             Err(SandboxError::UnsupportedPlatform)
         }
     }
-    
+
     /// Create a tool sandbox with fallback support
-    /// 
+    ///
     /// Tries gVisor Docker first, falls back to standard Docker if gVisor is not available
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `config` - Sandbox configuration
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// Returns a tuple of (Sandbox, FallbackResult)
     pub async fn create_tool_sandbox_with_fallback(
         &self,
@@ -174,18 +179,21 @@ impl FallbackManager {
         #[cfg(target_os = "windows")]
         {
             use crate::sandbox::Wsl2GVisorSandbox;
-            
+
             // Try primary implementation: WSL2 + gVisor Docker
             match Wsl2GVisorSandbox::new(config.clone()) {
                 Ok(sandbox) => {
-                    log::info!("Using WSL2 + gVisor Docker sandbox for: {}", config.sandbox_id);
+                    log::info!(
+                        "Using WSL2 + gVisor Docker sandbox for: {}",
+                        config.sandbox_id
+                    );
                     return Ok((Box::new(sandbox), FallbackResult::Primary));
                 }
                 Err(e) => {
                     if !self.config.enable_fallback {
                         return Err(e);
                     }
-                    
+
                     if self.config.log_fallback_warnings {
                         log::warn!(
                             "WSL2 + gVisor creation failed for {}: {}. Attempting fallback to standard Docker...",
@@ -193,21 +201,23 @@ impl FallbackManager {
                             e
                         );
                     }
-                    
+
                     // Try fallback: Standard Docker (less secure)
                     if !self.config.allow_insecure_fallback {
-                        return Err(SandboxError::CreationFailed(
-                            format!("gVisor not available and insecure fallback is disabled: {}", e)
-                        ));
+                        return Err(SandboxError::CreationFailed(format!(
+                            "gVisor not available and insecure fallback is disabled: {}",
+                            e
+                        )));
                     }
-                    
+
                     self.record_fallback_event(
                         &config.sandbox_id,
                         "WSL2+gVisor",
                         "Standard Docker",
                         &format!("gVisor failed: {}", e),
-                    ).await;
-                    
+                    )
+                    .await;
+
                     use crate::sandbox::plain_docker::PlainDockerSandbox;
 
                     match PlainDockerSandbox::new(config) {
@@ -229,7 +239,7 @@ impl FallbackManager {
                 }
             }
         }
-        
+
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
             use crate::sandbox::plain_docker::PlainDockerSandbox;
@@ -256,9 +266,10 @@ impl FallbackManager {
 
                     // Try fallback: Plain Docker (default runc, no gVisor)
                     if !self.config.allow_insecure_fallback {
-                        return Err(SandboxError::CreationFailed(
-                            format!("gVisor not available and insecure fallback is disabled: {}", e)
-                        ));
+                        return Err(SandboxError::CreationFailed(format!(
+                            "gVisor not available and insecure fallback is disabled: {}",
+                            e
+                        )));
                     }
 
                     self.record_fallback_event(
@@ -271,8 +282,14 @@ impl FallbackManager {
 
                     match PlainDockerSandbox::new(config) {
                         Ok(sandbox) => {
-                            log::info!("Using plain Docker sandbox (fallback) for: {}", sandbox.get_info().sandbox_id);
-                            return Ok((Box::new(sandbox), FallbackResult::Fallback("plain-docker".to_string())));
+                            log::info!(
+                                "Using plain Docker sandbox (fallback) for: {}",
+                                sandbox.get_info().sandbox_id
+                            );
+                            return Ok((
+                                Box::new(sandbox),
+                                FallbackResult::Fallback("plain-docker".to_string()),
+                            ));
                         }
                         Err(e2) => {
                             return Err(SandboxError::CreationFailed(format!(
@@ -284,13 +301,13 @@ impl FallbackManager {
                 }
             }
         }
-        
+
         #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
         {
             Err(SandboxError::UnsupportedPlatform)
         }
     }
-    
+
     /// Record a fallback event
     async fn record_fallback_event(
         &self,
@@ -306,26 +323,26 @@ impl FallbackManager {
             fallback_impl: fallback_impl.to_string(),
             reason: reason.to_string(),
         };
-        
+
         let mut history = self.fallback_history.write().await;
         history.push(event);
-        
+
         // Keep only last 100 events
         if history.len() > 100 {
             history.remove(0);
         }
     }
-    
+
     /// Get fallback history
     pub async fn get_fallback_history(&self) -> Vec<FallbackEvent> {
         self.fallback_history.read().await.clone()
     }
-    
+
     /// Clear fallback history
     pub async fn clear_fallback_history(&self) {
         self.fallback_history.write().await.clear();
     }
-    
+
     /// Check if a specific sandbox implementation is available
     pub fn is_implementation_available(&self, implementation: &str) -> bool {
         match implementation {
@@ -381,7 +398,7 @@ impl Default for FallbackManager {
 mod tests {
     use super::*;
     use crate::sandbox::types::*;
-    
+
     fn create_test_config(sandbox_id: &str) -> SandboxConfig {
         SandboxConfig {
             sandbox_id: sandbox_id.to_string(),
@@ -413,7 +430,7 @@ mod tests {
             image: None,
         }
     }
-    
+
     #[tokio::test]
     async fn test_fallback_manager_creation() {
         let manager = FallbackManager::new();
@@ -421,7 +438,7 @@ mod tests {
         assert!(manager.config.log_fallback_warnings);
         assert!(!manager.config.allow_insecure_fallback);
     }
-    
+
     #[tokio::test]
     async fn test_fallback_manager_with_custom_config() {
         let config = FallbackConfig {
@@ -434,73 +451,69 @@ mod tests {
         assert!(!manager.config.log_fallback_warnings);
         assert!(manager.config.allow_insecure_fallback);
     }
-    
+
     #[tokio::test]
     async fn test_fallback_history() {
         let manager = FallbackManager::new();
-        
-        manager.record_fallback_event(
-            "test-sandbox",
-            "AppContainer",
-            "Sandboxie-Plus",
-            "Test reason",
-        ).await;
-        
+
+        manager
+            .record_fallback_event(
+                "test-sandbox",
+                "AppContainer",
+                "Sandboxie-Plus",
+                "Test reason",
+            )
+            .await;
+
         let history = manager.get_fallback_history().await;
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].sandbox_id, "test-sandbox");
         assert_eq!(history[0].primary_impl, "AppContainer");
         assert_eq!(history[0].fallback_impl, "Sandboxie-Plus");
     }
-    
+
     #[tokio::test]
     async fn test_clear_fallback_history() {
         let manager = FallbackManager::new();
-        
-        manager.record_fallback_event(
-            "test-sandbox",
-            "gVisor",
-            "Docker",
-            "Test reason",
-        ).await;
-        
+
+        manager
+            .record_fallback_event("test-sandbox", "gVisor", "Docker", "Test reason")
+            .await;
+
         assert_eq!(manager.get_fallback_history().await.len(), 1);
-        
+
         manager.clear_fallback_history().await;
         assert_eq!(manager.get_fallback_history().await.len(), 0);
     }
-    
+
     #[tokio::test]
     async fn test_fallback_history_limit() {
         let manager = FallbackManager::new();
-        
+
         // Add 150 events
         for i in 0..150 {
-            manager.record_fallback_event(
-                &format!("sandbox-{}", i),
-                "Primary",
-                "Fallback",
-                "Test",
-            ).await;
+            manager
+                .record_fallback_event(&format!("sandbox-{}", i), "Primary", "Fallback", "Test")
+                .await;
         }
-        
+
         // Should keep only last 100
         let history = manager.get_fallback_history().await;
         assert_eq!(history.len(), 100);
         assert_eq!(history[0].sandbox_id, "sandbox-50");
         assert_eq!(history[99].sandbox_id, "sandbox-149");
     }
-    
+
     #[test]
     fn test_implementation_availability() {
         let manager = FallbackManager::new();
-        
+
         #[cfg(target_os = "windows")]
         {
             assert!(manager.is_implementation_available("appcontainer"));
             assert!(!manager.is_implementation_available("nono"));
         }
-        
+
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
             assert!(!manager.is_implementation_available("appcontainer"));
@@ -508,10 +521,10 @@ mod tests {
             // be installed even when the nono backend is compiled in.
             let _nono_available = manager.is_implementation_available("nono");
         }
-        
+
         // Docker and the runsc runtime are environment-dependent as well.
         let _gvisor_available = manager.is_implementation_available("gvisor");
-        
+
         // Unknown implementation
         assert!(!manager.is_implementation_available("unknown"));
     }

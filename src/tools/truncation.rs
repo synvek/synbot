@@ -126,11 +126,7 @@ pub fn smart_truncate_streams(
         let sb = (max_size as f64 * stdout_ratio) as usize;
         // Ensure at least 1 byte for each non-empty stream so both are
         // represented.
-        let sb = if !stdout.is_empty() && sb == 0 {
-            1
-        } else {
-            sb
-        };
+        let sb = if !stdout.is_empty() && sb == 0 { 1 } else { sb };
         let eb = max_size.saturating_sub(sb);
         let eb = if !stderr.is_empty() && eb == 0 {
             // Give stderr at least 1 byte, take from stdout budget
@@ -272,8 +268,8 @@ mod tests {
 
         // Find the marker in the result
         let marker_start = result.content.find("\n...[truncated:").unwrap();
-        let marker_end = result.content.find("strategy: head-tail]\n").unwrap()
-            + "strategy: head-tail]\n".len();
+        let marker_end =
+            result.content.find("strategy: head-tail]\n").unwrap() + "strategy: head-tail]\n".len();
 
         let head_len = marker_start;
         let tail_len = result.content.len() - marker_end;

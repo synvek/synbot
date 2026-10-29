@@ -36,6 +36,8 @@ fn main() {
         std::fs::write(Path::new(path), json).expect("write schema file");
         eprintln!("Wrote config JSON schema to {}", path);
     } else {
-        io::stdout().write_all(json.as_bytes()).expect("write stdout");
+        io::stdout()
+            .write_all(json.as_bytes())
+            .expect("write stdout");
     }
 }

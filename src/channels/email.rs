@@ -165,8 +165,7 @@ impl EmailChannel {
             .await
             .context("IMAP TCP connect")?;
         let stream = if cfg.use_tls {
-            let connector = native_tls::TlsConnector::new()
-                .context("IMAP TLS connector")?;
+            let connector = native_tls::TlsConnector::new().context("IMAP TLS connector")?;
             let tls_connector = TlsConnector::from(connector);
             let tls = tls_connector
                 .connect(&host, tcp)
@@ -228,7 +227,10 @@ impl EmailChannel {
             from_sender
         };
 
-        let uids = session.uid_search("UNSEEN").await.context("IMAP UID SEARCH UNSEEN")?;
+        let uids = session
+            .uid_search("UNSEEN")
+            .await
+            .context("IMAP UID SEARCH UNSEEN")?;
         let uids: Vec<u32> = uids.into_iter().collect();
         info!(
             channel = %self.config.name,
@@ -240,7 +242,11 @@ impl EmailChannel {
             return Ok(vec![]);
         }
 
-        let uid_set = uids.iter().map(|u| u.to_string()).collect::<Vec<_>>().join(",");
+        let uid_set = uids
+            .iter()
+            .map(|u| u.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
         let fetch = session
             .uid_fetch(&uid_set, "(FLAGS ENVELOPE INTERNALDATE)")
             .await
@@ -329,11 +335,7 @@ impl EmailChannel {
         Ok(out)
     }
 
-    async fn fetch_body(
-        &self,
-        session: &mut Session<ImapStreamKind>,
-        uid: u32,
-    ) -> Result<String> {
+    async fn fetch_body(&self, session: &mut Session<ImapStreamKind>, uid: u32) -> Result<String> {
         let uid_set = uid.to_string();
         let mut fetch = session
             .uid_fetch(&uid_set, "(BODY.PEEK[])")
@@ -356,11 +358,7 @@ impl EmailChannel {
         Ok(body.trim().to_string())
     }
 
-    async fn mark_read(
-        &self,
-        session: &mut Session<ImapStreamKind>,
-        uid: u32,
-    ) -> Result<()> {
+    async fn mark_read(&self, session: &mut Session<ImapStreamKind>, uid: u32) -> Result<()> {
         let uid_set = uid.to_string();
         let mut store = session
             .uid_store(&uid_set, "+FLAGS (\\Seen)")
@@ -391,7 +389,13 @@ impl EmailChannel {
                     result_preview,
                 } if show_tool_calls => {
                     let preview = if result_preview.len() > tool_result_preview_chars {
-                        format!("{}...", result_preview.chars().take(tool_result_preview_chars).collect::<String>())
+                        format!(
+                            "{}...",
+                            result_preview
+                                .chars()
+                                .take(tool_result_preview_chars)
+                                .collect::<String>()
+                        )
                     } else {
                         result_preview.clone()
                     };
@@ -427,7 +431,13 @@ impl EmailChannel {
         in_reply_to: Option<&str>,
     ) -> Result<()> {
         let cfg = &config.smtp;
-        let port = if cfg.port != 0 { cfg.port } else if cfg.use_tls { 465 } else { 587 };
+        let port = if cfg.port != 0 {
+            cfg.port
+        } else if cfg.use_tls {
+            465
+        } else {
+            587
+        };
         let creds = Credentials::new(cfg.username.clone(), cfg.password.clone());
         let mailer: AsyncSmtpTransport<Tokio1Executor> = if cfg.use_tls {
             AsyncSmtpTransport::<Tokio1Executor>::relay(&cfg.host)?
@@ -516,7 +526,11 @@ impl EmailChannel {
                 let mut p = self.pending.write().await;
                 p.insert(chat_id.clone(), (from_addr.clone(), uid, tx));
             }
-            let content = if body.is_empty() { "(no body)" } else { body.as_str() };
+            let content = if body.is_empty() {
+                "(no body)"
+            } else {
+                body.as_str()
+            };
             info!(
                 channel = %self.config.name,
                 uid,
@@ -624,7 +638,13 @@ impl Channel for EmailChannel {
                 result_preview,
             } if self.show_tool_calls => {
                 let preview = if result_preview.len() > self.tool_result_preview_chars {
-                    format!("{}...", result_preview.chars().take(self.tool_result_preview_chars).collect::<String>())
+                    format!(
+                        "{}...",
+                        result_preview
+                            .chars()
+                            .take(self.tool_result_preview_chars)
+                            .collect::<String>()
+                    )
                 } else {
                     result_preview.clone()
                 };

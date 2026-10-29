@@ -1,10 +1,10 @@
 use crate::tools::approval::{ApprovalRequest, ApprovalResponse, ApprovalStatus};
 use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use chrono::{DateTime, Utc};
 
 /// Approval history entry combining request and response
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,8 +20,14 @@ pub struct ApprovalHistoryEntry {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ApprovalStatusRecord {
     Pending,
-    Approved { responder: String, timestamp: DateTime<Utc> },
-    Rejected { responder: String, timestamp: DateTime<Utc> },
+    Approved {
+        responder: String,
+        timestamp: DateTime<Utc>,
+    },
+    Rejected {
+        responder: String,
+        timestamp: DateTime<Utc>,
+    },
     Timeout,
 }
 
@@ -110,15 +116,13 @@ impl ApprovalStore {
     pub fn save(&self) -> Result<()> {
         // Create parent directory if it doesn't exist
         if let Some(parent) = self.file_path.parent() {
-            fs::create_dir_all(parent)
-                .context("Failed to create approval store directory")?;
+            fs::create_dir_all(parent).context("Failed to create approval store directory")?;
         }
 
         let json = serde_json::to_string_pretty(&self.entries)
             .context("Failed to serialize approval history")?;
-        
-        fs::write(&self.file_path, json)
-            .context("Failed to write approval history to file")?;
+
+        fs::write(&self.file_path, json).context("Failed to write approval history to file")?;
 
         Ok(())
     }
@@ -126,16 +130,15 @@ impl ApprovalStore {
     /// Load approval history from file
     pub fn load<P: AsRef<Path>>(file_path: P) -> Result<Self> {
         let file_path = file_path.as_ref();
-        
+
         if !file_path.exists() {
             return Ok(Self::new(file_path));
         }
 
-        let json = fs::read_to_string(file_path)
-            .context("Failed to read approval history file")?;
-        
-        let entries: HashMap<String, ApprovalHistoryEntry> = serde_json::from_str(&json)
-            .context("Failed to deserialize approval history")?;
+        let json = fs::read_to_string(file_path).context("Failed to read approval history file")?;
+
+        let entries: HashMap<String, ApprovalHistoryEntry> =
+            serde_json::from_str(&json).context("Failed to deserialize approval history")?;
 
         Ok(Self {
             entries,
@@ -145,8 +148,7 @@ impl ApprovalStore {
 
     /// Export approval history to JSON string
     pub fn export(&self) -> Result<String> {
-        serde_json::to_string_pretty(&self.entries)
-            .context("Failed to export approval history")
+        serde_json::to_string_pretty(&self.entries).context("Failed to export approval history")
     }
 
     /// Get the number of entries in the store
@@ -216,9 +218,9 @@ mod tests {
     fn test_add_and_get_entry() {
         let mut store = ApprovalStore::new("/tmp/test.json");
         let entry = create_test_entry("req-1", "session-1", "telegram");
-        
+
         store.add_entry(entry.clone());
-        
+
         assert_eq!(store.len(), 1);
         assert!(store.get_entry("req-1").is_some());
         assert!(store.get_entry("req-2").is_none());
@@ -229,7 +231,7 @@ mod tests {
         let mut store = ApprovalStore::new("/tmp/test.json");
         store.add_entry(create_test_entry("req-1", "session-1", "telegram"));
         store.add_entry(create_test_entry("req-2", "session-2", "discord"));
-        
+
         let all = store.get_all_entries();
         assert_eq!(all.len(), 2);
     }
@@ -240,7 +242,7 @@ mod tests {
         store.add_entry(create_test_entry("req-1", "session-1", "telegram"));
         store.add_entry(create_test_entry("req-2", "session-2", "discord"));
         store.add_entry(create_test_entry("req-3", "session-1", "feishu"));
-        
+
         let results = store.query(Some("session-1"), None, None);
         assert_eq!(results.len(), 2);
     }
@@ -251,7 +253,7 @@ mod tests {
         store.add_entry(create_test_entry("req-1", "session-1", "telegram"));
         store.add_entry(create_test_entry("req-2", "session-2", "discord"));
         store.add_entry(create_test_entry("req-3", "session-3", "telegram"));
-        
+
         let results = store.query(None, Some("telegram"), None);
         assert_eq!(results.len(), 2);
     }
@@ -259,18 +261,18 @@ mod tests {
     #[test]
     fn test_query_by_status() {
         let mut store = ApprovalStore::new("/tmp/test.json");
-        
+
         let mut entry1 = create_test_entry("req-1", "session-1", "telegram");
         entry1.status = ApprovalStatusRecord::Approved {
             responder: "user1".to_string(),
             timestamp: Utc::now(),
         };
-        
+
         let entry2 = create_test_entry("req-2", "session-2", "discord");
-        
+
         store.add_entry(entry1);
         store.add_entry(entry2);
-        
+
         let results = store.query(None, None, Some(&ApprovalStatusRecord::Pending));
         assert_eq!(results.len(), 1);
     }
@@ -279,14 +281,14 @@ mod tests {
     fn test_save_and_load() {
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("approvals.json");
-        
+
         // Create and save store
         let mut store = ApprovalStore::new(&file_path);
         store.add_entry(create_test_entry("req-1", "session-1", "telegram"));
         store.add_entry(create_test_entry("req-2", "session-2", "discord"));
-        
+
         store.save().unwrap();
-        
+
         // Load store
         let loaded_store = ApprovalStore::load(&file_path).unwrap();
         assert_eq!(loaded_store.len(), 2);
@@ -298,7 +300,7 @@ mod tests {
     fn test_load_nonexistent_file() {
         let temp_dir = TempDir::new().unwrap();
         let file_path = temp_dir.path().join("nonexistent.json");
-        
+
         let store = ApprovalStore::load(&file_path).unwrap();
         assert!(store.is_empty());
     }
@@ -307,7 +309,7 @@ mod tests {
     fn test_export() {
         let mut store = ApprovalStore::new("/tmp/test.json");
         store.add_entry(create_test_entry("req-1", "session-1", "telegram"));
-        
+
         let json = store.export().unwrap();
         assert!(json.contains("req-1"));
         assert!(json.contains("session-1"));
@@ -319,9 +321,9 @@ mod tests {
         let mut store = ApprovalStore::new("/tmp/test.json");
         store.add_entry(create_test_entry("req-1", "session-1", "telegram"));
         store.add_entry(create_test_entry("req-2", "session-2", "discord"));
-        
+
         assert_eq!(store.len(), 2);
-        
+
         store.clear();
         assert!(store.is_empty());
     }
@@ -334,10 +336,10 @@ mod tests {
             responder: "user1".to_string(),
             timestamp: Utc::now(),
         };
-        
+
         let status = ApprovalStatus::Approved(response.clone());
         let record = ApprovalStatusRecord::from(&status);
-        
+
         match record {
             ApprovalStatusRecord::Approved { responder, .. } => {
                 assert_eq!(responder, "user1");

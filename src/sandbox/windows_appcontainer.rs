@@ -21,17 +21,16 @@ use super::types::{
 use chrono::Utc;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
-use std::os::windows::ffi::OsStrExt;
 use std::io::{Read, Write};
+use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{FromRawHandle, RawHandle};
 use std::path::{Path, PathBuf};
 use std::ptr::null_mut;
 use std::time::{Duration, Instant};
 use windows::core::{HRESULT, PCWSTR};
 use windows::Win32::Foundation::{
-    CloseHandle, HANDLE, HLOCAL, LocalFree, WAIT_OBJECT_0, WAIT_TIMEOUT,
+    CloseHandle, LocalFree, HANDLE, HLOCAL, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
-use windows::Win32::System::Memory::{LocalAlloc, LMEM_ZEROINIT};
 use windows::Win32::Security::Authorization::{
     BuildTrusteeWithSidW, ConvertSidToStringSidW, ConvertStringSidToSidW, GetNamedSecurityInfoW,
     SetEntriesInAclW, SetNamedSecurityInfoW, EXPLICIT_ACCESS_W, GRANT_ACCESS, SE_FILE_OBJECT,
@@ -40,28 +39,34 @@ use windows::Win32::Security::Authorization::{
 use windows::Win32::Security::Isolation::{CreateAppContainerProfile, DeleteAppContainerProfile};
 use windows::Win32::Security::{
     AclSizeInformation, CopySid, EqualSid, FreeSid, GetAce, GetAclInformation, GetLengthSid,
-    ACCESS_ALLOWED_ACE, ACCESS_DENIED_ACE, ACE_HEADER, ACL, ACL_SIZE_INFORMATION, PSID,
-    PSECURITY_DESCRIPTOR, SID_AND_ATTRIBUTES, SECURITY_ATTRIBUTES, SECURITY_CAPABILITIES,
+    ACCESS_ALLOWED_ACE, ACCESS_DENIED_ACE, ACE_HEADER, ACL, ACL_SIZE_INFORMATION,
+    PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES, SECURITY_CAPABILITIES, SID_AND_ATTRIBUTES,
     SUB_CONTAINERS_AND_OBJECTS_INHERIT,
 };
+use windows::Win32::System::Memory::{LocalAlloc, LMEM_ZEROINIT};
 // ACCESS_ALLOWED_ACE_TYPE = 0, ACCESS_DENIED_ACE_TYPE = 1 (avoid extra `windows` crate feature)
 const ACCESS_ALLOWED_ACE_TYPE_U8: u8 = 0;
 const ACCESS_DENIED_ACE_TYPE_U8: u8 = 1;
-use windows::Win32::Security::DACL_SECURITY_INFORMATION;
-use windows::Win32::Storage::FileSystem::{
-    CreateFileW, QueryDosDeviceW, FILE_FLAG_BACKUP_SEMANTICS, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ,
-    FILE_GENERIC_WRITE, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+use windows::Win32::Foundation::{
+    SetHandleInformation, ERROR_SUCCESS, HANDLE_FLAGS, HANDLE_FLAG_INHERIT,
 };
+use windows::Win32::Security::DACL_SECURITY_INFORMATION;
 use windows::Win32::Storage::FileSystem::GetVolumeInformationW;
-use windows::Win32::Foundation::{ERROR_SUCCESS, SetHandleInformation, HANDLE_FLAG_INHERIT, HANDLE_FLAGS};
-use windows::Win32::System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE};
+use windows::Win32::Storage::FileSystem::{
+    CreateFileW, QueryDosDeviceW, FILE_FLAG_BACKUP_SEMANTICS, FILE_GENERIC_EXECUTE,
+    FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    OPEN_EXISTING,
+};
+use windows::Win32::System::Console::{
+    GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+};
 use windows::Win32::System::Pipes::CreatePipe;
 use windows::Win32::System::Threading::{
     CreateProcessW, DeleteProcThreadAttributeList, GetExitCodeProcess,
-    InitializeProcThreadAttributeList, LPPROC_THREAD_ATTRIBUTE_LIST, PROCESS_INFORMATION,
-    STARTUPINFOEXW, STARTUPINFOW, TerminateProcess, UpdateProcThreadAttribute,
-    WaitForSingleObject, EXTENDED_STARTUPINFO_PRESENT, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
-    STARTF_USESTDHANDLES,
+    InitializeProcThreadAttributeList, TerminateProcess, UpdateProcThreadAttribute,
+    WaitForSingleObject, EXTENDED_STARTUPINFO_PRESENT, LPPROC_THREAD_ATTRIBUTE_LIST,
+    PROCESS_INFORMATION, PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, STARTF_USESTDHANDLES,
+    STARTUPINFOEXW, STARTUPINFOW,
 };
 
 /// Windows AppContainer capability
@@ -89,24 +94,24 @@ unsafe impl Sync for WindowsAppContainerSandbox {}
 
 impl WindowsAppContainerSandbox {
     /// Create a new Windows AppContainer sandbox
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `config` - Sandbox configuration
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// A new `WindowsAppContainerSandbox` instance
-    /// 
+    ///
     /// # Errors
-    /// 
+    ///
     /// Returns an error if:
     /// - The configuration is invalid
     /// - Capabilities cannot be built
     pub fn new(config: SandboxConfig) -> Result<Self> {
         let capabilities = Self::build_capabilities(&config)?;
         let profile_name = format!("SynBot.Sandbox.{}", config.sandbox_id);
-        
+
         Ok(Self {
             status: SandboxStatus {
                 sandbox_id: config.sandbox_id.clone(),
@@ -123,24 +128,24 @@ impl WindowsAppContainerSandbox {
             firewall_rule_name: None,
         })
     }
-    
+
     /// Build capabilities from configuration
-    /// 
+    ///
     /// Translates the sandbox configuration into Windows AppContainer capabilities.
     /// This includes:
     /// - Network capabilities (if network is enabled)
     /// - File system capabilities (based on allowed paths)
-    /// 
+    ///
     /// # Arguments
-    /// 
+    ///
     /// * `config` - Sandbox configuration
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// A vector of capabilities
     fn build_capabilities(config: &SandboxConfig) -> Result<Vec<Capability>> {
         let mut capabilities = Vec::new();
-        
+
         // Add network capability if enabled. PRIVATE_NETWORK_CLIENT_SERVER is required for
         // system DNS resolver / local network (getaddrinfo often uses local DNS path);
         // INTERNET_CLIENT alone can still yield WSAHOST_NOT_FOUND in AppContainer.
@@ -158,23 +163,25 @@ impl WindowsAppContainerSandbox {
                 sid: "S-1-15-3-2".to_string(), // SECURITY_CAPABILITY_INTERNET_CLIENT_SERVER
             });
         }
-        
+
         // File system access is controlled through AppContainer's file system isolation
         // We grant access to writable paths through security descriptors
         // Readonly paths are accessible by default with read-only permissions
         // Hidden paths are blocked by not granting any access
-        
+
         // Add document library capability for file access
-        if !config.filesystem.writable_paths.is_empty() || !config.filesystem.readonly_paths.is_empty() {
+        if !config.filesystem.writable_paths.is_empty()
+            || !config.filesystem.readonly_paths.is_empty()
+        {
             capabilities.push(Capability {
                 name: "documentsLibrary".to_string(),
                 sid: "S-1-15-3-12".to_string(), // SECURITY_CAPABILITY_DOCUMENTS_LIBRARY
             });
         }
-        
+
         Ok(capabilities)
     }
-    
+
     /// Convert capabilities to Windows SID_AND_ATTRIBUTES array
     fn capabilities_to_sid_and_attributes(&self) -> Result<Vec<String>> {
         // Simplified implementation that returns capability names
@@ -185,7 +192,10 @@ impl WindowsAppContainerSandbox {
 
 /// Convert a Rust string to null-terminated wide string (caller must free with drop or LocalFree).
 fn to_wide_null(s: &str) -> Vec<u16> {
-    OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
+    OsStr::new(s)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
 }
 
 /// Resolve `X:\...` paths that are DOS device mappings (e.g. SUBST drives).
@@ -260,7 +270,10 @@ fn log_windows_volume_acl_capability(path: &Path) {
             return;
         }
     }
-    let fs_name_end = fs_name_buf.iter().position(|c| *c == 0).unwrap_or(fs_name_buf.len());
+    let fs_name_end = fs_name_buf
+        .iter()
+        .position(|c| *c == 0)
+        .unwrap_or(fs_name_buf.len());
     let fs_name = String::from_utf16_lossy(&fs_name_buf[..fs_name_end]);
     // From Win32 `GetVolumeInformationW` docs: FILE_PERSISTENT_ACLS = 0x00000008
     const FILE_PERSISTENT_ACLS: u32 = 0x0000_0008;
@@ -375,17 +388,26 @@ struct TokenMandatoryLabelLayout {
 pub fn log_process_token_appcontainer_diagnostic() {
     use std::io::Write;
     use windows::Win32::Foundation::HANDLE;
-    use windows::Win32::Security::{GetTokenInformation, GetSidSubAuthority, GetSidSubAuthorityCount, TokenIntegrityLevel, TOKEN_QUERY};
+    use windows::Win32::Security::{
+        GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation, TokenIntegrityLevel,
+        TOKEN_QUERY,
+    };
     use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
-    let _ = writeln!(std::io::stderr(), "[synbot] AppContainer diagnostic: checking process token...");
+    let _ = writeln!(
+        std::io::stderr(),
+        "[synbot] AppContainer diagnostic: checking process token..."
+    );
     let _ = std::io::stderr().flush();
 
     unsafe {
         let process = GetCurrentProcess();
         let mut token = HANDLE::default();
         if OpenProcessToken(process, TOKEN_QUERY, &mut token).is_err() {
-            let _ = writeln!(std::io::stderr(), "[synbot] AppContainer diagnostic: OpenProcessToken failed");
+            let _ = writeln!(
+                std::io::stderr(),
+                "[synbot] AppContainer diagnostic: OpenProcessToken failed"
+            );
             let _ = std::io::stderr().flush();
             return;
         }
@@ -419,11 +441,20 @@ pub fn log_process_token_appcontainer_diagnostic() {
                         0x4000 => "System",
                         _ => "Unknown",
                     };
-                    let _ = writeln!(std::io::stderr(), "[synbot] AppContainer diagnostic: IntegrityLevel={} (0x{:X}, {})", last, last, level_name);
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "[synbot] AppContainer diagnostic: IntegrityLevel={} (0x{:X}, {})",
+                        last,
+                        last,
+                        level_name
+                    );
                 }
             }
         } else {
-            let _ = writeln!(std::io::stderr(), "[synbot] AppContainer diagnostic: GetTokenInformation(TokenIntegrityLevel) failed");
+            let _ = writeln!(
+                std::io::stderr(),
+                "[synbot] AppContainer diagnostic: GetTokenInformation(TokenIntegrityLevel) failed"
+            );
         }
 
         // TokenAppContainerSid -> TOKEN_APPCONTAINER_INFORMATION (TokenAppContainer: PSID only in Win8+; layout is single PSID)
@@ -454,10 +485,18 @@ pub fn log_process_token_appcontainer_diagnostic() {
             let info = &*(buf.as_ptr() as *const TokenAppContainerInfo);
             let sid_ptr = info.token_app_container_sid;
             let is_app_container = !sid_ptr.is_null();
-            let _ = writeln!(std::io::stderr(), "[synbot] AppContainer diagnostic: IsAppContainer={}", is_app_container);
+            let _ = writeln!(
+                std::io::stderr(),
+                "[synbot] AppContainer diagnostic: IsAppContainer={}",
+                is_app_container
+            );
             if is_app_container {
                 if let Some(sid_str) = sid_to_string(sid_ptr) {
-                    let _ = writeln!(std::io::stderr(), "[synbot] AppContainer diagnostic: AppContainerSid={}", sid_str);
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "[synbot] AppContainer diagnostic: AppContainerSid={}",
+                        sid_str
+                    );
                 } else {
                     let _ = writeln!(std::io::stderr(), "[synbot] AppContainer diagnostic: AppContainerSid=(non-null but ConvertSidToStringSid failed)");
                 }
@@ -477,19 +516,26 @@ fn add_firewall_outbound_rule_for_appcontainer(sid_string: &str, rule_name: &str
     use windows::core::BSTR;
     use windows::Win32::Foundation::VARIANT_TRUE;
     use windows::Win32::NetworkManagement::WindowsFirewall::{
-        INetFwPolicy2, INetFwRule3, NetFwPolicy2, NetFwRule, NET_FW_ACTION_ALLOW, NET_FW_PROFILE2_ALL,
-        NET_FW_RULE_DIR_OUT,
+        INetFwPolicy2, INetFwRule3, NetFwPolicy2, NetFwRule, NET_FW_ACTION_ALLOW,
+        NET_FW_PROFILE2_ALL, NET_FW_RULE_DIR_OUT,
     };
-    use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
+    };
 
     unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         let policy: INetFwPolicy2 = CoCreateInstance(&NetFwPolicy2, None, CLSCTX_INPROC_SERVER)
-            .map_err(|e| SandboxError::CreationFailed(format!("CoCreateInstance(NetFwPolicy2): {}", e)))?;
-        let rules = policy.Rules()
+            .map_err(|e| {
+                SandboxError::CreationFailed(format!("CoCreateInstance(NetFwPolicy2): {}", e))
+            })?;
+        let rules = policy
+            .Rules()
             .map_err(|e| SandboxError::CreationFailed(format!("INetFwPolicy2::Rules: {}", e)))?;
-        let rule: INetFwRule3 = CoCreateInstance(&NetFwRule, None, CLSCTX_INPROC_SERVER)
-            .map_err(|e| SandboxError::CreationFailed(format!("CoCreateInstance(NetFwRule): {}", e)))?;
+        let rule: INetFwRule3 =
+            CoCreateInstance(&NetFwRule, None, CLSCTX_INPROC_SERVER).map_err(|e| {
+                SandboxError::CreationFailed(format!("CoCreateInstance(NetFwRule): {}", e))
+            })?;
         let name_bstr = BSTR::from(rule_name);
         rule.SetName(&name_bstr)
             .map_err(|e| SandboxError::CreationFailed(format!("SetName: {}", e)))?;
@@ -505,7 +551,8 @@ fn add_firewall_outbound_rule_for_appcontainer(sid_string: &str, rule_name: &str
         // Apply rule to all firewall profiles (domain, private, public) so it is active.
         rule.SetProfiles(NET_FW_PROFILE2_ALL.0)
             .map_err(|e| SandboxError::CreationFailed(format!("SetProfiles: {}", e)))?;
-        rules.Add(&rule)
+        rules
+            .Add(&rule)
             .map_err(|e| SandboxError::CreationFailed(format!("Rules.Add: {}", e)))?;
     }
     Ok(())
@@ -530,8 +577,10 @@ const FWP_E_LIFETIME_MISMATCH: u32 = 0x8032_0016;
 struct SidCopyGuard(HLOCAL);
 impl Drop for SidCopyGuard {
     fn drop(&mut self) {
-        if !self.0.0.is_null() {
-            unsafe { let _ = LocalFree(self.0); }
+        if !self.0 .0.is_null() {
+            unsafe {
+                let _ = LocalFree(self.0);
+            }
         }
     }
 }
@@ -541,20 +590,20 @@ impl Drop for SidCopyGuard {
 /// Idempotent: if provider/sublayer/filters already exist (e.g. leftover from crash), treats as success.
 /// Cleanup in stop() uses delete-by-key (no stored IDs needed).
 fn add_wfp_permit_for_appcontainer(container_sid: *mut std::ffi::c_void) -> Result<()> {
-    use windows::Win32::NetworkManagement::WindowsFilteringPlatform::{
-        FwpmEngineClose0, FwpmEngineOpen0, FwpmFilterAdd0, FwpmFilterDeleteById0, FwpmFilterDeleteByKey0,
-        FwpmProviderAdd0, FwpmProviderDeleteByKey0, FwpmSubLayerAdd0, FwpmSubLayerDeleteByKey0,
-        FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_CONNECT_V6,
-        FWPM_LAYER_ALE_FLOW_ESTABLISHED_V4, FWPM_LAYER_ALE_FLOW_ESTABLISHED_V6,
-        FWPM_CONDITION_ALE_PACKAGE_ID, FWPM_FILTER0, FWPM_FILTER_CONDITION0,
-        FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT, FWPM_FILTER_FLAG_PERSISTENT,
-        FWPM_PROVIDER0, FWPM_PROVIDER_FLAG_PERSISTENT, FWPM_SUBLAYER0, FWPM_SUBLAYER_FLAG_PERSISTENT,
-        FWP_ACTION_PERMIT, FWP_CONDITION_VALUE0, FWP_CONDITION_VALUE0_0,
-        FWP_MATCH_EQUAL, FWP_SID, FWP_VALUE0, FWP_VALUE0_0, FWP_EMPTY, FWPM_ACTION0, FWPM_ACTION0_0,
-        FWPM_DISPLAY_DATA0, FWP_BYTE_BLOB,
-    };
-    use windows::Win32::Foundation::HANDLE;
     use windows::core::GUID;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::NetworkManagement::WindowsFilteringPlatform::{
+        FwpmEngineClose0, FwpmEngineOpen0, FwpmFilterAdd0, FwpmFilterDeleteById0,
+        FwpmFilterDeleteByKey0, FwpmProviderAdd0, FwpmProviderDeleteByKey0, FwpmSubLayerAdd0,
+        FwpmSubLayerDeleteByKey0, FWPM_ACTION0, FWPM_ACTION0_0, FWPM_CONDITION_ALE_PACKAGE_ID,
+        FWPM_DISPLAY_DATA0, FWPM_FILTER0, FWPM_FILTER_CONDITION0,
+        FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT, FWPM_FILTER_FLAG_PERSISTENT,
+        FWPM_LAYER_ALE_AUTH_CONNECT_V4, FWPM_LAYER_ALE_AUTH_CONNECT_V6,
+        FWPM_LAYER_ALE_FLOW_ESTABLISHED_V4, FWPM_LAYER_ALE_FLOW_ESTABLISHED_V6, FWPM_PROVIDER0,
+        FWPM_PROVIDER_FLAG_PERSISTENT, FWPM_SUBLAYER0, FWPM_SUBLAYER_FLAG_PERSISTENT,
+        FWP_ACTION_PERMIT, FWP_BYTE_BLOB, FWP_CONDITION_VALUE0, FWP_CONDITION_VALUE0_0, FWP_EMPTY,
+        FWP_MATCH_EQUAL, FWP_SID, FWP_VALUE0, FWP_VALUE0_0,
+    };
 
     const ERROR_SUCCESS: u32 = 0;
     // FwpmEngineOpen0 only accepts RPC_C_AUTHN_WINNT (10) or RPC_C_AUTHN_DEFAULT (0xffffffff). Using 0 (RPC_C_AUTHN_NONE) returns ERROR_NOT_SUPPORTED (50).
@@ -583,13 +632,7 @@ fn add_wfp_permit_for_appcontainer(container_sid: *mut std::ffi::c_void) -> Resu
         let filter_recv_v6_name = to_wide_null("SynBot AppContainer Inbound V6");
 
         let mut engine: HANDLE = HANDLE::default();
-        let err = FwpmEngineOpen0(
-            None,
-            RPC_C_AUTHN_WINNT,
-            None,
-            None,
-            &mut engine,
-        );
+        let err = FwpmEngineOpen0(None, RPC_C_AUTHN_WINNT, None, None, &mut engine);
         if err != ERROR_SUCCESS {
             return Err(SandboxError::CreationFailed(format!(
                 "FwpmEngineOpen0: {}",
@@ -650,7 +693,9 @@ fn add_wfp_permit_for_appcontainer(container_sid: *mut std::ffi::c_void) -> Resu
                     let _ = FwpmProviderDeleteByKey0(engine, &provider_key);
                 }
                 let _ = FwpmEngineClose0(engine);
-                return Err(SandboxError::CreationFailed("LocalAlloc for SID copy failed".to_string()));
+                return Err(SandboxError::CreationFailed(
+                    "LocalAlloc for SID copy failed".to_string(),
+                ));
             }
         };
         if CopySid(sid_len, PSID(sid_copy.0 as *mut _), PSID(container_sid)).is_err() {
@@ -675,8 +720,14 @@ fn add_wfp_permit_for_appcontainer(container_sid: *mut std::ffi::c_void) -> Resu
             matchType: FWP_MATCH_EQUAL,
             conditionValue: cond_value,
         };
-        let weight = FWP_VALUE0 { r#type: FWP_EMPTY, Anonymous: FWP_VALUE0_0::default() };
-        let action = FWPM_ACTION0 { r#type: FWP_ACTION_PERMIT, Anonymous: FWPM_ACTION0_0::default() };
+        let weight = FWP_VALUE0 {
+            r#type: FWP_EMPTY,
+            Anonymous: FWP_VALUE0_0::default(),
+        };
+        let action = FWPM_ACTION0 {
+            r#type: FWP_ACTION_PERMIT,
+            Anonymous: FWPM_ACTION0_0::default(),
+        };
 
         let mut filter_v4 = FWPM_FILTER0 {
             filterKey: filter_key_v4,
@@ -693,7 +744,9 @@ fn add_wfp_permit_for_appcontainer(container_sid: *mut std::ffi::c_void) -> Resu
             numFilterConditions: 1,
             filterCondition: &mut condition as *mut _,
             action,
-            Anonymous: windows::Win32::NetworkManagement::WindowsFilteringPlatform::FWPM_FILTER0_0::default(),
+            Anonymous:
+                windows::Win32::NetworkManagement::WindowsFilteringPlatform::FWPM_FILTER0_0::default(
+                ),
             reserved: std::ptr::null_mut(),
             filterId: 0,
             effectiveWeight: FWP_VALUE0::default(),
@@ -842,12 +895,12 @@ fn add_wfp_permit_for_appcontainer(container_sid: *mut std::ffi::c_void) -> Resu
 
 /// Remove WFP permit filters and our sublayer/provider by key (idempotent; works even when filter IDs were not stored).
 fn remove_wfp_permit_filters() {
-    use windows::Win32::NetworkManagement::WindowsFilteringPlatform::{
-        FwpmEngineClose0, FwpmEngineOpen0, FwpmFilterDeleteByKey0,
-        FwpmProviderDeleteByKey0, FwpmSubLayerDeleteByKey0,
-    };
-    use windows::Win32::Foundation::HANDLE;
     use windows::core::GUID;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::NetworkManagement::WindowsFilteringPlatform::{
+        FwpmEngineClose0, FwpmEngineOpen0, FwpmFilterDeleteByKey0, FwpmProviderDeleteByKey0,
+        FwpmSubLayerDeleteByKey0,
+    };
 
     const ERROR_SUCCESS: u32 = 0;
     const RPC_C_AUTHN_WINNT: u32 = 10;
@@ -881,16 +934,22 @@ fn remove_wfp_permit_filters() {
 fn remove_firewall_rule_by_name(rule_name: &str) -> Result<()> {
     use windows::core::BSTR;
     use windows::Win32::NetworkManagement::WindowsFirewall::{INetFwPolicy2, NetFwPolicy2};
-    use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
+    };
 
     unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         let policy: INetFwPolicy2 = CoCreateInstance(&NetFwPolicy2, None, CLSCTX_INPROC_SERVER)
-            .map_err(|e| SandboxError::CreationFailed(format!("CoCreateInstance(NetFwPolicy2): {}", e)))?;
-        let rules = policy.Rules()
+            .map_err(|e| {
+                SandboxError::CreationFailed(format!("CoCreateInstance(NetFwPolicy2): {}", e))
+            })?;
+        let rules = policy
+            .Rules()
             .map_err(|e| SandboxError::CreationFailed(format!("INetFwPolicy2::Rules: {}", e)))?;
         let name_bstr = BSTR::from(rule_name);
-        rules.Remove(&name_bstr)
+        rules
+            .Remove(&name_bstr)
             .map_err(|e| SandboxError::CreationFailed(format!("Rules.Remove: {}", e)))?;
     }
     Ok(())
@@ -905,8 +964,8 @@ fn add_firewall_inbound_rule_for_port(rule_name: &str, port: u16) -> Result<()> 
     use windows::core::BSTR;
     use windows::Win32::Foundation::VARIANT_TRUE;
     use windows::Win32::NetworkManagement::WindowsFirewall::{
-        INetFwPolicy2, INetFwRule, NetFwPolicy2, NetFwRule,
-        NET_FW_ACTION_ALLOW, NET_FW_IP_PROTOCOL_TCP, NET_FW_PROFILE2_ALL, NET_FW_RULE_DIR_IN,
+        INetFwPolicy2, INetFwRule, NetFwPolicy2, NetFwRule, NET_FW_ACTION_ALLOW,
+        NET_FW_IP_PROTOCOL_TCP, NET_FW_PROFILE2_ALL, NET_FW_RULE_DIR_IN,
     };
     use windows::Win32::System::Com::{
         CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
@@ -914,15 +973,17 @@ fn add_firewall_inbound_rule_for_port(rule_name: &str, port: u16) -> Result<()> 
 
     unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-        let policy: INetFwPolicy2 =
-            CoCreateInstance(&NetFwPolicy2, None, CLSCTX_INPROC_SERVER).map_err(|e| {
+        let policy: INetFwPolicy2 = CoCreateInstance(&NetFwPolicy2, None, CLSCTX_INPROC_SERVER)
+            .map_err(|e| {
                 SandboxError::CreationFailed(format!("CoCreateInstance(NetFwPolicy2): {}", e))
             })?;
-        let rules = policy.Rules().map_err(|e| {
-            SandboxError::CreationFailed(format!("INetFwPolicy2::Rules: {}", e))
-        })?;
-        let rule: INetFwRule = CoCreateInstance(&NetFwRule, None, CLSCTX_INPROC_SERVER)
-            .map_err(|e| SandboxError::CreationFailed(format!("CoCreateInstance(NetFwRule): {}", e)))?;
+        let rules = policy
+            .Rules()
+            .map_err(|e| SandboxError::CreationFailed(format!("INetFwPolicy2::Rules: {}", e)))?;
+        let rule: INetFwRule =
+            CoCreateInstance(&NetFwRule, None, CLSCTX_INPROC_SERVER).map_err(|e| {
+                SandboxError::CreationFailed(format!("CoCreateInstance(NetFwRule): {}", e))
+            })?;
         rule.SetName(&BSTR::from(rule_name))
             .map_err(|e| SandboxError::CreationFailed(format!("SetName: {}", e)))?;
         rule.SetDirection(NET_FW_RULE_DIR_IN)
@@ -937,7 +998,8 @@ fn add_firewall_inbound_rule_for_port(rule_name: &str, port: u16) -> Result<()> 
             .map_err(|e| SandboxError::CreationFailed(format!("SetEnabled: {}", e)))?;
         rule.SetProfiles(NET_FW_PROFILE2_ALL.0)
             .map_err(|e| SandboxError::CreationFailed(format!("SetProfiles: {}", e)))?;
-        rules.Add(&rule)
+        rules
+            .Add(&rule)
             .map_err(|e| SandboxError::CreationFailed(format!("Rules.Add: {}", e)))?;
     }
     Ok(())
@@ -1106,7 +1168,11 @@ fn cmd_pushd_path_segment_for_c(user_workdir: &Path) -> String {
 
 /// Use host System32 as the process current directory, then `cd` / `Set-Location` into
 /// `user_workdir` inside the shell so listing and tools see the intended folder.
-fn wrap_spawn_args_for_user_workdir(exe: &Path, args: &[String], user_workdir: &Path) -> Vec<String> {
+fn wrap_spawn_args_for_user_workdir(
+    exe: &Path,
+    args: &[String],
+    user_workdir: &Path,
+) -> Vec<String> {
     let stem = exe
         .file_stem()
         .and_then(|s| s.to_str())
@@ -1227,7 +1293,8 @@ fn log_tool_sandbox_ntfs_dacl_probe_after_denied(
     container_sid: *mut std::ffi::c_void,
     sandbox_id: &str,
 ) {
-    let sid_str = unsafe { sid_to_string(container_sid) }.unwrap_or_else(|| "<unknown>".to_string());
+    let sid_str =
+        unsafe { sid_to_string(container_sid) }.unwrap_or_else(|| "<unknown>".to_string());
     let profile_name = format!("SynBot.Sandbox.{}", sandbox_id);
     let psid = PSID(container_sid);
     let mut parts: Vec<String> = Vec::new();
@@ -1253,7 +1320,11 @@ fn log_tool_sandbox_ntfs_dacl_probe_after_denied(
             }
         }
         cur = p.parent().map(PathBuf::from);
-        if cur.as_ref().map(|x| x.as_os_str().is_empty()).unwrap_or(true) {
+        if cur
+            .as_ref()
+            .map(|x| x.as_os_str().is_empty())
+            .unwrap_or(true)
+        {
             break;
         }
         steps += 1;
@@ -1268,19 +1339,20 @@ fn log_tool_sandbox_ntfs_dacl_probe_after_denied(
         "tool sandbox: NTFS DACL read-only probe after child access denied"
     );
     // Always mirror a short line to helper stderr so it appears even when log filtering hides the target.
-    let summary = format!(
-        "sid={} profile={}",
-        sid_str, profile_name
-    );
+    let summary = format!("sid={} profile={}", sid_str, profile_name);
     let chain_tail = if chain.len() > 600 {
-        format!("{} ... (truncated, full chain in WARN synbot::sandbox::ntfs_verify)", &chain[..600])
+        format!(
+            "{} ... (truncated, full chain in WARN synbot::sandbox::ntfs_verify)",
+            &chain[..600]
+        )
     } else {
         chain
     };
     let _ = writeln!(
         std::io::stderr(),
         "[synbot tool-sandbox] NTFS verify: {} | {}",
-        summary, chain_tail
+        summary,
+        chain_tail
     );
 }
 
@@ -1334,7 +1406,8 @@ fn grant_appcontainer_path_ancestors_traverse(
                     let _ = writeln!(
                         std::io::stderr(),
                         "[synbot sandbox]     ACL ancestor failed after {:.0}ms: {}",
-                        wall_ms, e
+                        wall_ms,
+                        e
                     );
                     let _ = std::io::stderr().flush();
                     log::warn!(
@@ -1381,7 +1454,8 @@ fn grant_appcontainer_path_ancestors_traverse(
             let _ = writeln!(
                 std::io::stderr(),
                 "[synbot sandbox]     ACL ancestor failed after {:.0}ms: {}",
-                wall_ms, e
+                wall_ms,
+                e
             );
             let _ = std::io::stderr().flush();
             log::warn!(
@@ -1404,7 +1478,9 @@ fn grant_appcontainer_path_ancestors_traverse(
     let _ = writeln!(
         std::io::stderr(),
         "[synbot sandbox]   Ancestors finished for {}: {} new grant(s) in {:.0}ms",
-        target, new_ancestor_grants, phase_ms
+        target,
+        new_ancestor_grants,
+        phase_ms
     );
     let _ = std::io::stderr().flush();
     if new_ancestor_grants > 0 {
@@ -1500,7 +1576,8 @@ fn grant_config_paths_for_appcontainer_sid(
                 let _ = writeln!(
                     std::io::stderr(),
                     "[synbot sandbox]   ACL target failed after {:.0}ms: {}",
-                    wall_ms, e
+                    wall_ms,
+                    e
                 );
                 let _ = std::io::stderr().flush();
                 log::warn!(
@@ -1530,14 +1607,19 @@ fn grant_config_paths_for_appcontainer_sid(
         .collect();
     let read_collapsed = collapse_nested_paths_outermost(&read_not_under_writ);
 
-    let skipped_writ = config.filesystem.writable_paths.len().saturating_sub(writ_collapsed.len());
+    let skipped_writ = config
+        .filesystem
+        .writable_paths
+        .len()
+        .saturating_sub(writ_collapsed.len());
     let skipped_read_ro = config
         .filesystem
         .readonly_paths
         .len()
         .saturating_sub(read_not_under_writ.len());
-    let skipped_read_nested =
-        read_not_under_writ.len().saturating_sub(read_collapsed.len());
+    let skipped_read_nested = read_not_under_writ
+        .len()
+        .saturating_sub(read_collapsed.len());
     if skipped_writ + skipped_read_ro + skipped_read_nested > 0 {
         let _ = writeln!(
             std::io::stderr(),
@@ -1599,7 +1681,9 @@ fn grant_appcontainer_path_access(
     inherit: bool,
 ) -> Result<()> {
     if container_sid.is_null() {
-        return Err(SandboxError::CreationFailed("container_sid is null".to_string()));
+        return Err(SandboxError::CreationFailed(
+            "container_sid is null".to_string(),
+        ));
     }
     if path.as_os_str().is_empty() {
         return Err(SandboxError::CreationFailed(
@@ -1640,7 +1724,9 @@ fn grant_appcontainer_path_access(
         if err != ERROR_SUCCESS {
             log::warn!(
                 "sandbox ACL GetNamedSecurityInfoW failed path={} after {:.1}ms err={:?}",
-                path_disp, ms_get, err
+                path_disp,
+                ms_get,
+                err
             );
             return Err(SandboxError::CreationFailed(format!(
                 "GetNamedSecurityInfoW({}) failed: {:?}",
@@ -1753,16 +1839,30 @@ impl WindowsAppContainerSandbox {
         } else if should_apply_runtime_appcontainer_acl_grants() {
             if let Some(parent) = exe.parent() {
                 if !parent.as_os_str().is_empty() && !is_windows_skip_acl_dir(parent) {
-                    let _ = writeln!(std::io::stderr(), "[synbot sandbox] Grant access: exe dir {}...", parent.display());
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "[synbot sandbox] Grant access: exe dir {}...",
+                        parent.display()
+                    );
                     let _ = std::io::stderr().flush();
-                    if let Err(e) = grant_appcontainer_path_access(parent, container_sid, false, true) {
-                        log::warn!("Grant access to exe dir {}: {} (child may fail to start)", parent.display(), e);
+                    if let Err(e) =
+                        grant_appcontainer_path_access(parent, container_sid, false, true)
+                    {
+                        log::warn!(
+                            "Grant access to exe dir {}: {} (child may fail to start)",
+                            parent.display(),
+                            e
+                        );
                     }
                 }
             }
             for p in &self.config.filesystem.writable_paths {
                 let path = Path::new(p);
-                let _ = writeln!(std::io::stderr(), "[synbot sandbox] Grant write: {}...", path.display());
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "[synbot sandbox] Grant write: {}...",
+                    path.display()
+                );
                 let _ = std::io::stderr().flush();
                 if let Err(e) = grant_appcontainer_path_access(path, container_sid, false, true) {
                     log::warn!("Grant write access to {}: {}", path.display(), e);
@@ -1771,11 +1871,19 @@ impl WindowsAppContainerSandbox {
             for p in &self.config.filesystem.readonly_paths {
                 let path = Path::new(p);
                 if is_windows_skip_acl_dir(path) {
-                    let _ = writeln!(std::io::stderr(), "[synbot sandbox] Skip ACL for system path: {} (would block)", path.display());
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "[synbot sandbox] Skip ACL for system path: {} (would block)",
+                        path.display()
+                    );
                     let _ = std::io::stderr().flush();
                     continue;
                 }
-                let _ = writeln!(std::io::stderr(), "[synbot sandbox] Grant read: {}...", path.display());
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "[synbot sandbox] Grant read: {}...",
+                    path.display()
+                );
                 let _ = std::io::stderr().flush();
                 if let Err(e) = grant_appcontainer_path_access(path, container_sid, true, true) {
                     log::warn!("Grant read access to {}: {}", path.display(), e);
@@ -1808,7 +1916,9 @@ impl WindowsAppContainerSandbox {
                     .filter(|p| !p.as_os_str().is_empty())
                     .map(|p| crate::config::normalize_workspace_path(p))
             });
-        let work_dir_wide = work_dir.as_ref().map(|p| to_wide_null(&p.to_string_lossy()));
+        let work_dir_wide = work_dir
+            .as_ref()
+            .map(|p| to_wide_null(&p.to_string_lossy()));
 
         let (h_stdin, h_stdout, h_stderr) = unsafe {
             let hin = GetStdHandle(STD_INPUT_HANDLE).unwrap_or_default();
@@ -1868,7 +1978,10 @@ impl WindowsAppContainerSandbox {
             Reserved: 0,
         };
 
-        let _ = writeln!(std::io::stderr(), "[synbot sandbox] Creating child process...");
+        let _ = writeln!(
+            std::io::stderr(),
+            "[synbot sandbox] Creating child process..."
+        );
         let _ = std::io::stderr().flush();
 
         unsafe {
@@ -1882,8 +1995,9 @@ impl WindowsAppContainerSandbox {
             let mut buf = vec![0u8; size];
             let attr_list = buf.as_mut_ptr() as *mut std::ffi::c_void;
             let attr_list_handle = LPPROC_THREAD_ATTRIBUTE_LIST(attr_list);
-            InitializeProcThreadAttributeList(attr_list_handle, 1, 0, &mut size)
-                .map_err(|e| SandboxError::ExecutionFailed(format!("InitializeProcThreadAttributeList: {}", e)))?;
+            InitializeProcThreadAttributeList(attr_list_handle, 1, 0, &mut size).map_err(|e| {
+                SandboxError::ExecutionFailed(format!("InitializeProcThreadAttributeList: {}", e))
+            })?;
 
             UpdateProcThreadAttribute(
                 attr_list_handle,
@@ -1894,7 +2008,9 @@ impl WindowsAppContainerSandbox {
                 None,
                 None,
             )
-            .map_err(|e| SandboxError::ExecutionFailed(format!("UpdateProcThreadAttribute: {}", e)))?;
+            .map_err(|e| {
+                SandboxError::ExecutionFailed(format!("UpdateProcThreadAttribute: {}", e))
+            })?;
 
             let startup = STARTUPINFOEXW {
                 StartupInfo: STARTUPINFOW {
@@ -1923,7 +2039,10 @@ impl WindowsAppContainerSandbox {
             )
             .map_err(|e| SandboxError::ExecutionFailed(format!("CreateProcessW: {}", e)))?;
 
-            let _ = writeln!(std::io::stderr(), "[synbot sandbox] Child process created, waiting for exit...");
+            let _ = writeln!(
+                std::io::stderr(),
+                "[synbot sandbox] Child process created, waiting for exit..."
+            );
             let _ = std::io::stderr().flush();
 
             for sid in &mut capability_sids {
@@ -1955,7 +2074,8 @@ impl WindowsAppContainerSandbox {
         let container_sid = self
             .container_sid
             .ok_or_else(|| SandboxError::CreationFailed("AppContainer not started".to_string()))?;
-        let sid_str = unsafe { sid_to_string(container_sid) }.unwrap_or_else(|| "<unknown>".to_string());
+        let sid_str =
+            unsafe { sid_to_string(container_sid) }.unwrap_or_else(|| "<unknown>".to_string());
 
         if skip_runtime_appcontainer_acl_grants() {
             log::debug!(
@@ -1965,7 +2085,9 @@ impl WindowsAppContainerSandbox {
         } else if should_apply_runtime_appcontainer_acl_grants() {
             if let Some(parent) = exe.parent() {
                 if !parent.as_os_str().is_empty() && !is_windows_skip_acl_dir(parent) {
-                    if let Err(e) = grant_appcontainer_path_access(parent, container_sid, false, true) {
+                    if let Err(e) =
+                        grant_appcontainer_path_access(parent, container_sid, false, true)
+                    {
                         log::warn!(
                             "Grant access to exe dir {}: {} (child may fail to start)",
                             parent.display(),
@@ -2055,37 +2177,45 @@ impl WindowsAppContainerSandbox {
             .and_then(|s| s.to_str())
             .unwrap_or("")
             .to_ascii_lowercase();
-        let cmd_c_payload = if stem == "cmd" && args.len() >= 2 && args[0].eq_ignore_ascii_case("/c") {
-            join_args_for_cmd_c_tail(&args[1..]).to_ascii_lowercase()
-        } else {
-            String::new()
-        };
-        let cmd_payload_mentions_powershell =
-            stem == "cmd" && (cmd_c_payload.contains("powershell") || cmd_c_payload.contains("pwsh"));
+        let cmd_c_payload =
+            if stem == "cmd" && args.len() >= 2 && args[0].eq_ignore_ascii_case("/c") {
+                join_args_for_cmd_c_tail(&args[1..]).to_ascii_lowercase()
+            } else {
+                String::new()
+            };
+        let cmd_payload_mentions_powershell = stem == "cmd"
+            && (cmd_c_payload.contains("powershell") || cmd_c_payload.contains("pwsh"));
 
         let parent_in_app_sandbox = std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some();
 
-        let (spawn_args, create_process_cwd_wide): (Vec<String>, Option<Vec<u16>>) = match work_dir.as_ref() {
+        let (spawn_args, create_process_cwd_wide): (Vec<String>, Option<Vec<u16>>) = match work_dir
+            .as_ref()
+        {
             // PowerShell is known to emit “当前目录无效” when inheriting some AppContainer cwd values.
             // When cmd.exe is being used to launch PowerShell, prefer System32 + in-shell cd.
             Some(wd) if cmd_payload_mentions_powershell => (
                 wrap_spawn_args_for_user_workdir(exe, args, wd),
-                Some(to_wide_null(&windows_host_create_process_cwd().to_string_lossy())),
+                Some(to_wide_null(
+                    &windows_host_create_process_cwd().to_string_lossy(),
+                )),
             ),
             // cmd from **inside** the app-container daemon: historical pushd workaround.
             Some(wd) if stem == "cmd" && parent_in_app_sandbox => (
                 wrap_spawn_args_for_user_workdir(exe, args, wd),
-                Some(to_wide_null(&windows_host_create_process_cwd().to_string_lossy())),
+                Some(to_wide_null(
+                    &windows_host_create_process_cwd().to_string_lossy(),
+                )),
             ),
             // cmd from host (e.g. `tool-sandbox serve`): workspace as `lpCurrentDirectory`.
-            Some(wd) if stem == "cmd" => (
-                args.to_vec(),
-                Some(to_wide_null(&wd.to_string_lossy())),
-            ),
-            Some(wd) if work_dir_preflight_ok => (args.to_vec(), Some(to_wide_null(&wd.to_string_lossy()))),
+            Some(wd) if stem == "cmd" => (args.to_vec(), Some(to_wide_null(&wd.to_string_lossy()))),
+            Some(wd) if work_dir_preflight_ok => {
+                (args.to_vec(), Some(to_wide_null(&wd.to_string_lossy())))
+            }
             Some(wd) => (
                 wrap_spawn_args_for_user_workdir(exe, args, wd),
-                Some(to_wide_null(&windows_host_create_process_cwd().to_string_lossy())),
+                Some(to_wide_null(
+                    &windows_host_create_process_cwd().to_string_lossy(),
+                )),
             ),
             None => (args.to_vec(), None),
         };
@@ -2149,8 +2279,7 @@ impl WindowsAppContainerSandbox {
                 &mut stderr_w,
                 Some(std::ptr::addr_of!(sa)),
                 0,
-            )
-            {
+            ) {
                 let _ = CloseHandle(stdout_r);
                 let _ = CloseHandle(stdout_w);
                 return Err(SandboxError::ExecutionFailed(format!(
@@ -2271,7 +2400,10 @@ impl WindowsAppContainerSandbox {
                 let _ = CloseHandle(stdout_w);
                 let _ = CloseHandle(stderr_r);
                 let _ = CloseHandle(stderr_w);
-                return Err(SandboxError::ExecutionFailed(format!("CreateProcessW: {}", e)));
+                return Err(SandboxError::ExecutionFailed(format!(
+                    "CreateProcessW: {}",
+                    e
+                )));
             }
 
             for sid in &mut capability_sids {
@@ -2289,8 +2421,7 @@ impl WindowsAppContainerSandbox {
             let stdout_j = thread::spawn(move || {
                 let mut v = Vec::new();
                 unsafe {
-                    let mut f =
-                        std::fs::File::from_raw_handle(out_h as RawHandle);
+                    let mut f = std::fs::File::from_raw_handle(out_h as RawHandle);
                     let _ = f.read_to_end(&mut v);
                 }
                 v
@@ -2298,14 +2429,15 @@ impl WindowsAppContainerSandbox {
             let stderr_j = thread::spawn(move || {
                 let mut v = Vec::new();
                 unsafe {
-                    let mut f =
-                        std::fs::File::from_raw_handle(err_h as RawHandle);
+                    let mut f = std::fs::File::from_raw_handle(err_h as RawHandle);
                     let _ = f.read_to_end(&mut v);
                 }
                 v
             });
 
-            let timeout_ms = u32::try_from(timeout.as_millis()).unwrap_or(u32::MAX).max(1);
+            let timeout_ms = u32::try_from(timeout.as_millis())
+                .unwrap_or(u32::MAX)
+                .max(1);
             let wait = WaitForSingleObject(pi.hProcess, timeout_ms);
 
             let (exit_u32, timed_out) = if wait == WAIT_TIMEOUT {
@@ -2420,7 +2552,12 @@ impl WindowsAppContainerSandbox {
                         PCWSTR::from_raw(desc_wide.as_ptr()),
                         cap_slice,
                     )
-                    .map_err(|e| SandboxError::CreationFailed(format!("CreateAppContainerProfile (after delete): {}", e)))?
+                    .map_err(|e| {
+                        SandboxError::CreationFailed(format!(
+                            "CreateAppContainerProfile (after delete): {}",
+                            e
+                        ))
+                    })?
                 }
                 Err(e) => {
                     return Err(SandboxError::CreationFailed(format!(
@@ -2450,19 +2587,33 @@ impl WindowsAppContainerSandbox {
                     match add_firewall_outbound_rule_for_appcontainer(&sid_str, &rule_name) {
                         Ok(()) => {
                             self.firewall_rule_name = Some(rule_name);
-                            let _ = writeln!(std::io::stderr(), "[synbot sandbox] Firewall outbound rule added for AppContainer");
+                            let _ = writeln!(
+                                std::io::stderr(),
+                                "[synbot sandbox] Firewall outbound rule added for AppContainer"
+                            );
                             let _ = std::io::stderr().flush();
                         }
                         Err(e) => {
-                            let _ = writeln!(std::io::stderr(), "[synbot sandbox] WARNING: Could not add firewall rule: {}", e);
-                            let _ = writeln!(std::io::stderr(), "[synbot sandbox] Run once as Administrator: synbot sandbox setup");
+                            let _ = writeln!(
+                                std::io::stderr(),
+                                "[synbot sandbox] WARNING: Could not add firewall rule: {}",
+                                e
+                            );
+                            let _ = writeln!(
+                                std::io::stderr(),
+                                "[synbot sandbox] Run once as Administrator: synbot sandbox setup"
+                            );
                             let _ = std::io::stderr().flush();
                             log::warn!("Firewall outbound rule: {} (run as Administrator: synbot sandbox setup)", e);
                         }
                     }
                 }
                 if let Some(sid_str) = unsafe { sid_to_string(self.container_sid.unwrap()) } {
-                    let _ = writeln!(std::io::stderr(), "[synbot sandbox] WFP permit will use AppContainer SID: {}", sid_str);
+                    let _ = writeln!(
+                        std::io::stderr(),
+                        "[synbot sandbox] WFP permit will use AppContainer SID: {}",
+                        sid_str
+                    );
                     let _ = std::io::stderr().flush();
                 }
                 match add_wfp_permit_for_appcontainer(self.container_sid.unwrap()) {
@@ -2472,11 +2623,21 @@ impl WindowsAppContainerSandbox {
                         let _ = std::io::stderr().flush();
                     }
                     Err(e) => {
-                        let _ = writeln!(std::io::stderr(), "[synbot sandbox] WARNING: Could not add WFP permit: {}", e);
-                        let _ = writeln!(std::io::stderr(), "[synbot sandbox] Run once as Administrator: synbot sandbox setup");
+                        let _ = writeln!(
+                            std::io::stderr(),
+                            "[synbot sandbox] WARNING: Could not add WFP permit: {}",
+                            e
+                        );
+                        let _ = writeln!(
+                            std::io::stderr(),
+                            "[synbot sandbox] Run once as Administrator: synbot sandbox setup"
+                        );
                         let _ = writeln!(std::io::stderr(), "[synbot sandbox] Then you can start the sandbox as a normal user. WFP filters are persistent (survive reboot).");
                         let _ = std::io::stderr().flush();
-                        log::warn!("WFP permit for AppContainer: {} (network may be blocked)", e);
+                        log::warn!(
+                            "WFP permit for AppContainer: {} (network may be blocked)",
+                            e
+                        );
                     }
                 }
 
@@ -2494,11 +2655,18 @@ impl WindowsAppContainerSandbox {
 
                 // Inbound firewall rule: allow LAN clients to reach the web server port.
                 for port in &self.config.network.allowed_ports {
-                    let inbound_rule_name = format!("SynBot Sandbox Inbound - {} port {}", self.config.sandbox_id, port);
+                    let inbound_rule_name = format!(
+                        "SynBot Sandbox Inbound - {} port {}",
+                        self.config.sandbox_id, port
+                    );
                     let _ = remove_firewall_rule_by_name(&inbound_rule_name);
                     match add_firewall_inbound_rule_for_port(&inbound_rule_name, *port) {
                         Ok(()) => {
-                            let _ = writeln!(std::io::stderr(), "[synbot sandbox] Firewall inbound rule added for port {}", port);
+                            let _ = writeln!(
+                                std::io::stderr(),
+                                "[synbot sandbox] Firewall inbound rule added for port {}",
+                                port
+                            );
                             let _ = std::io::stderr().flush();
                         }
                         Err(e) => {
@@ -2577,7 +2745,11 @@ pub fn install_windows_sandbox_network_rules(
                 "[synbot sandbox]   (Nested dirs share one inheritable grant per root; very large trees can still take a few minutes.)"
             );
             let _ = std::io::stderr().flush();
-            grant_config_paths_for_appcontainer_sid(&sandbox.config, sid, grant_parent_traverse_acl);
+            grant_config_paths_for_appcontainer_sid(
+                &sandbox.config,
+                sid,
+                grant_parent_traverse_acl,
+            );
             let _ = writeln!(
                 std::io::stderr(),
                 "[synbot sandbox] Filesystem ACL grants finished (check logs if any path failed)."
@@ -2630,14 +2802,17 @@ impl Sandbox for WindowsAppContainerSandbox {
             }
         }
 
-        log::info!("AppContainer sandbox stopped: id={}", self.config.sandbox_id);
+        log::info!(
+            "AppContainer sandbox stopped: id={}",
+            self.config.sandbox_id
+        );
 
         self.status.state = SandboxState::Stopped;
         self.status.stopped_at = Some(Utc::now());
 
         Ok(())
     }
-    
+
     fn execute(
         &self,
         command: &str,
@@ -2666,44 +2841,48 @@ impl Sandbox for WindowsAppContainerSandbox {
             error: None,
         })
     }
-    
+
     fn get_status(&self) -> SandboxStatus {
         self.status.clone()
     }
-    
+
     fn health_check(&self) -> HealthStatus {
         let mut checks = HashMap::new();
-        
+
         // Check if container is running
         let is_running = self.status.state == SandboxState::Running;
         checks.insert("running".to_string(), is_running);
-        
+
         // Check if profile is configured
         let has_profile = !self.profile_name.is_empty();
         checks.insert("profile_configured".to_string(), has_profile);
-        
+
         let healthy = is_running && has_profile;
         let message = if healthy {
             "Sandbox is healthy".to_string()
         } else {
-            format!("Sandbox is not healthy: state={:?}, has_profile={}", 
-                    self.status.state, has_profile)
+            format!(
+                "Sandbox is not healthy: state={:?}, has_profile={}",
+                self.status.state, has_profile
+            )
         };
-        
+
         HealthStatus {
             healthy,
             checks,
             message,
         }
     }
-    
+
     fn get_info(&self) -> SandboxInfo {
-        let sandbox_type =
-            if matches!(self.config.requested_tool_sandbox_type.as_deref(), Some("appcontainer")) {
-                "appcontainer-tool".to_string()
-            } else {
-                "appcontainer".to_string()
-            };
+        let sandbox_type = if matches!(
+            self.config.requested_tool_sandbox_type.as_deref(),
+            Some("appcontainer")
+        ) {
+            "appcontainer-tool".to_string()
+        } else {
+            "appcontainer".to_string()
+        };
         SandboxInfo {
             sandbox_id: self.config.sandbox_id.clone(),
             platform: "windows".to_string(),
@@ -2723,7 +2902,7 @@ impl Drop for WindowsAppContainerSandbox {
 mod tests {
     use super::*;
     use crate::sandbox::types::*;
-    
+
     fn create_test_config() -> SandboxConfig {
         SandboxConfig {
             sandbox_id: "test-windows-001".to_string(),
@@ -2755,75 +2934,81 @@ mod tests {
             image: None,
         }
     }
-    
+
     #[test]
     fn test_new_appcontainer_sandbox() {
         let config = create_test_config();
         let sandbox = WindowsAppContainerSandbox::new(config.clone());
-        
+
         assert!(sandbox.is_ok());
         let sandbox = sandbox.unwrap();
         assert_eq!(sandbox.config.sandbox_id, "test-windows-001");
         assert_eq!(sandbox.status.state, SandboxState::Created);
     }
-    
+
     #[test]
     fn test_build_capabilities_with_network() {
         let config = create_test_config();
         let capabilities = WindowsAppContainerSandbox::build_capabilities(&config).unwrap();
-        
+
         // Should have network capabilities
         assert!(!capabilities.is_empty());
         assert!(capabilities.iter().any(|c| c.name == "internetClient"));
-        assert!(capabilities.iter().any(|c| c.name == "internetClientServer"));
+        assert!(capabilities
+            .iter()
+            .any(|c| c.name == "internetClientServer"));
     }
-    
+
     #[test]
     fn test_build_capabilities_without_network() {
         let mut config = create_test_config();
         config.network.enabled = false;
-        
+
         let capabilities = WindowsAppContainerSandbox::build_capabilities(&config).unwrap();
-        
+
         // Should have no network capabilities
         assert!(capabilities.iter().all(|c| c.name != "internetClient"));
-        assert!(capabilities.iter().all(|c| c.name != "internetClientServer"));
+        assert!(capabilities
+            .iter()
+            .all(|c| c.name != "internetClientServer"));
     }
-    
+
     #[test]
     fn test_build_capabilities_with_file_access() {
         let config = create_test_config();
         let capabilities = WindowsAppContainerSandbox::build_capabilities(&config).unwrap();
-        
+
         // Should have document library capability for file access
         assert!(capabilities.iter().any(|c| c.name == "documentsLibrary"));
     }
-    
+
     #[test]
     fn test_build_capabilities_with_allowed_hosts() {
         let config = create_test_config();
         let capabilities = WindowsAppContainerSandbox::build_capabilities(&config).unwrap();
-        
+
         // Should have private network capability when specific hosts are allowed
-        assert!(capabilities.iter().any(|c| c.name == "privateNetworkClientServer"));
+        assert!(capabilities
+            .iter()
+            .any(|c| c.name == "privateNetworkClientServer"));
     }
-    
+
     #[test]
     fn test_get_info() {
         let config = create_test_config();
         let sandbox = WindowsAppContainerSandbox::new(config).unwrap();
-        
+
         let info = sandbox.get_info();
         assert_eq!(info.platform, "windows");
         assert_eq!(info.sandbox_type, "appcontainer");
         assert_eq!(info.sandbox_id, "test-windows-001");
     }
-    
+
     #[test]
     fn test_health_check_created_state() {
         let config = create_test_config();
         let sandbox = WindowsAppContainerSandbox::new(config).unwrap();
-        
+
         let health = sandbox.health_check();
         assert!(!health.healthy); // Not healthy until started
         assert_eq!(health.checks.get("running"), Some(&false));

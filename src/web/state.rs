@@ -1,4 +1,5 @@
 use crate::agent::agent_registry::AgentRegistry;
+use crate::agent::events::EventBus;
 use crate::agent::session_manager::SessionManager;
 use crate::agent::skills::SkillProvider;
 use crate::bus::{InboundMessage, OutboundMessage};
@@ -22,10 +23,21 @@ pub struct AppState {
     pub skills_loader: Arc<dyn SkillProvider>,
     pub inbound_tx: mpsc::Sender<InboundMessage>,
     pub outbound_tx: broadcast::Sender<OutboundMessage>,
+    /// Streaming agent events (deltas, tool lifecycle) for `/ws/agent`.
+    pub events: Arc<EventBus>,
     pub log_buffer: SharedLogBuffer,
     pub approval_manager: Arc<crate::tools::approval::ApprovalManager>,
     pub permission_policy: Option<Arc<crate::tools::permission::CommandPermissionPolicy>>,
     pub runtime_status: Arc<ChannelStatusRegistry>,
+    /// Opened folders + which chat works inside which folder (shared with the agent loop).
+    pub projects: Arc<RwLock<crate::project::ProjectStore>>,
+    /// Turn snapshots (write before/after images) shared with the agent loop.
+    pub checkpoints: Arc<crate::checkpoint::CheckpointStore>,
+    /// Persistent PTY sessions for the workbench terminal (`/ws/terminal`).
+    pub terminals: Arc<crate::terminal::TerminalHub>,
+    /// Subagents (spawn / run_team / directive routing) shown in the workbench team panel.
+    /// Startup replaces this with the pool the tools actually spawn into.
+    pub subagents: Arc<tokio::sync::Mutex<crate::agent::subagent::SubagentManager>>,
 }
 
 impl AppState {
@@ -38,10 +50,13 @@ impl AppState {
         skills_loader: Arc<dyn SkillProvider>,
         inbound_tx: mpsc::Sender<InboundMessage>,
         outbound_tx: broadcast::Sender<OutboundMessage>,
+        events: Arc<EventBus>,
         log_buffer: SharedLogBuffer,
         approval_manager: Arc<crate::tools::approval::ApprovalManager>,
         permission_policy: Option<Arc<crate::tools::permission::CommandPermissionPolicy>>,
         runtime_status: Arc<ChannelStatusRegistry>,
+        projects: Arc<RwLock<crate::project::ProjectStore>>,
+        checkpoints: Arc<crate::checkpoint::CheckpointStore>,
     ) -> Self {
         Self {
             config,
@@ -52,10 +67,17 @@ impl AppState {
             skills_loader,
             inbound_tx,
             outbound_tx,
+            events,
             log_buffer,
             approval_manager,
             permission_policy,
             runtime_status,
+            projects,
+            checkpoints,
+            terminals: Arc::new(crate::terminal::TerminalHub::new()),
+            subagents: Arc::new(tokio::sync::Mutex::new(
+                crate::agent::subagent::SubagentManager::new(4, None),
+            )),
         }
     }
 
@@ -92,10 +114,17 @@ mod tests {
             Arc::new(SkillsLoader::new(&PathBuf::from("."))),
             inbound_tx,
             outbound_tx,
+            EventBus::new(),
             Arc::new(RwLock::new(crate::web::log_buffer::LogBuffer::new(100))),
             Arc::new(crate::tools::approval::ApprovalManager::new()),
             None,
             Arc::new(ChannelStatusRegistry::new()),
+            Arc::new(RwLock::new(crate::project::ProjectStore::load(
+                PathBuf::from("/tmp/synbot_app_state_test_projects.json"),
+            ))),
+            Arc::new(crate::checkpoint::CheckpointStore::new(PathBuf::from(
+                "/tmp/synbot_app_state_test_checkpoints",
+            ))),
         );
         let cloned = state.clone();
         assert!(Arc::ptr_eq(&state.config, &cloned.config));

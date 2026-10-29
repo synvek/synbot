@@ -59,6 +59,7 @@ export const MainAgentSection: React.FC<SectionProps> = ({ draft, setDraft, t })
   const maxTokens = typeof m.maxTokens === 'number' ? m.maxTokens : 8192
   const temperature = typeof m.temperature === 'number' ? m.temperature : 0.7
   const maxToolIterations = typeof m.maxToolIterations === 'number' ? m.maxToolIterations : 99
+  const maxIdleIterations = typeof m.maxIdleIterations === 'number' ? m.maxIdleIterations : 6
   const maxConsecutiveToolErrors =
     typeof m.maxConsecutiveToolErrors === 'number' ? m.maxConsecutiveToolErrors : 8
   const maxChatHistoryMessages =
@@ -126,6 +127,13 @@ export const MainAgentSection: React.FC<SectionProps> = ({ draft, setDraft, t })
         value={maxToolIterations}
         min={1}
         onChange={(v) => patchMain({ maxToolIterations: v })}
+      />
+      <NumberField
+        id="maMaxIdleIter"
+        label={t('config.sections.mainAgent.maxIdleIterations')}
+        value={maxIdleIterations}
+        min={1}
+        onChange={(v) => patchMain({ maxIdleIterations: v })}
       />
       <NumberField
         id="maMaxConsecErr"

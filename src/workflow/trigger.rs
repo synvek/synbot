@@ -66,13 +66,21 @@ fn strip_json_from_content(content: &str) -> (String, Option<WorkflowDef>) {
     let without = if def.is_some() {
         if let Some(back_start) = s.find("```") {
             let after = s[back_start + 3..].trim_start();
-            let skip = if after.to_lowercase().starts_with("json") { 4 } else { 0 };
+            let skip = if after.to_lowercase().starts_with("json") {
+                4
+            } else {
+                0
+            };
             let after = after[skip..].trim_start();
             if let Some(back_end) = after.find("```") {
                 let end_pos = back_start + 3 + (if skip == 4 { 4 } else { 0 }) + back_end + 3;
-                format!("{} {}", s[..back_start].trim(), s.get(end_pos..).unwrap_or("").trim())
-                    .trim()
-                    .to_string()
+                format!(
+                    "{} {}",
+                    s[..back_start].trim(),
+                    s.get(end_pos..).unwrap_or("").trim()
+                )
+                .trim()
+                .to_string()
             } else {
                 s.to_string()
             }
@@ -127,7 +135,8 @@ pub fn parse_workflow_trigger(content: &str) -> WorkflowTrigger {
         return WorkflowTrigger::None;
     }
 
-    let body = content[PREFIX_LEN..].trim_start_matches(|c: char| c == ' ' || c == ':' || c == '\n');
+    let body =
+        content[PREFIX_LEN..].trim_start_matches(|c: char| c == ' ' || c == ':' || c == '\n');
     if body.is_empty() {
         return WorkflowTrigger::Create {
             description: String::new(),
@@ -165,7 +174,9 @@ mod tests {
     fn prefix_workflow_case_insensitive() {
         let r = parse_workflow_trigger("/Workflow do something");
         match &r {
-            WorkflowTrigger::Create { description, .. } => assert!(description.contains("something")),
+            WorkflowTrigger::Create { description, .. } => {
+                assert!(description.contains("something"))
+            }
             _ => panic!("expected Create"),
         }
     }

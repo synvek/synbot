@@ -20,22 +20,26 @@ pub mod approval_store;
 pub mod approval_tool;
 pub mod browser;
 pub mod code_analyzer;
+pub mod code_index;
 pub mod context;
 pub mod diff_viewer;
 pub mod filesystem;
 pub mod generation;
+pub mod git;
 pub mod heartbeat_cron;
-pub mod list_tools;
 pub mod list_commands;
-pub mod memory_tool;
-pub mod message;
+pub mod list_tools;
 #[cfg(feature = "mcp")]
 pub mod mcp;
+pub mod memory_tool;
+pub mod message;
 pub mod permission;
 pub mod session_tools;
 pub mod shell;
 pub mod skills_tool;
 pub mod spawn;
+pub mod tasks;
+pub mod team;
 pub mod truncation;
 pub mod web;
 
@@ -43,8 +47,8 @@ use anyhow::Result;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
-use tracing::{info, debug};
+use std::sync::{Arc, Mutex as StdMutex, OnceLock};
+use tracing::{debug, info};
 
 pub use context::{scope, ToolContext};
 
@@ -70,17 +74,24 @@ fn sanitize_args_for_log(tool_name: &str, args: &Value) -> String {
         None => return "args=?".to_string(),
     };
     let part = match tool_name {
-        "read_file" | "write_file" | "edit_file" | "list_dir" | "get_file_info" | "create_dir" => obj
-            .get("path")
-            .and_then(|v| v.as_str())
-            .map(|s| format!("path={}", truncate_for_log(s, 120))),
+        "read_file" | "write_file" | "edit_file" | "list_dir" | "get_file_info" | "create_dir" => {
+            obj.get("path")
+                .and_then(|v| v.as_str())
+                .map(|s| format!("path={}", truncate_for_log(s, 120)))
+        }
         "read_multiple_files" => obj
             .get("paths")
             .and_then(|v| v.as_array())
             .map(|a| format!("paths_count={}", a.len())),
         "move_file" => {
-            let src = obj.get("source").and_then(|v| v.as_str()).map(|s| truncate_for_log(s, 60));
-            let dst = obj.get("destination").and_then(|v| v.as_str()).map(|s| truncate_for_log(s, 60));
+            let src = obj
+                .get("source")
+                .and_then(|v| v.as_str())
+                .map(|s| truncate_for_log(s, 60));
+            let dst = obj
+                .get("destination")
+                .and_then(|v| v.as_str())
+                .map(|s| truncate_for_log(s, 60));
             match (src, dst) {
                 (Some(s), Some(d)) => Some(format!("source={}, destination={}", s, d)),
                 _ => None,
@@ -89,12 +100,24 @@ fn sanitize_args_for_log(tool_name: &str, args: &Value) -> String {
         "search_files" => {
             let dir = obj.get("directory").and_then(|v| v.as_str()).unwrap_or(".");
             let pat = obj.get("pattern").and_then(|v| v.as_str()).unwrap_or("?");
-            Some(format!("directory={}, pattern={}", truncate_for_log(dir, 80), truncate_for_log(pat, 40)))
+            Some(format!(
+                "directory={}, pattern={}",
+                truncate_for_log(dir, 80),
+                truncate_for_log(pat, 40)
+            ))
         }
         "search_text" => {
             let dir = obj.get("directory").and_then(|v| v.as_str()).unwrap_or(".");
-            let q = obj.get("query").and_then(|v| v.as_str()).map(|s| truncate_for_log(s, 40)).unwrap_or_else(|| "?".to_string());
-            Some(format!("directory={}, query={}", truncate_for_log(dir, 80), q))
+            let q = obj
+                .get("query")
+                .and_then(|v| v.as_str())
+                .map(|s| truncate_for_log(s, 40))
+                .unwrap_or_else(|| "?".to_string());
+            Some(format!(
+                "directory={}, query={}",
+                truncate_for_log(dir, 80),
+                q
+            ))
         }
         "exec" => obj
             .get("command")
@@ -105,9 +128,20 @@ fn sanitize_args_for_log(tool_name: &str, args: &Value) -> String {
             .and_then(|v| v.as_str())
             .map(|s| format!("content_len={}", s.len())),
         "message" => {
-            let content_len = obj.get("content").and_then(|v| v.as_str()).map(|s| s.len()).unwrap_or(0);
-            let files_count = obj.get("files").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
-            Some(format!("content_len={}, files={}", content_len, files_count))
+            let content_len = obj
+                .get("content")
+                .and_then(|v| v.as_str())
+                .map(|s| s.len())
+                .unwrap_or(0);
+            let files_count = obj
+                .get("files")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+            Some(format!(
+                "content_len={}, files={}",
+                content_len, files_count
+            ))
         }
         "list_memory" => obj
             .get("agent_id")
@@ -134,6 +168,33 @@ fn truncate_for_log(s: &str, max_len: usize) -> String {
     }
 }
 
+/// Process-wide write lock for one workspace path.
+///
+/// Several turns (parallel chats, sub-agents) may write concurrently; serialising per path keeps
+/// read-modify-write tools (`edit_file`, `write_file`, `move_file`) from clobbering each other
+/// while still letting different files be written in parallel.
+fn path_write_lock(path: &str) -> Arc<tokio::sync::Mutex<()>> {
+    static LOCKS: OnceLock<StdMutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> =
+        OnceLock::new();
+    let locks = LOCKS.get_or_init(|| StdMutex::new(HashMap::new()));
+    let mut locks = locks.lock().unwrap_or_else(|e| e.into_inner());
+    Arc::clone(locks.entry(path.to_string()).or_default())
+}
+
+/// Paths a mutating call touches, deduplicated and sorted so lock order is always the same
+/// (a `move_file` from A to B and one from B to A cannot deadlock).
+fn mutating_lock_paths(args: &Value) -> Vec<String> {
+    let mut paths: Vec<String> = ["path", "destination", "source"]
+        .iter()
+        .filter_map(|key| args.get(*key).and_then(|v| v.as_str()))
+        .filter(|p| !p.trim().is_empty())
+        .map(|p| p.to_string())
+        .collect();
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
 /// A type-erased tool that can be stored in the registry.
 #[async_trait::async_trait]
 pub trait DynTool: Send + Sync {
@@ -141,6 +202,15 @@ pub trait DynTool: Send + Sync {
     fn description(&self) -> &str;
     fn parameters_schema(&self) -> Value;
     async fn call(&self, args: Value) -> Result<String>;
+
+    /// Whether the tool only observes state (file reads, searches, fetches).
+    ///
+    /// The agent loop runs read-only calls of one model round concurrently; anything that may
+    /// mutate the workspace, sessions or remote state must keep the default (`false`) so it stays
+    /// strictly ordered. Plugin/MCP tools are therefore serial unless they opt in.
+    fn read_only(&self) -> bool {
+        false
+    }
 }
 
 /// Metadata about a registered tool, returned by `list_tools`.
@@ -155,7 +225,6 @@ pub struct ToolInfo {
 pub struct ToolRegistry {
     tools: HashMap<String, Arc<dyn DynTool>>,
 }
-
 
 impl ToolRegistry {
     pub fn new() -> Self {
@@ -180,6 +249,21 @@ impl ToolRegistry {
         Ok(self.tools.remove(name).is_some())
     }
 
+    /// A registry view without the named tools, sharing the same `Arc<dyn DynTool>` instances.
+    ///
+    /// Used to give subagents a narrower toolset (no `spawn`/`run_team`, no `plan_write`) without
+    /// duplicating tool state or the registry itself.
+    pub fn without(&self, names: &[&str]) -> ToolRegistry {
+        ToolRegistry {
+            tools: self
+                .tools
+                .iter()
+                .filter(|(name, _)| !names.contains(&name.as_str()))
+                .map(|(name, tool)| (name.clone(), Arc::clone(tool)))
+                .collect(),
+        }
+    }
+
     /// Return metadata about all registered tools.
     pub fn list_tools(&self) -> Vec<ToolInfo> {
         self.tools
@@ -196,6 +280,11 @@ impl ToolRegistry {
         self.tools.get(name)
     }
 
+    /// Whether `name` is a read-only tool (unknown tools are treated as mutating).
+    pub fn is_read_only(&self, name: &str) -> bool {
+        self.tools.get(name).map(|t| t.read_only()).unwrap_or(false)
+    }
+
     /// Execute a tool by name. If `message_ctx` is provided:
     /// - add_heartbeat_task / add_cron_task: channel, chat_id, user_id are injected so the task is associated with the current chat.
     /// - submit_approval_response: responder (user_id) is injected.
@@ -209,26 +298,50 @@ impl ToolRegistry {
         if let Some((channel, chat_id, user_id, session_id)) = message_ctx {
             if name == "add_heartbeat_task" || name == "add_cron_task" {
                 if let Some(obj) = args.as_object_mut() {
-                    obj.insert("channel".into(), serde_json::Value::String(channel.to_string()));
-                    obj.insert("chat_id".into(), serde_json::Value::String(chat_id.to_string()));
-                    obj.insert("user_id".into(), serde_json::Value::String(user_id.to_string()));
+                    obj.insert(
+                        "channel".into(),
+                        serde_json::Value::String(channel.to_string()),
+                    );
+                    obj.insert(
+                        "chat_id".into(),
+                        serde_json::Value::String(chat_id.to_string()),
+                    );
+                    obj.insert(
+                        "user_id".into(),
+                        serde_json::Value::String(user_id.to_string()),
+                    );
                 }
             }
             if name == "submit_approval_response" {
                 if let Some(obj) = args.as_object_mut() {
-                    obj.insert("responder".into(), serde_json::Value::String(user_id.to_string()));
+                    obj.insert(
+                        "responder".into(),
+                        serde_json::Value::String(user_id.to_string()),
+                    );
                 }
             }
             if name == "reset_session" {
                 if let Some(obj) = args.as_object_mut() {
-                    obj.insert("_session_id".into(), serde_json::Value::String(session_id.to_string()));
+                    obj.insert(
+                        "_session_id".into(),
+                        serde_json::Value::String(session_id.to_string()),
+                    );
                 }
             }
             if name == "exec" {
                 if let Some(obj) = args.as_object_mut() {
-                    obj.insert("_channel".into(), serde_json::Value::String(channel.to_string()));
-                    obj.insert("_chat_id".into(), serde_json::Value::String(chat_id.to_string()));
-                    obj.insert("_session_id".into(), serde_json::Value::String(session_id.to_string()));
+                    obj.insert(
+                        "_channel".into(),
+                        serde_json::Value::String(channel.to_string()),
+                    );
+                    obj.insert(
+                        "_chat_id".into(),
+                        serde_json::Value::String(chat_id.to_string()),
+                    );
+                    obj.insert(
+                        "_session_id".into(),
+                        serde_json::Value::String(session_id.to_string()),
+                    );
                 }
             }
             if name == "message"
@@ -237,14 +350,30 @@ impl ToolRegistry {
                 || name == "generate_speech"
             {
                 if let Some(obj) = args.as_object_mut() {
-                    obj.insert("channel".into(), serde_json::Value::String(channel.to_string()));
-                    obj.insert("chat_id".into(), serde_json::Value::String(chat_id.to_string()));
+                    obj.insert(
+                        "channel".into(),
+                        serde_json::Value::String(channel.to_string()),
+                    );
+                    obj.insert(
+                        "chat_id".into(),
+                        serde_json::Value::String(chat_id.to_string()),
+                    );
                 }
             }
-            if name == "spawn" {
+            if name == "spawn" || name == "run_team" || name == "cancel_subagent" {
                 if let Some(obj) = args.as_object_mut() {
-                    obj.insert("_channel".into(), serde_json::Value::String(channel.to_string()));
-                    obj.insert("_chat_id".into(), serde_json::Value::String(chat_id.to_string()));
+                    obj.insert(
+                        "_channel".into(),
+                        serde_json::Value::String(channel.to_string()),
+                    );
+                    obj.insert(
+                        "_chat_id".into(),
+                        serde_json::Value::String(chat_id.to_string()),
+                    );
+                    obj.insert(
+                        "_session_id".into(),
+                        serde_json::Value::String(session_id.to_string()),
+                    );
                 }
             }
         }
@@ -258,6 +387,15 @@ impl ToolRegistry {
 
         debug!(tool_name = %name, args = ?args, "Tool call started");
         let start = std::time::Instant::now();
+        let lock_paths = if self.is_read_only(name) {
+            Vec::new()
+        } else {
+            mutating_lock_paths(&args)
+        };
+        let mut guards = Vec::with_capacity(lock_paths.len());
+        for path in &lock_paths {
+            guards.push(path_write_lock(path).lock_owned().await);
+        }
         let result = match self.tools.get(name) {
             Some(tool) => tool.call(args).await,
             None => anyhow::bail!("Tool '{}' not found", name),
@@ -396,7 +534,10 @@ mod tests {
         let err = reg.register(fake_tool("dup"));
         assert!(err.is_err());
         let msg = err.unwrap_err().to_string();
-        assert!(msg.contains("already registered"), "error message was: {msg}");
+        assert!(
+            msg.contains("already registered"),
+            "error message was: {msg}"
+        );
     }
 
     #[test]
@@ -480,7 +621,10 @@ mod tests {
         assert_eq!(infos.len(), 1);
         assert_eq!(infos[0].name, "mytool");
         assert_eq!(infos[0].description, "My tool description");
-        assert_eq!(infos[0].parameters_schema, json!({"type": "object", "properties": {}}));
+        assert_eq!(
+            infos[0].parameters_schema,
+            json!({"type": "object", "properties": {}})
+        );
     }
 
     #[tokio::test]
@@ -498,5 +642,44 @@ mod tests {
         reg.deregister("gone").unwrap();
         let result = reg.execute("gone", json!({}), None).await;
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn mutating_lock_paths_are_deduped_and_sorted() {
+        let args = json!({"destination": "b.txt", "source": "a.txt"});
+        assert_eq!(mutating_lock_paths(&args), vec!["a.txt", "b.txt"]);
+        assert_eq!(
+            mutating_lock_paths(&json!({"path": "same.txt"})),
+            vec!["same.txt"]
+        );
+        assert!(mutating_lock_paths(&json!({"command": "ls"})).is_empty());
+    }
+
+    #[tokio::test]
+    async fn writes_to_one_path_do_not_interleave() {
+        let order = Arc::new(StdMutex::new(Vec::new()));
+        let mut handles = Vec::new();
+        for i in 0..4 {
+            let order = Arc::clone(&order);
+            handles.push(tokio::spawn(async move {
+                let _guard = path_write_lock("shared.txt").lock_owned().await;
+                order.lock().unwrap().push(format!("start{i}"));
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                order.lock().unwrap().push(format!("end{i}"));
+            }));
+        }
+        for h in handles {
+            h.await.unwrap();
+        }
+
+        let entries = order.lock().unwrap().clone();
+        for pair in entries.chunks(2) {
+            let start = pair[0].trim_start_matches("start");
+            let end = pair[1].trim_start_matches("end");
+            assert_eq!(
+                start, end,
+                "writes to the same path must not interleave: {entries:?}"
+            );
+        }
     }
 }

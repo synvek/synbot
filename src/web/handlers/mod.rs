@@ -1,7 +1,18 @@
 pub mod api;
+pub mod checkpoints;
+pub mod commands;
 pub mod config_redact;
+pub mod git;
+pub mod index;
+pub mod plugins;
+pub mod projects;
 pub mod sanitize;
+pub mod security;
 pub mod static_files;
+pub mod tasks;
+pub mod team;
 pub mod ws;
+pub mod ws_agent;
+pub mod ws_terminal;
 
 pub use api::{ApiResponse, ErrorResponse};

@@ -132,6 +132,11 @@ encoding_rs = "0.8"
 # Extism: load external Wasm plugins (tools, hooks, skills, background, provider)
 extism = "1.13"
 
+# Plugin package integrity: sha256 digests + ed25519 signatures over the wasm entry
+sha2 = "0.10"
+hex = "0.4"
+ed25519-dalek = "2"
+
 # MCP (Model Context Protocol): connect to MCP servers and expose their tools
 mcp-client = { version = "0.1", optional = true }
 mcp-spec = { version = "0.1", optional = true }
@@ -144,6 +149,7 @@ agent-client-protocol = { version = "=0.11.1", optional = true }
 num_cpus = "1"
 bollard = "0.18"
 nix = { version = "0.29", features = ["process", "sched", "mount", "user", "signal"] }
+portable-pty = "0.9"
 
 # nono: capability sandbox (Linux Landlock / macOS Seatbelt) for synbot sandbox
 # 0.6.x breaks with newer sigstore-trust-root (TrustedRoot::production removed).

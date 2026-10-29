@@ -36,7 +36,10 @@ pub async fn cmd_onboard() -> Result<()> {
 
     let mut cfg = config::Config::default();
     // Use workspace under current root (important when using --root-dir).
-    cfg.main_agent.workspace = config::config_dir().join("workspace").to_string_lossy().into_owned();
+    cfg.main_agent.workspace = config::config_dir()
+        .join("workspace")
+        .to_string_lossy()
+        .into_owned();
 
     // Enable web dashboard with auth by default for security (username=admin, password=random UUID).
     let web_password = Uuid::new_v4().to_string();
@@ -60,17 +63,26 @@ pub async fn cmd_onboard() -> Result<()> {
     println!("✓ Created workspace at {}", ws.display());
 
     create_roles_templates()?;
-    println!("✓ Created role templates at {}", config::roles_dir().display());
+    println!(
+        "✓ Created role templates at {}",
+        config::roles_dir().display()
+    );
 
     create_skills_templates()?;
-    println!("✓ Created skill templates at {}", config::skills_dir().display());
+    println!(
+        "✓ Created skill templates at {}",
+        config::skills_dir().display()
+    );
 
     println!("\n🔐 Web dashboard is enabled with authentication. Save these credentials:");
     println!("   ┌─────────────────────────────────────────────────────────────────┐");
     println!("   │  Username:  admin                                                │");
     println!("   │  Password:  {:<36}  │", web_password);
     println!("   └─────────────────────────────────────────────────────────────────┘");
-    println!("   The password is stored in {} and will not be shown again.", cfg_path.display());
+    println!(
+        "   The password is stored in {} and will not be shown again.",
+        cfg_path.display()
+    );
 
     println!("\n🐈 synbot is ready!");
     println!("\nNext steps:");

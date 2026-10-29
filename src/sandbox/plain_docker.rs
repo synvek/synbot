@@ -12,7 +12,7 @@ use bollard::container::{
 };
 use bollard::exec::{CreateExecOptions, StartExecResults};
 use bollard::models::HostConfig;
-use bollard::{API_DEFAULT_VERSION, Docker};
+use bollard::{Docker, API_DEFAULT_VERSION};
 use chrono::Utc;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -42,14 +42,16 @@ pub(crate) fn connect_docker() -> Result<Docker> {
                 }
             }
         }
-        Docker::connect_with_local_defaults()
-            .map_err(|e| SandboxError::CreationFailed(format!("Failed to connect to Docker: {}", e)))
+        Docker::connect_with_local_defaults().map_err(|e| {
+            SandboxError::CreationFailed(format!("Failed to connect to Docker: {}", e))
+        })
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        Docker::connect_with_local_defaults()
-            .map_err(|e| SandboxError::CreationFailed(format!("Failed to connect to Docker: {}", e)))
+        Docker::connect_with_local_defaults().map_err(|e| {
+            SandboxError::CreationFailed(format!("Failed to connect to Docker: {}", e))
+        })
     }
 
     #[cfg(target_os = "windows")]
@@ -68,7 +70,8 @@ pub(crate) fn connect_docker() -> Result<Docker> {
         }
 
         // 3. Explicit TCP fallback (Docker Desktop: General -> "Expose daemon on tcp://localhost:2375")
-        if let Ok(d) = Docker::connect_with_http("http://localhost:2375", 120, API_DEFAULT_VERSION) {
+        if let Ok(d) = Docker::connect_with_http("http://localhost:2375", 120, API_DEFAULT_VERSION)
+        {
             return Ok(d);
         }
 
@@ -134,8 +137,9 @@ impl Sandbox for PlainDockerSandbox {
         self.status.state = SandboxState::Starting;
 
         tokio::task::block_in_place(|| {
-            let runtime = tokio::runtime::Runtime::new()
-                .map_err(|e| SandboxError::CreationFailed(format!("Failed to create runtime: {}", e)))?;
+            let runtime = tokio::runtime::Runtime::new().map_err(|e| {
+                SandboxError::CreationFailed(format!("Failed to create runtime: {}", e))
+            })?;
 
             runtime.block_on(async {
                 if self.config.delete_on_start {
@@ -168,7 +172,12 @@ impl Sandbox for PlainDockerSandbox {
                             self.docker
                                 .start_container(id, None::<StartContainerOptions<String>>)
                                 .await
-                                .map_err(|e| SandboxError::CreationFailed(format!("Failed to start existing container: {}", e)))?;
+                                .map_err(|e| {
+                                    SandboxError::CreationFailed(format!(
+                                        "Failed to start existing container: {}",
+                                        e
+                                    ))
+                                })?;
                         }
                         self.container_id = Some(id.to_string());
                         self.status.state = SandboxState::Running;
@@ -210,17 +219,22 @@ impl Sandbox for PlainDockerSandbox {
                     ..Default::default()
                 };
 
-                let container = self.docker
+                let container = self
+                    .docker
                     .create_container(Some(options), config)
                     .await
-                    .map_err(|e| SandboxError::CreationFailed(format!("Failed to create container: {}", e)))?;
+                    .map_err(|e| {
+                        SandboxError::CreationFailed(format!("Failed to create container: {}", e))
+                    })?;
 
                 self.container_id = Some(container.id.clone());
 
                 self.docker
                     .start_container(&container.id, None::<StartContainerOptions<String>>)
                     .await
-                    .map_err(|e| SandboxError::CreationFailed(format!("Failed to start container: {}", e)))?;
+                    .map_err(|e| {
+                        SandboxError::CreationFailed(format!("Failed to start container: {}", e))
+                    })?;
 
                 self.status.state = SandboxState::Running;
                 self.status.started_at = Some(Utc::now());
@@ -240,25 +254,44 @@ impl Sandbox for PlainDockerSandbox {
         let docker = self.docker.clone();
 
         let exit_reason = tokio::task::block_in_place(|| {
-            let runtime = tokio::runtime::Runtime::new()
-                .map_err(|e| SandboxError::ExecutionFailed(format!("Failed to create runtime: {}", e)))?;
+            let runtime = tokio::runtime::Runtime::new().map_err(|e| {
+                SandboxError::ExecutionFailed(format!("Failed to create runtime: {}", e))
+            })?;
 
             runtime.block_on(async move {
-                docker.stop_container(&container_id, None::<StopContainerOptions>).await.ok();
-                let reason = docker.inspect_container(&container_id, None).await.ok().and_then(|info| {
-                    info.state.and_then(|state| state.error.filter(|reason| !reason.is_empty()).or_else(|| {
-                        if state.oom_killed == Some(true) {
-                            Some("container was killed by the OOM killer".to_string())
-                        } else if let Some(exit_code) = state.exit_code {
-                            Some(format!("container exited with code {}", exit_code))
-                        } else {
-                            state.status.map(|status| format!("container exited with status {}", status))
-                        }
-                    }))
-                });
-                docker.remove_container(&container_id, Some(RemoveContainerOptions {
-                    force: true, ..Default::default()
-                })).await.ok();
+                docker
+                    .stop_container(&container_id, None::<StopContainerOptions>)
+                    .await
+                    .ok();
+                let reason = docker
+                    .inspect_container(&container_id, None)
+                    .await
+                    .ok()
+                    .and_then(|info| {
+                        info.state.and_then(|state| {
+                            state.error.filter(|reason| !reason.is_empty()).or_else(|| {
+                                if state.oom_killed == Some(true) {
+                                    Some("container was killed by the OOM killer".to_string())
+                                } else if let Some(exit_code) = state.exit_code {
+                                    Some(format!("container exited with code {}", exit_code))
+                                } else {
+                                    state.status.map(|status| {
+                                        format!("container exited with status {}", status)
+                                    })
+                                }
+                            })
+                        })
+                    });
+                docker
+                    .remove_container(
+                        &container_id,
+                        Some(RemoveContainerOptions {
+                            force: true,
+                            ..Default::default()
+                        }),
+                    )
+                    .await
+                    .ok();
                 Ok::<Option<String>, SandboxError>(reason)
             })
         })?;
@@ -278,21 +311,35 @@ impl Sandbox for PlainDockerSandbox {
         timeout: Duration,
         working_dir: Option<&str>,
     ) -> Result<ExecutionResult> {
-        let container_id = self.container_id.as_ref().ok_or(SandboxError::NotStarted)?.clone();
+        let container_id = self
+            .container_id
+            .as_ref()
+            .ok_or(SandboxError::NotStarted)?
+            .clone();
         let docker = self.docker.clone();
-        let cmd: Vec<String> = std::iter::once(command.to_string()).chain(args.iter().cloned()).collect();
+        let cmd: Vec<String> = std::iter::once(command.to_string())
+            .chain(args.iter().cloned())
+            .collect();
         let working_dir = working_dir.map(str::to_string);
 
         tokio::task::block_in_place(|| {
-            let runtime = tokio::runtime::Runtime::new()
-                .map_err(|e| SandboxError::ExecutionFailed(format!("Failed to create runtime: {}", e)))?;
+            let runtime = tokio::runtime::Runtime::new().map_err(|e| {
+                SandboxError::ExecutionFailed(format!("Failed to create runtime: {}", e))
+            })?;
             runtime.block_on(async move {
                 let exec_config = CreateExecOptions {
-                    cmd: Some(cmd), attach_stdout: Some(true), attach_stderr: Some(true),
-                    working_dir, ..Default::default()
+                    cmd: Some(cmd),
+                    attach_stdout: Some(true),
+                    attach_stderr: Some(true),
+                    working_dir,
+                    ..Default::default()
                 };
-                let exec = docker.create_exec(&container_id, exec_config).await
-                    .map_err(|e| SandboxError::ExecutionFailed(format!("Failed to create exec: {}", e)))?;
+                let exec = docker
+                    .create_exec(&container_id, exec_config)
+                    .await
+                    .map_err(|e| {
+                        SandboxError::ExecutionFailed(format!("Failed to create exec: {}", e))
+                    })?;
                 let started_at = std::time::Instant::now();
                 let result = tokio_timeout(timeout, async {
                     match docker.start_exec(&exec.id, None).await {
@@ -303,28 +350,46 @@ impl Sandbox for PlainDockerSandbox {
                             tokio::pin!(output);
                             while let Some(chunk) = output.next().await {
                                 match chunk {
-                                    Ok(bollard::container::LogOutput::StdOut { message }) => stdout.extend_from_slice(&message),
-                                    Ok(bollard::container::LogOutput::StdErr { message }) => stderr.extend_from_slice(&message),
+                                    Ok(bollard::container::LogOutput::StdOut { message }) => {
+                                        stdout.extend_from_slice(&message)
+                                    }
+                                    Ok(bollard::container::LogOutput::StdErr { message }) => {
+                                        stderr.extend_from_slice(&message)
+                                    }
                                     _ => {}
                                 }
                             }
-                            let inspect = docker.inspect_exec(&exec.id).await
-                                .map_err(|e| SandboxError::ExecutionFailed(format!("Failed to inspect exec: {}", e)))?;
+                            let inspect = docker.inspect_exec(&exec.id).await.map_err(|e| {
+                                SandboxError::ExecutionFailed(format!(
+                                    "Failed to inspect exec: {}",
+                                    e
+                                ))
+                            })?;
                             Ok::<ExecutionResult, SandboxError>(ExecutionResult {
-                                exit_code: inspect.exit_code.unwrap_or(-1) as i32, stdout, stderr,
-                                duration: started_at.elapsed(), error: None,
+                                exit_code: inspect.exit_code.unwrap_or(-1) as i32,
+                                stdout,
+                                stderr,
+                                duration: started_at.elapsed(),
+                                error: None,
                             })
                         }
-                        Ok(StartExecResults::Detached) => Err(SandboxError::ExecutionFailed("Docker exec unexpectedly detached".to_string())),
+                        Ok(StartExecResults::Detached) => Err(SandboxError::ExecutionFailed(
+                            "Docker exec unexpectedly detached".to_string(),
+                        )),
                         Err(e) => Err(SandboxError::ExecutionFailed(format!("Exec failed: {}", e))),
                     }
-                }).await;
+                })
+                .await;
                 match result {
                     Ok(result) => result,
                     Err(_) => {
                         // Docker has no kill-exec endpoint; kill the container to terminate all descendants.
-                        let _ = docker.kill_container(&container_id, None::<KillContainerOptions<String>>).await;
-                        let _ = docker.start_container(&container_id, None::<StartContainerOptions<String>>).await;
+                        let _ = docker
+                            .kill_container(&container_id, None::<KillContainerOptions<String>>)
+                            .await;
+                        let _ = docker
+                            .start_container(&container_id, None::<StartContainerOptions<String>>)
+                            .await;
                         Err(SandboxError::Timeout)
                     }
                 }

@@ -4,7 +4,10 @@
 pub async fn cmd_tool_sandbox_serve(pipe: String, auth: String) -> anyhow::Result<()> {
     use std::io::Write;
 
-    std::env::set_var(crate::sandbox::tool_sandbox_ipc::ENV_TOOL_SANDBOX_HELPER, "1");
+    std::env::set_var(
+        crate::sandbox::tool_sandbox_ipc::ENV_TOOL_SANDBOX_HELPER,
+        "1",
+    );
 
     let cfg = crate::config::load_config(None)?;
     let tool_cfg = cfg
@@ -47,8 +50,9 @@ pub async fn cmd_tool_sandbox_serve(pipe: String, auth: String) -> anyhow::Resul
     loop {
         // Create a fresh pipe instance per request. Calling DisconnectNamedPipe immediately after
         // writing can race with the client reading, causing ERROR_PIPE_NOT_CONNECTED (233).
-        let mut server = crate::sandbox::tool_sandbox_ipc::create_tool_sandbox_pipe(&pipe, first_instance)
-            .map_err(|e| anyhow::anyhow!("named pipe create: {}", e))?;
+        let mut server =
+            crate::sandbox::tool_sandbox_ipc::create_tool_sandbox_pipe(&pipe, first_instance)
+                .map_err(|e| anyhow::anyhow!("named pipe create: {}", e))?;
         first_instance = false;
 
         server

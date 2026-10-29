@@ -4,9 +4,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use extism::host_fn;
 use extism::{Function, UserData, PTR};
-use tracing;
+
+use crate::plugin::manifest::HostPermissions;
+use crate::security::audit::{SecurityKind, SecurityOutcome};
 
 /// Data shared with all host function callbacks for one plugin instance.
 #[derive(Clone)]
@@ -16,6 +17,20 @@ pub struct PluginHostData {
     pub http_client: Arc<reqwest::Client>,
     /// Workspace root for fs_* host functions; paths are resolved and restricted under this.
     pub workspace: Option<PathBuf>,
+    /// What this plugin may actually do (manifest permissions, or unrestricted for legacy plugins).
+    pub permissions: HostPermissions,
+}
+
+/// Refuse a request and leave a trace the Security page can show (the plugin itself only sees the
+/// error JSON, so the audit trail is the only place a denied host/path becomes visible).
+fn denied(host: &PluginHostData, what: &str) -> String {
+    crate::security::audit::record(
+        SecurityKind::PluginPermission,
+        SecurityOutcome::Blocked,
+        &host.plugin_id,
+        format!("permission denied: {what}"),
+    );
+    serde_json::json!({ "err": format!("permission denied: {what}") }).to_string()
 }
 
 /// Resolve path against workspace and ensure it stays under workspace. Returns error JSON string on violation.
@@ -66,6 +81,9 @@ extism::host_fn!(log(user_data: PluginHostData; level: String, message: String) 
 extism::host_fn!(config_get(user_data: PluginHostData; key: String) -> String {
     let data = user_data.get().map_err(|e| extism::Error::msg(e.to_string()))?;
     let guard = data.lock().map_err(|_| extism::Error::msg("lock"))?;
+    if !guard.permissions.config {
+        return Ok(denied(&guard, "plugin config"));
+    }
     let config = &guard.plugin_config;
     let v: serde_json::Value = if key.is_empty() {
         config.clone()
@@ -80,6 +98,12 @@ extism::host_fn!(config_get(user_data: PluginHostData; key: String) -> String {
 extism::host_fn!(http_request(user_data: PluginHostData; method: String, url: String, headers_json: String, body: String) -> String {
     let data = user_data.get().map_err(|e| extism::Error::msg(e.to_string()))?;
     let guard = data.lock().map_err(|_| extism::Error::msg("lock"))?;
+    // The manifest decides which hosts are reachable; this is our own HTTP host function, so the
+    // Extism `allowed_hosts` list never applies to it.
+    if !guard.permissions.allows_http(&url) {
+        tracing::warn!(plugin = %guard.plugin_id, host = %url, "blocked by network permission");
+        return Ok(denied(&guard, "network host not in the manifest allowlist"));
+    }
     let client = guard.http_client.clone();
     let method = method.to_uppercase();
     let url = url.clone();
@@ -126,6 +150,12 @@ extism::host_fn!(sleep_ms(user_data: PluginHostData; ms: String) -> String {
 extism::host_fn!(fs_read(user_data: PluginHostData; path: String) -> String {
     let data = user_data.get().map_err(|e| extism::Error::msg(e.to_string()))?;
     let guard = data.lock().map_err(|_| extism::Error::msg("lock"))?;
+    if !guard.permissions.read {
+        return Ok(denied(&guard, "filesystem read"));
+    }
+    if !guard.permissions.allows_relative_path(&path) {
+        return Ok(denied(&guard, "path outside the manifest allowlist"));
+    }
     let workspace = match &guard.workspace {
         Some(w) => w.clone(),
         None => return Ok(serde_json::json!({ "err": "no workspace configured" }).to_string()),
@@ -144,6 +174,12 @@ extism::host_fn!(fs_read(user_data: PluginHostData; path: String) -> String {
 extism::host_fn!(fs_write(user_data: PluginHostData; path: String, content: String) -> String {
     let data = user_data.get().map_err(|e| extism::Error::msg(e.to_string()))?;
     let guard = data.lock().map_err(|_| extism::Error::msg("lock"))?;
+    if !guard.permissions.write {
+        return Ok(denied(&guard, "filesystem write"));
+    }
+    if !guard.permissions.allows_relative_path(&path) {
+        return Ok(denied(&guard, "path outside the manifest allowlist"));
+    }
     let workspace = match &guard.workspace {
         Some(w) => w.clone(),
         None => return Ok(serde_json::json!({ "err": "no workspace configured" }).to_string()),
@@ -167,6 +203,12 @@ extism::host_fn!(fs_write(user_data: PluginHostData; path: String, content: Stri
 extism::host_fn!(fs_list_dir(user_data: PluginHostData; path: String) -> String {
     let data = user_data.get().map_err(|e| extism::Error::msg(e.to_string()))?;
     let guard = data.lock().map_err(|_| extism::Error::msg("lock"))?;
+    if !guard.permissions.read {
+        return Ok(denied(&guard, "filesystem read"));
+    }
+    if !guard.permissions.allows_relative_path(&path) {
+        return Ok(denied(&guard, "path outside the manifest allowlist"));
+    }
     let workspace = match &guard.workspace {
         Some(w) => w.clone(),
         None => return Ok(serde_json::json!({ "err": "no workspace configured" }).to_string()),
@@ -198,10 +240,7 @@ extism::host_fn!(fs_list_dir(user_data: PluginHostData; path: String) -> String 
 
 /// Build host functions for a plugin. Uses namespace "extism:host/user" so custom imports
 /// are satisfied (extism:host/env only allows the built-in PDK set; custom fns go in user).
-pub fn host_functions(
-    data: PluginHostData,
-    with_http: bool,
-) -> Vec<Function> {
+pub fn host_functions(data: PluginHostData, with_http: bool) -> Vec<Function> {
     let user = UserData::new(data);
     let ns = "extism:host/user";
     let mut fns = vec![
@@ -215,8 +254,14 @@ pub fn host_functions(
     ];
     if with_http {
         fns.push(
-            Function::new("http_request", [PTR, PTR, PTR, PTR], [PTR], user, http_request)
-                .with_namespace(ns),
+            Function::new(
+                "http_request",
+                [PTR, PTR, PTR, PTR],
+                [PTR],
+                user,
+                http_request,
+            )
+            .with_namespace(ns),
         );
     }
     fns

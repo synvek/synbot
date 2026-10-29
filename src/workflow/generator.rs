@@ -86,8 +86,8 @@ pub async fn generate_workflow(
         text
     };
 
-    let def: WorkflowDef = serde_json::from_str(json_str)
-        .context("parse workflow JSON from model response")?;
+    let def: WorkflowDef =
+        serde_json::from_str(json_str).context("parse workflow JSON from model response")?;
     def.validate()
         .map_err(|e| anyhow::anyhow!("invalid workflow: {}", e))?;
     Ok(def)

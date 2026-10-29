@@ -15,7 +15,7 @@ This guide covers how to start, stop, and manage Synbot in different environment
 
 For a **native desktop experience** (Tauri window + automatic `synbot start`), use the desktop app instead of running the CLI and browser separately. See [Desktop App](/getting-started/desktop-app) for build and dev instructions.
 
-When developing the dashboard UI, run `SYNBOT_DESKTOP=1 synbot start` in one terminal and `cd desktop && npm run dev` in another.
+When developing the dashboard UI, `cd desktop && npm run dev` is enough: the desktop app spawns `synbot start` itself (an existing daemon on port 18888 is reused).
 
 ## Starting Synbot
 

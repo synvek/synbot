@@ -76,15 +76,14 @@ pub async fn cmd_sandbox(child_args: Vec<String>) -> Result<()> {
     progress("Loading config...");
     let cfg = crate::config::load_config(None).context("Load config for sandbox")?;
 
-    let app_cfg = cfg
-        .app_sandbox
-        .as_ref()
-        .ok_or_else(|| anyhow::anyhow!("app_sandbox is not configured; add it to config to use `synbot sandbox`"))?;
+    let app_cfg = cfg.app_sandbox.as_ref().ok_or_else(|| {
+        anyhow::anyhow!("app_sandbox is not configured; add it to config to use `synbot sandbox`")
+    })?;
 
     let monitoring = &cfg.sandbox_monitoring;
     progress("Building sandbox config...");
-    let sandbox_config =
-        crate::config::build_app_sandbox_config(app_cfg, &cfg, monitoring).context("Build app sandbox config")?;
+    let sandbox_config = crate::config::build_app_sandbox_config(app_cfg, &cfg, monitoring)
+        .context("Build app sandbox config")?;
 
     // Windows-only: setup adds firewall/WFP rules once (run as Administrator). After that, normal users can start the sandbox.
     if child_args.get(0).map(|s| s.as_str()) == Some("setup") {
@@ -117,7 +116,9 @@ async fn run_sandbox_setup(
 ) -> Result<()> {
     #[cfg(target_os = "windows")]
     {
-        progress("Installing firewall and WFP rules for app AppContainer (requires Administrator)...");
+        progress(
+            "Installing firewall and WFP rules for app AppContainer (requires Administrator)...",
+        );
         // `grant_parent_traverse_acl`: walk each configured path's parent chain (C:\Users\…, etc.)
         // and add traverse ACEs — very slow on large ACLs. Historically this was enabled for the
         // **app** profile when `toolSandbox` was also AppContainer because both profiles' processes
@@ -129,7 +130,7 @@ async fn run_sandbox_setup(
             app_sandbox_config.clone(),
             false,
         )
-            .context("Install Windows app sandbox network rules")?;
+        .context("Install Windows app sandbox network rules")?;
 
         if let Some(ref tool_cfg) = cfg.tool_sandbox {
             let st = tool_cfg.sandbox_type.as_deref().unwrap_or("gvisor-docker");
@@ -196,8 +197,14 @@ async fn run_sandbox_windows(
     if tool_ac {
         let pipe = format!(r"\\.\pipe\synbot-tool-{}", Uuid::new_v4());
         let auth = Uuid::new_v4().to_string();
-        std::env::set_var(crate::sandbox::tool_sandbox_ipc::ENV_TOOL_SANDBOX_PIPE, &pipe);
-        std::env::set_var(crate::sandbox::tool_sandbox_ipc::ENV_TOOL_SANDBOX_AUTH, &auth);
+        std::env::set_var(
+            crate::sandbox::tool_sandbox_ipc::ENV_TOOL_SANDBOX_PIPE,
+            &pipe,
+        );
+        std::env::set_var(
+            crate::sandbox::tool_sandbox_ipc::ENV_TOOL_SANDBOX_AUTH,
+            &auth,
+        );
 
         let exe = std::env::current_exe().context("Current executable path")?;
         let mut cmd = Command::new(&exe);
@@ -295,11 +302,17 @@ async fn run_sandbox_nono(
                 }
             };
             let argv: Vec<CString> = std::iter::once(exe_c.clone())
-                .chain(args.iter().map(|s| CString::new(s.as_bytes().to_vec()).unwrap()))
+                .chain(
+                    args.iter()
+                        .map(|s| CString::new(s.as_bytes().to_vec()).unwrap()),
+                )
                 .collect();
             let argv_ref: Vec<&std::ffi::CStr> = argv.iter().map(|c| c.as_c_str()).collect();
             let _ = execv(exe_c.as_c_str(), &argv_ref);
-            eprintln!("[synbot sandbox] exec failed: {}", std::io::Error::last_os_error());
+            eprintln!(
+                "[synbot sandbox] exec failed: {}",
+                std::io::Error::last_os_error()
+            );
             std::process::exit(1);
         }
         Err(e) => anyhow::bail!("fork failed: {}", e),
@@ -316,8 +329,7 @@ async fn run_sandbox_nono(
 
     let mut join = tokio::task::spawn_blocking(move || nix::sys::wait::waitpid(pid, None));
 
-    let mut sigterm = signal(SignalKind::terminate())
-        .context("Register SIGTERM handler")?;
+    let mut sigterm = signal(SignalKind::terminate()).context("Register SIGTERM handler")?;
 
     let code = tokio::select! {
         res = &mut join => exit_code_from_wait(res.unwrap_or(Err(nix::errno::Errno::ECHILD))),
@@ -347,7 +359,10 @@ mod tests {
             "--root-dir".into(),
             r"c:\synbot".into(),
         ]);
-        assert_eq!(root.as_ref().map(|p| p.as_path()), Some(Path::new(r"c:\synbot")));
+        assert_eq!(
+            root.as_ref().map(|p| p.as_path()),
+            Some(Path::new(r"c:\synbot"))
+        );
         assert_eq!(rest, vec!["setup".to_string()]);
     }
 
@@ -355,7 +370,10 @@ mod tests {
     fn strip_root_dir_equals_form() {
         let (root, rest) =
             strip_root_dir_from_child_args(vec![r"--root-dir=d:\inst".into(), "start".into()]);
-        assert_eq!(root.as_ref().map(|p| p.as_path()), Some(Path::new(r"d:\inst")));
+        assert_eq!(
+            root.as_ref().map(|p| p.as_path()),
+            Some(Path::new(r"d:\inst"))
+        );
         assert_eq!(rest, vec!["start".to_string()]);
     }
 }

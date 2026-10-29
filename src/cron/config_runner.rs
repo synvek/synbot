@@ -107,11 +107,7 @@ impl ConfigCronRunner {
                     continue;
                 }
 
-                let chat_id = task
-                    .chat_id
-                    .as_deref()
-                    .unwrap_or(&task.user_id)
-                    .to_string();
+                let chat_id = task.chat_id.as_deref().unwrap_or(&task.user_id).to_string();
                 let msg = InboundMessage {
                     channel: task.channel.clone(),
                     sender_id: task.user_id.clone(),
@@ -158,7 +154,11 @@ mod tests {
         let next_late_dt = DateTime::from_timestamp_millis(next_late)
             .unwrap()
             .with_timezone(&Local);
-        assert_eq!(next_late_dt.day(), 16, "next after 22:35:08 should be next day");
+        assert_eq!(
+            next_late_dt.day(),
+            16,
+            "next after 22:35:08 should be next day"
+        );
 
         let lookback = during.saturating_sub(NEVER_FIRED_AFTER_LOOKBACK_MS);
         let next_ok = next_run_ms_after("35 22 * * *", lookback).expect("valid cron");
@@ -167,6 +167,9 @@ mod tests {
             .with_timezone(&Local);
         assert_eq!(next_ok_dt.day(), 15);
         assert_eq!((next_ok_dt.hour(), next_ok_dt.minute()), (22, 35));
-        assert!(next_ok <= during, "today's 22:35:00 should be <= now for firing");
+        assert!(
+            next_ok <= during,
+            "today's 22:35:00 should be <= now for firing"
+        );
     }
 }

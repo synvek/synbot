@@ -15,11 +15,7 @@ pub fn format_approval_request(request: &ApprovalRequest) -> String {
     let ts = request.timestamp.format("%Y-%m-%d %H:%M:%S");
     format!(
         "command: `{}`\nworking_dir: `{}`\ncontext: {}\ntimestamp: {}\ntimeout_secs: {}",
-        request.command,
-        request.working_dir,
-        request.context,
-        ts,
-        request.timeout_secs
+        request.command, request.working_dir, request.context, ts, request.timeout_secs
     )
 }
 
@@ -31,11 +27,15 @@ pub fn format_approval_result(
 ) -> String {
     match result {
         ApprovalResult::Approved => {
-            let who = responder.map(|r| format!(" (responder: {})", r)).unwrap_or_default();
+            let who = responder
+                .map(|r| format!(" (responder: {})", r))
+                .unwrap_or_default();
             format!("approved{}\ncommand: `{}`", who, command)
         }
         ApprovalResult::Rejected => {
-            let who = responder.map(|r| format!(" (responder: {})", r)).unwrap_or_default();
+            let who = responder
+                .map(|r| format!(" (responder: {})", r))
+                .unwrap_or_default();
             format!("rejected{}\ncommand: `{}`", who, command)
         }
         ApprovalResult::Timeout => format!("timeout\ncommand: `{}`", command),
@@ -85,11 +85,8 @@ mod tests {
 
     #[test]
     fn test_format_approval_result_rejected() {
-        let result = format_approval_result(
-            ApprovalResult::Rejected,
-            "rm -rf /tmp/test",
-            Some("admin"),
-        );
+        let result =
+            format_approval_result(ApprovalResult::Rejected, "rm -rf /tmp/test", Some("admin"));
         assert!(result.contains("rejected"));
         assert!(result.contains("admin"));
     }
