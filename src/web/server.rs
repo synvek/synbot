@@ -1,7 +1,7 @@
 use crate::config::WebConfig;
 use crate::web::handlers::{
-    api, checkpoints, commands, git, index, plugins, projects, security, static_files, tasks, team,
-    ws, ws_agent, ws_terminal,
+    api, checkpoints, commands, git, index, market, plugins, projects, security, static_files,
+    tasks, team, ws, ws_agent, ws_terminal,
 };
 use crate::web::state::AppState;
 use crate::web::{BasicAuth, Cors};
@@ -78,6 +78,9 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig, state: AppState, auth: Bas
                 .route("/plugin-keys", web::get().to(plugins::list_keys))
                 .route("/plugin-keys", web::post().to(plugins::add_key))
                 .route("/plugin-keys/{name}", web::delete().to(plugins::remove_key))
+                .route("/market", web::get().to(market::list_market))
+                .route("/market/install", web::post().to(market::install_plugin))
+                .route("/market/update-all", web::post().to(market::update_all))
                 .route("/security/overview", web::get().to(security::overview))
                 .route("/security/events", web::get().to(security::list_events))
                 .route("/security/events", web::delete().to(security::clear_events))

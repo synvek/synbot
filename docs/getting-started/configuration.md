@@ -711,6 +711,31 @@ You can override or add auth in config:
 }
 ```
 
+## Plugin Market Configuration
+
+Synbot can install WASM plugin packages from one or more published indexes. An empty `sources` list disables the market — nothing is fetched until you configure a source.
+
+```json
+{
+  "pluginMarket": {
+    "sources": [
+      "https://plugins.example.com/index.json",
+      "plugin-market/index.json"
+    ],
+    "timeoutSecs": 30
+  }
+}
+```
+
+| Field         | Type     | Default | Meaning |
+|---------------|----------|---------|---------|
+| `sources`     | string[] | `[]`    | Index locations: `https://…`, `file://…`, or a plain path (relative paths resolve against the config dir, `~` is expanded). Several sources are merged; the highest version of an id wins. |
+| `timeoutSecs` | number   | `30`    | Timeout for a single index or package download. Must be greater than `0`. |
+
+Install and update from the **Plugins → Market** tab of the Web dashboard, or over REST (`GET /api/market`, `POST /api/market/install`, `POST /api/market/update-all`). Each file is verified against the `sha256` in the index, and the package is then installed by the same installer used for local packages — permissions still come from `plugin.json`, signatures are still checked against the trust store. Newly installed plugins are loaded on the next start.
+
+See [Plugin Market](/developer-guide/plugin-market) for the index format, version requirements, dependency resolution and the boundaries of the trust model.
+
 ## Logging Configuration
 
 ### Basic Logging

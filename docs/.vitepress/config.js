@@ -55,7 +55,9 @@ export default defineConfig({
             text: 'Developer Guide',
             collapsed: false,
             items: [
-              { text: 'Architecture', link: '/developer-guide/architecture' }
+              { text: 'Architecture', link: '/developer-guide/architecture' },
+              { text: 'Plugins', link: '/developer-guide/plugins' },
+              { text: 'Plugin Market', link: '/developer-guide/plugin-market' }
             ]
           },
           {
@@ -107,7 +109,8 @@ export default defineConfig({
           text: '开发指南',
           collapsed: false,
           items: [
-            { text: '架构', link: '/zh/developer-guide/architecture' }
+            { text: '架构', link: '/zh/developer-guide/architecture' },
+            { text: '插件市场', link: '/zh/developer-guide/plugin-market' }
           ]
         },
         {

@@ -31,6 +31,8 @@ import type {
   InstalledPlugin,
   PluginKeysResponse,
   TrustedKey,
+  MarketResponse,
+  MarketInstallReport,
   SecurityOverview,
   SecurityEventsResponse,
   SecurityKind,
@@ -412,6 +414,38 @@ export class ApiClient {
     if (!response.data.success) {
       throw new Error(response.data.error ?? 'Remove failed');
     }
+  }
+
+  // Plugin market (published index + install/update)
+  async listMarket(): Promise<MarketResponse> {
+    const response = await this.client.get<ApiResponse<MarketResponse>>('/api/market');
+    if (!response.data.success || !response.data.data) {
+      throw new Error(response.data.error ?? 'Failed to load the plugin market');
+    }
+    return response.data.data;
+  }
+
+  /** Install `id` plus whatever it depends on; `version` pins an exact version. */
+  async installMarketPlugin(id: string, version?: string): Promise<MarketInstallReport> {
+    const response = await this.client.post<ApiResponse<MarketInstallReport>>(
+      '/api/market/install',
+      version ? { id, version } : { id }
+    );
+    if (!response.data.success || !response.data.data) {
+      throw new Error(response.data.error ?? 'Install failed');
+    }
+    return response.data.data;
+  }
+
+  /** Install every newer version the market offers for the installed plugins. */
+  async updateMarketPlugins(): Promise<MarketInstallReport> {
+    const response = await this.client.post<ApiResponse<MarketInstallReport>>(
+      '/api/market/update-all'
+    );
+    if (!response.data.success || !response.data.data) {
+      throw new Error(response.data.error ?? 'Update failed');
+    }
+    return response.data.data;
   }
 
   // Security (effective policy, audit trail, command dry-run)

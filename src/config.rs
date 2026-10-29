@@ -1851,6 +1851,36 @@ fn apply_security_profile_defaults(value: &mut serde_json::Value, profile: Secur
     }
 }
 
+/// Remote plugin market (`pluginMarket`): where published plugin packages are listed.
+///
+/// A source is an `index.json` reachable over `https://`, a `file://` URL, or a plain path
+/// (relative paths resolve against the config dir). Leaving `sources` empty keeps the market list
+/// empty — nothing is fetched until the user configures a source.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct PluginMarketConfig {
+    /// Index locations, merged in order (the highest version of an id wins).
+    #[serde(default)]
+    pub sources: Vec<String>,
+    /// HTTP timeout for index and package downloads, in seconds (default 30).
+    #[serde(default = "default_market_timeout_secs")]
+    pub timeout_secs: u64,
+}
+
+impl Default for PluginMarketConfig {
+    fn default() -> Self {
+        Self {
+            sources: Vec::new(),
+            timeout_secs: default_market_timeout_secs(),
+        }
+    }
+}
+
+fn default_market_timeout_secs() -> u64 {
+    30
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
@@ -1901,6 +1931,9 @@ pub struct Config {
     /// Plugin-specific configuration. Keys are plugin names; values are arbitrary JSON for each plugin.
     #[serde(default)]
     pub plugins: std::collections::HashMap<String, serde_json::Value>,
+    /// Plugin market sources (`pluginMarket`). Empty keeps the market list empty.
+    #[serde(default)]
+    pub plugin_market: PluginMarketConfig,
     /// Pairing approvals: supplement allowlist; matched by channel provider + MD5(chat_id) prefix.
     #[serde(default)]
     pub pairings: Vec<PairingEntry>,
@@ -2306,6 +2339,7 @@ impl std::fmt::Display for ValidationError {
 /// - `mainAgent.max_tool_iterations > 0`
 /// - `mainAgent.max_idle_iterations > 0`
 /// - `tools.exec.timeout_secs > 0`
+/// - `pluginMarket.timeoutSecs > 0` and every source non-empty
 /// - Enabled channels must have non-empty credentials
 pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
     let mut errors = Vec::new();
@@ -2854,6 +2888,24 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
                 field: format!("{}.name", agent_label),
                 value: agent.name.clone(),
                 constraint: "duplicate agent name".into(),
+            });
+        }
+    }
+
+    // --- Plugin market ---
+    if config.plugin_market.timeout_secs == 0 {
+        errors.push(ValidationError {
+            field: "pluginMarket.timeoutSecs".into(),
+            value: config.plugin_market.timeout_secs.to_string(),
+            constraint: "must be greater than 0".into(),
+        });
+    }
+    for source in &config.plugin_market.sources {
+        if source.trim().is_empty() {
+            errors.push(ValidationError {
+                field: "pluginMarket.sources".into(),
+                value: source.clone(),
+                constraint: "sources must not be empty strings".into(),
             });
         }
     }
@@ -3816,6 +3868,35 @@ mod tests {
     fn default_config_passes_validation() {
         let cfg = valid_config();
         assert!(validate_config(&cfg).is_ok());
+    }
+
+    #[test]
+    fn plugin_market_defaults_to_no_sources() {
+        let cfg = Config::default();
+        assert!(cfg.plugin_market.sources.is_empty());
+        assert_eq!(cfg.plugin_market.timeout_secs, 30);
+        assert!(validate_config(&cfg).is_ok());
+    }
+
+    #[test]
+    fn plugin_market_rejects_zero_timeout_and_blank_sources() {
+        let mut cfg = valid_config();
+        cfg.plugin_market.sources = vec!["  ".to_string()];
+        cfg.plugin_market.timeout_secs = 0;
+        let errors = validate_config(&cfg).expect_err("invalid market config");
+        assert!(find_error(&errors, "pluginMarket.timeoutSecs").is_some());
+        assert!(find_error(&errors, "pluginMarket.sources").is_some());
+    }
+
+    #[test]
+    fn plugin_market_round_trips_through_json() {
+        let mut cfg = valid_config();
+        cfg.plugin_market.sources = vec!["https://plugins.example.com/index.json".to_string()];
+        cfg.plugin_market.timeout_secs = 15;
+        let text = serde_json::to_string(&cfg).unwrap();
+        assert!(text.contains("\"pluginMarket\""));
+        let round_tripped: Config = serde_json::from_str(&text).unwrap();
+        assert_eq!(round_tripped.plugin_market, cfg.plugin_market);
     }
 
     #[test]

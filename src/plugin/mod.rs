@@ -2,7 +2,7 @@
 //!
 //! Packages carry a `plugin.json` manifest that declares version, permissions, digest and optional
 //! signature; see [`manifest`]. Installing/uninstalling packages and the trusted publisher keys live
-//! in [`install`].
+//! in [`install`], and remote indexes with dependency resolution live in [`market`].
 
 mod abi;
 mod host_fns;
@@ -11,5 +11,6 @@ pub mod adapters;
 pub mod install;
 pub mod loader;
 pub mod manifest;
+pub mod market;
 
 pub use loader::load_extism_plugins;

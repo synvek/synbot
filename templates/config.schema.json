@@ -157,6 +157,18 @@
         "$ref": "#/definitions/PairingEntry"
       }
     },
+    "pluginMarket": {
+      "description": "Plugin market sources (`pluginMarket`). Empty keeps the market list empty.",
+      "default": {
+        "sources": [],
+        "timeoutSecs": 30
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/PluginMarketConfig"
+        }
+      ]
+    },
     "plugins": {
       "description": "Plugin-specific configuration. Keys are plugin names; values are arbitrary JSON for each plugin.",
       "default": {},
@@ -1739,6 +1751,27 @@
         },
         "pattern": {
           "type": "string"
+        }
+      }
+    },
+    "PluginMarketConfig": {
+      "description": "Remote plugin market (`pluginMarket`): where published plugin packages are listed.\n\nA source is an `index.json` reachable over `https://`, a `file://` URL, or a plain path (relative paths resolve against the config dir). Leaving `sources` empty keeps the market list empty — nothing is fetched until the user configures a source.",
+      "type": "object",
+      "properties": {
+        "sources": {
+          "description": "Index locations, merged in order (the highest version of an id wins).",
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "timeoutSecs": {
+          "description": "HTTP timeout for index and package downloads, in seconds (default 30).",
+          "default": 30,
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0
         }
       }
     },

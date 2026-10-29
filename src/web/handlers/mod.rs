@@ -4,6 +4,7 @@ pub mod commands;
 pub mod config_redact;
 pub mod git;
 pub mod index;
+pub mod market;
 pub mod plugins;
 pub mod projects;
 pub mod sanitize;

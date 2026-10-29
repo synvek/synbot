@@ -3,7 +3,12 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import Plugins from './Plugins';
 import { I18nProvider } from '../i18n/I18nContext';
 import { apiClient } from '../api/client';
-import type { InstalledPlugin, PluginListResponse } from '../types/api';
+import type {
+  InstalledPlugin,
+  MarketPlugin,
+  MarketResponse,
+  PluginListResponse,
+} from '../types/api';
 
 vi.mock('../api/client', () => ({
   apiClient: {
@@ -14,6 +19,9 @@ vi.mock('../api/client', () => ({
     listPluginKeys: vi.fn(),
     addPluginKey: vi.fn(),
     removePluginKey: vi.fn(),
+    listMarket: vi.fn(),
+    installMarketPlugin: vi.fn(),
+    updateMarketPlugins: vi.fn(),
   },
 }));
 
@@ -48,6 +56,35 @@ const listing = (over: Partial<PluginListResponse> = {}): PluginListResponse => 
   ...over,
 });
 
+const marketPlugin = (over: Partial<MarketPlugin> = {}): MarketPlugin => ({
+  id: 'demo',
+  name: 'Demo plugin',
+  version: '1.2.3',
+  description: 'does demo things',
+  author: 'acme',
+  homepage: null,
+  tags: [],
+  manifest_url: '/tmp/demo/plugin.json',
+  entry_url: null,
+  sha256: 'a'.repeat(64),
+  files: [],
+  dependencies: [],
+  source: '/tmp/index.json',
+  installed_version: null,
+  update_available: false,
+  ...over,
+});
+
+const marketListing = (over: Partial<MarketResponse> = {}): MarketResponse => ({
+  sources: ['/tmp/index.json'],
+  plugins: [marketPlugin()],
+  errors: [],
+  ...over,
+});
+
+// The tab is suffixed with the pending update count, e.g. `Market (1)`.
+const MARKET_TAB = /^(Market|市场)( \(\d+\))?$/;
+
 const renderPage = () =>
   render(
     <I18nProvider>
@@ -65,6 +102,12 @@ describe('Plugins', () => {
     mocked.installPlugin.mockResolvedValue(plugin());
     mocked.addPluginKey.mockResolvedValue({ name: 'publisher', public_key: 'KEY' });
     mocked.removePluginKey.mockResolvedValue();
+    mocked.listMarket.mockResolvedValue(marketListing());
+    mocked.installMarketPlugin.mockResolvedValue({
+      installed: [{ id: 'demo', version: '1.2.3', trust: 'unsigned', dependencies: [] }],
+      failed: [],
+    });
+    mocked.updateMarketPlugins.mockResolvedValue({ installed: [], failed: [] });
   });
 
   afterEach(() => {
@@ -180,5 +223,108 @@ describe('Plugins', () => {
     renderPage();
 
     expect(await screen.findByText('boom')).toBeInTheDocument();
+  });
+
+  it('installs a plugin from the market tab', async () => {
+    mocked.listMarket.mockResolvedValue(
+      marketListing({
+        plugins: [marketPlugin({ dependencies: [{ id: 'base', version: '>=1.0.0' }] })],
+      })
+    );
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: MARKET_TAB }));
+    expect(await screen.findByText('demo@1.2.3')).toBeInTheDocument();
+    expect(screen.getByText('base >=1.0.0')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Install$|^安装$/ }));
+
+    await waitFor(() => expect(mocked.installMarketPlugin).toHaveBeenCalledWith('demo', undefined));
+    expect(
+      await screen.findByText(/Installed 1 plugin\(s\)|已安装 1 个插件/)
+    ).toBeInTheDocument();
+  });
+
+  it('pins the version when the market offers an update', async () => {
+    mocked.listMarket.mockResolvedValue(
+      marketListing({
+        plugins: [marketPlugin({ installed_version: '1.0.0', update_available: true })],
+      })
+    );
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: MARKET_TAB }));
+    const updateButtons = await screen.findAllByRole('button', { name: /Update to 1\.2\.3|更新到 1\.2\.3/ });
+    fireEvent.click(updateButtons[0]);
+
+    await waitFor(() => expect(mocked.installMarketPlugin).toHaveBeenCalledWith('demo', '1.2.3'));
+  });
+
+  it('updates everything from the market header', async () => {
+    mocked.listMarket.mockResolvedValue(
+      marketListing({
+        plugins: [marketPlugin({ installed_version: '1.0.0', update_available: true })],
+      })
+    );
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: MARKET_TAB }));
+    fireEvent.click(
+      await screen.findByRole('button', { name: /Update all|全部更新/ })
+    );
+
+    await waitFor(() => expect(mocked.updateMarketPlugins).toHaveBeenCalled());
+    expect(
+      await screen.findByText(/Everything is up to date|所有插件都是最新版本/)
+    ).toBeInTheDocument();
+  });
+
+  it('surfaces broken market sources next to the working entries', async () => {
+    mocked.listMarket.mockResolvedValue(
+      marketListing({
+        plugins: [],
+        errors: [{ source: 'https://example.com/index.json', error: 'HTTP 404' }],
+      })
+    );
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: MARKET_TAB }));
+
+    expect(await screen.findByText(/Market source failed|市场源读取失败/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/https:\/\/example\.com\/index\.json: HTTP 404/)
+    ).toBeInTheDocument();
+  });
+
+  it('asks for a market source when none is configured', async () => {
+    mocked.listMarket.mockResolvedValue({ sources: [], plugins: [], errors: [] });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: MARKET_TAB }));
+
+    expect(
+      await screen.findByText(/No market source configured|还没有配置市场源/)
+    ).toBeInTheDocument();
+  });
+
+  it('filters market entries by the search box', async () => {
+    mocked.listMarket.mockResolvedValue(
+      marketListing({
+        plugins: [
+          marketPlugin(),
+          marketPlugin({ id: 'other', name: 'Other tool', version: '0.1.0' }),
+        ],
+      })
+    );
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: MARKET_TAB }));
+    fireEvent.change(
+      await screen.findByPlaceholderText(/Search name, id or tag|搜索名称/),
+      { target: { value: 'other' } }
+    );
+
+    expect(screen.queryByText('demo@1.2.3')).not.toBeInTheDocument();
+    expect(screen.getByText('other@0.1.0')).toBeInTheDocument();
   });
 });

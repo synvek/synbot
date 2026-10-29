@@ -385,6 +385,69 @@ export interface PluginKeysResponse {
   keys: TrustedKey[];
 }
 
+// Plugin market (`/api/market`) — published versions annotated with the local install state.
+export interface MarketFile {
+  path: string;
+  url: string;
+  sha256: string;
+}
+
+export interface MarketDependency {
+  id: string;
+  /** Version requirement (`>=1.0.0`, `^1.2`, …); null means any version. */
+  version: string | null;
+}
+
+export interface MarketPlugin {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  author: string;
+  homepage: string | null;
+  tags: string[];
+  manifest_url: string;
+  entry_url: string | null;
+  sha256: string;
+  files: MarketFile[];
+  dependencies: MarketDependency[];
+  /** Source that published this version. */
+  source: string;
+  /** Locally installed version of the same id, when there is one. */
+  installed_version: string | null;
+  /** The market offers a strictly newer version than the installed one. */
+  update_available: boolean;
+}
+
+export interface MarketSourceError {
+  source: string;
+  error: string;
+}
+
+export interface MarketResponse {
+  sources: string[];
+  plugins: MarketPlugin[];
+  errors: MarketSourceError[];
+}
+
+export interface MarketInstalledSummary {
+  id: string;
+  version: string;
+  trust: PluginTrust;
+  dependencies: string[];
+}
+
+export interface MarketFailure {
+  id: string;
+  error: string;
+}
+
+/** Partial success is normal: `installed` and `failed` can both be non-empty. */
+export interface MarketInstallReport {
+  installed: MarketInstalledSummary[];
+  failed: MarketFailure[];
+}
+
 // Security (`/api/security*`) — the effective policy and what the guard actually stopped.
 export type SecurityKind =
   | 'command_blocked'

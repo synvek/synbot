@@ -44,7 +44,7 @@ fn to_error(e: anyhow::Error) -> actix_web::Error {
 }
 
 /// Persist the current in-memory config to the daemon's config file.
-async fn persist(state: &web::Data<AppState>) -> Result<(), actix_web::Error> {
+pub(crate) async fn persist(state: &web::Data<AppState>) -> Result<(), actix_web::Error> {
     let cfg = state.config.read().await;
     save_config(&cfg, Some(state.config_path.as_path()))
         .map_err(|e| ApiError::InternalError(format!("Failed to write config file: {}", e)))?;

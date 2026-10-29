@@ -359,7 +359,7 @@ pub fn is_valid_id(id: &str) -> bool {
     chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
 }
 
-fn validate_entry(entry: &str) -> Result<()> {
+pub(crate) fn validate_entry(entry: &str) -> Result<()> {
     if entry.trim().is_empty() {
         bail!("entry must name the wasm file");
     }
@@ -376,7 +376,7 @@ fn validate_entry(entry: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_relative_path(path: &str) -> Result<()> {
+pub(crate) fn validate_relative_path(path: &str) -> Result<()> {
     if path.trim().is_empty() {
         bail!("filesystem paths must not be empty (omit the list to allow the whole workspace)");
     }

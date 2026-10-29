@@ -708,6 +708,31 @@ cargo run --example generate_config_schema --features schema -- -o templates/con
 }
 ```
 
+## 插件市场配置 {#plugin-market-configuration}
+
+Synbot 可以从一到多个已发布的索引安装 WASM 插件包。`sources` 为空时市场停用 —— 在配置源之前不会发起任何请求。
+
+```json
+{
+  "pluginMarket": {
+    "sources": [
+      "https://plugins.example.com/index.json",
+      "plugin-market/index.json"
+    ],
+    "timeoutSecs": 30
+  }
+}
+```
+
+| 字段          | 类型     | 默认值 | 说明 |
+|---------------|----------|--------|------|
+| `sources`     | string[] | `[]`   | 索引地址：`https://…`、`file://…` 或普通路径（相对路径按配置目录解析，会展开 `~`）。多个源会合并，同一个 id 取最高版本。 |
+| `timeoutSecs` | number   | `30`   | 单个索引或安装包下载的超时时间，必须大于 `0`。 |
+
+可以在 Web 控制台的 **插件 → 市场** 页安装与更新，也可以直接调 REST（`GET /api/market`、`POST /api/market/install`、`POST /api/market/update-all`）。每个文件都会与索引中的 `sha256` 校对，然后由与本地安装包完全相同的安装器安装 —— 权限依然取自 `plugin.json`，签名依然对照信任库校验。新安装的插件在下次启动时加载。
+
+索引格式、版本需求语法、依赖解析与信任模型的边界见[插件市场](/zh/developer-guide/plugin-market)。
+
 ## 日志配置
 
 ### 基础日志
