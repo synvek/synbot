@@ -129,6 +129,7 @@ pub mod logging;
 pub mod office;
 pub mod plugin;
 pub mod project;
+pub mod provider_catalog;
 pub mod rig_provider;
 pub mod sandbox;
 pub mod security;

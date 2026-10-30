@@ -361,17 +361,31 @@ fn build_completion_model_builtin(
             DeepSeekDirectModel::new(mk_http(), api_key.to_string(), model_name.to_string(), base);
         Arc::new(m) as Arc<dyn SynbotCompletionModel>
     } else if lower.contains("moonshot") {
+        // `apiBase` used to be dropped here, so pointing Moonshot at a gateway silently kept
+        // talking to api.moonshot.cn. The catalog owns the default so the UI and this client agree.
+        let base = crate::provider_catalog::effective_api_base(
+            crate::provider_catalog::by_key("moonshot").expect("built-in provider"),
+            api_base,
+        );
         let client = rig::providers::moonshot::Client::<RC>::builder()
             .api_key(api_key.to_string())
             .http_client(mk_http())
+            .base_url(&base)
             .build()
             .map_err(|e| anyhow::anyhow!("{}", e))?;
         let m = client.completion_model(model_name.to_string());
         Arc::new(MoonshotModel(client, m)) as Arc<dyn SynbotCompletionModel>
     } else if lower.contains("ollama") {
+        // Same story as Moonshot: without `base_url` the rig client stays on localhost:11434,
+        // so a remote Ollama host configured in `providers.ollama.apiBase` was ignored.
+        let base = crate::provider_catalog::effective_api_base(
+            crate::provider_catalog::by_key("ollama").expect("built-in provider"),
+            api_base,
+        );
         let client = rig::providers::ollama::Client::<RC>::builder()
             .api_key(Nothing)
             .http_client(mk_http())
+            .base_url(&base)
             .build()
             .map_err(|e| anyhow::anyhow!("{}", e))?;
         let m = client.completion_model(model_name.to_string());

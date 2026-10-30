@@ -13,9 +13,9 @@ use actix_web::{test, web, App};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use std::sync::Arc;
 use synbot::agent::subagent::{SubagentScope, SubagentStatus};
-use synbot::config::WebAuthConfig;
+use synbot::config::{ProviderApiStyle, ProviderEntry, WebAuthConfig};
 use synbot::tools::approval::ApprovalManager;
-use synbot::web::handlers::{api, team};
+use synbot::web::handlers::{api, providers, team};
 use synbot::web::state::AppState;
 use synbot::web::BasicAuth;
 
@@ -1410,4 +1410,122 @@ async fn test_subagents_cancel_unknown_id_is_404() {
     )
     .await;
     assert_eq!(resp.status(), 404);
+}
+
+// ---------------------------------------------------------------------------
+// Provider metadata (`GET /api/providers`)
+// ---------------------------------------------------------------------------
+
+async fn get_providers_body(state: AppState) -> serde_json::Value {
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(state))
+            .route("/api/providers", web::get().to(providers::list_providers)),
+    )
+    .await;
+    let resp = test::call_service(
+        &app,
+        test::TestRequest::get().uri("/api/providers").to_request(),
+    )
+    .await;
+    assert_eq!(resp.status(), 200);
+    test::read_body_json(resp).await
+}
+
+#[actix_web::test]
+async fn test_get_providers_reports_metadata_without_leaking_keys() {
+    let state = create_test_state().await;
+    {
+        let mut cfg = state.config.write().await;
+        cfg.providers.anthropic.api_key = "sk-ant-do-not-leak".to_string();
+        cfg.providers.anthropic.api_base = Some("https://gateway.example.com/".to_string());
+        cfg.providers.extra.insert(
+            "minimax".to_string(),
+            ProviderEntry {
+                api_key: "extra-do-not-leak".to_string(),
+                api_style: ProviderApiStyle::Anthropic,
+                ..Default::default()
+            },
+        );
+        cfg.main_agent.provider = "minimax".to_string();
+        cfg.main_agent.model = "MiniMax-M3".to_string();
+    }
+
+    let body = get_providers_body(state).await;
+    let raw = body.to_string();
+    assert!(
+        !raw.contains("sk-ant-do-not-leak"),
+        "api keys must never be serialised"
+    );
+    assert!(
+        !raw.contains("extra-do-not-leak"),
+        "extra keys must never be serialised"
+    );
+
+    let data = &body["data"];
+    let providers = data["providers"].as_array().expect("providers array");
+    assert_eq!(providers.len(), 8, "every built-in provider is listed");
+
+    let anthropic = providers
+        .iter()
+        .find(|p| p["key"] == "anthropic")
+        .expect("anthropic is listed");
+    assert_eq!(anthropic["apiStyle"], "anthropic");
+    assert_eq!(anthropic["configured"], true);
+    assert_eq!(anthropic["apiBase"], "https://gateway.example.com/");
+    // Trailing slash is stripped only for the effective endpoint.
+    assert_eq!(anthropic["apiBaseEffective"], "https://gateway.example.com");
+    assert_eq!(anthropic["usedBy"].as_array().map(Vec::len), Some(0));
+
+    // A local runtime is usable without a key, so `configured` cannot mean "apiKey is set".
+    let ollama = providers
+        .iter()
+        .find(|p| p["key"] == "ollama")
+        .expect("ollama is listed");
+    assert_eq!(ollama["local"], true);
+    assert_eq!(ollama["configured"], true);
+    assert_eq!(ollama["requiresKey"], false);
+
+    let extra = data["extra"].as_array().expect("extra array");
+    assert_eq!(extra.len(), 1);
+    assert_eq!(extra[0]["name"], "minimax");
+    assert_eq!(extra[0]["apiStyle"], "anthropic");
+    assert_eq!(extra[0]["usedBy"][0], "main");
+
+    assert_eq!(data["defaults"]["provider"], "minimax");
+    assert_eq!(data["defaults"]["model"], "MiniMax-M3");
+    assert_eq!(data["unknownInUse"].as_array().map(Vec::len), Some(0));
+}
+
+#[actix_web::test]
+async fn test_get_providers_flags_unknown_names_in_use() {
+    let state = create_test_state().await;
+    {
+        let mut cfg = state.config.write().await;
+        // `deepsek` is a typo: it matches no built-in and no `providers.extra` key, so the request
+        // would fail at runtime with no hint in the UI.
+        cfg.main_agent.provider = "deepsek".to_string();
+        cfg.main_agent.model = "deepseek-chat".to_string();
+    }
+
+    let body = get_providers_body(state).await;
+    let unknown = body["data"]["unknownInUse"]
+        .as_array()
+        .expect("unknown list");
+    assert_eq!(unknown.len(), 1);
+    assert_eq!(unknown[0]["name"], "deepsek");
+    assert_eq!(unknown[0]["usedBy"][0], "main");
+
+    // The typo must not be counted as "used" by any built-in provider.
+    for provider in body["data"]["providers"]
+        .as_array()
+        .expect("providers array")
+    {
+        assert_eq!(
+            provider["usedBy"].as_array().map(Vec::len),
+            Some(0),
+            "{} should not claim an unknown name",
+            provider["key"]
+        );
+    }
 }

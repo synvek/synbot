@@ -39,6 +39,7 @@ import type {
   SecurityEventsResponse,
   SecurityKind,
   PolicyExplain,
+  ProviderCatalog,
 } from '../types/api';
 
 // API response wrapper from backend
@@ -578,6 +579,18 @@ export class ApiClient {
   async getConfig(): Promise<ConfigApiPayload> {
     const response = await this.client.get<ApiResponse<ConfigApiPayload>>('/api/config');
     return response.data.data!;
+  }
+
+  /**
+   * Provider metadata for the settings forms: which wire format each built-in speaks, the endpoint
+   * used when `apiBase` is empty, whether a key is set, and where each name is selected.
+   */
+  async listProviders(): Promise<ProviderCatalog> {
+    const response = await this.client.get<ApiResponse<ProviderCatalog>>('/api/providers');
+    if (!response.data.success || !response.data.data) {
+      throw new Error(response.data.error ?? 'Failed to load providers');
+    }
+    return response.data.data;
   }
 
   async updateConfig(config: unknown): Promise<PutConfigResponse> {

@@ -403,6 +403,41 @@ Optional channel to connect to an IRC server (e.g. Libera). Supports TLS, NickSe
 }
 ```
 
+- **apiKey**: Not needed; Ollama runs on your machine (`configured` is reported as true without a key).
+- **apiBase**: Defaults to `http://localhost:11434`. It is applied to the client, so a remote or containerised Ollama host works — set it to e.g. `http://192.168.1.9:11434`.
+
+### Moonshot and Kimi Code
+
+```json
+{
+  "providers": {
+    "moonshot": {
+      "apiKey": "sk-...",
+      "apiBase": "https://api.moonshot.cn/v1"
+    }
+  }
+}
+```
+
+- **Names** are matched by substring: any provider name containing `moonshot` uses the `moonshot` entry, and a name containing `kimi` uses `kimiCode` (Kimi Code Plan, default `https://api.kimi.com/coding`).
+- **apiBase** defaults to `https://api.moonshot.cn/v1` for `moonshot`; an override is honoured, so both providers can be pointed at a compatible gateway.
+
+### Provider metadata (`GET /api/providers`)
+
+The daemon exposes a read-only catalog of the built-in providers, used by the Web UI settings page and the agent provider picker:
+
+- **`providers[]`** — one entry per built-in key (`anthropic`, `openai`, `gemini`, `openrouter`, `deepseek`, `moonshot`, `kimiCode`, `ollama`) with `label`, `aliases`, `apiStyle`, `requiresKey`, `local`, `embeddings`, `defaultBase`, `docsUrl`, `apiBase` (as configured), `apiBaseEffective` (what the client actually uses), `configured`, and `usedBy` (`main` or agent names).
+- **`extra[]`** — the same `apiBase` / `apiBaseEffective` / `configured` / `usedBy` view for each `providers.extra` entry.
+- **`unknownInUse[]`** — provider names referenced by `mainAgent.provider` or `agents[].provider` that are neither built in nor present under `providers.extra` (usually a typo).
+- **`defaults`** — the currently selected `provider` / `model`.
+
+API keys are **never** returned by this endpoint.
+
+Two consequences for configuration:
+
+- **`apiStyle` is only meaningful for `providers.extra`.** Built-in keys dispatch on their name in a fixed order (`openrouter` → `anthropic`/`claude` → `openai` → `gemini` → `deepseek` → `moonshot` → `kimi` → `ollama`), so setting `apiStyle` on a built-in key has no effect and the UI shows it read-only.
+- **`apiBase` is honoured for every built-in provider**, including Moonshot/Kimi and Ollama. Leave it empty to use the default shown in `defaultBase`.
+
 ### Extra providers
 
 You can add **custom endpoints** that mirror either the **OpenAI Chat Completions** API or the **Anthropic Messages** API **without changing code**, by configuration only.

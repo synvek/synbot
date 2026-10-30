@@ -8,6 +8,7 @@ pub mod index;
 pub mod market;
 pub mod plugins;
 pub mod projects;
+pub mod providers;
 pub mod sanitize;
 pub mod security;
 pub mod static_files;

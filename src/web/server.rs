@@ -1,7 +1,7 @@
 use crate::config::WebConfig;
 use crate::web::handlers::{
-    api, checkpoints, commands, delivery, git, index, market, plugins, projects, security,
-    static_files, tasks, team, ws, ws_agent, ws_terminal,
+    api, checkpoints, commands, delivery, git, index, market, plugins, projects, providers,
+    security, static_files, tasks, team, ws, ws_agent, ws_terminal,
 };
 use crate::web::state::AppState;
 use crate::web::{BasicAuth, Cors};
@@ -32,6 +32,7 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig, state: AppState, auth: Bas
                 .route("/skills/{name}", web::get().to(api::get_skill_by_name))
                 .route("/config", web::get().to(api::get_config))
                 .route("/config", web::put().to(api::put_config))
+                .route("/providers", web::get().to(providers::list_providers))
                 .route("/logs", web::get().to(api::get_logs))
                 .route(
                     "/approvals/history",

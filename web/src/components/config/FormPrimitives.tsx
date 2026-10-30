@@ -17,8 +17,10 @@ export const TextField: React.FC<
     onChange: (v: string) => void
     placeholder?: string
     disabled?: boolean
+    /** Id of a `<datalist>` with suggestions; the field still accepts free text. */
+    list?: string
   }
-> = ({ id, label, value, onChange, placeholder, disabled, className = '' }) => (
+> = ({ id, label, value, onChange, placeholder, disabled, list, className = '' }) => (
   <div className={className}>
     <label htmlFor={id} className={labelClass}>
       {label}
@@ -30,6 +32,7 @@ export const TextField: React.FC<
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
+      list={list}
       disabled={disabled}
     />
   </div>

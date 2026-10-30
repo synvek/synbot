@@ -400,6 +400,41 @@ cargo run --example generate_config_schema --features schema -- -o templates/con
 }
 ```
 
+- **apiKey**：不需要。Ollama 运行在本机，即使不填 key 也会被视为已配置（`configured` 为 `true`）。
+- **apiBase**：默认为 `http://localhost:11434`。该值会真正传给客户端，因此远程或容器内的 Ollama 也可用，例如填 `http://192.168.1.9:11434`。
+
+### Moonshot 与 Kimi Code
+
+```json
+{
+  "providers": {
+    "moonshot": {
+      "apiKey": "sk-...",
+      "apiBase": "https://api.moonshot.cn/v1"
+    }
+  }
+}
+```
+
+- **名称按子串匹配**：provider 名称包含 `moonshot` 时使用 `moonshot` 配置，包含 `kimi` 时使用 `kimiCode`（Kimi Code Plan，默认 `https://api.kimi.com/coding`）。
+- **apiBase**：`moonshot` 默认 `https://api.moonshot.cn/v1`；自定义值会生效，便于指向兼容网关。
+
+### Provider 元数据（`GET /api/providers`）
+
+daemon 提供一个只读的内置 provider 元数据接口，Web UI 设置页与 agent 的 provider 选择器都基于它渲染：
+
+- **`providers[]`**：每个内置键（`anthropic`、`openai`、`gemini`、`openrouter`、`deepseek`、`moonshot`、`kimiCode`、`ollama`）一项，包含 `label`、`aliases`、`apiStyle`、`requiresKey`、`local`、`embeddings`、`defaultBase`、`docsUrl`、`apiBase`（当前配置值）、`apiBaseEffective`（客户端实际使用的地址）、`configured` 与 `usedBy`（`main` 或 agent 名称）。
+- **`extra[]`**：每个 `providers.extra` 条目的 `apiBase` / `apiBaseEffective` / `configured` / `usedBy` 视图。
+- **`unknownInUse[]`**：`mainAgent.provider` 或 `agents[].provider` 引用到、但既非内置也不在 `providers.extra` 中的名称（通常是拼写错误）。
+- **`defaults`**：当前选中的 `provider` / `model`。
+
+该接口**从不返回 API 密钥**。
+
+由此可得出两条配置结论：
+
+- **`apiStyle` 仅对 `providers.extra` 有意义。** 内置键按名称固定顺序分发（`openrouter` → `anthropic`/`claude` → `openai` → `gemini` → `deepseek` → `moonshot` → `kimi` → `ollama`），在内置键上设置 `apiStyle` 不会生效，UI 也只做只读展示。
+- **所有内置 provider 的 `apiBase` 都会生效**，包括 Moonshot/Kimi 与 Ollama；留空则使用 `defaultBase` 中的默认值。
+
 ### 额外提供商
 
 可以**仅通过配置**、不改代码，添加 **OpenAI Chat Completions 兼容**或 **Anthropic Messages 兼容**的自定义端点（如 Minimax、代理、网关等）。

@@ -1,7 +1,8 @@
 import React from 'react'
 import type { SectionProps } from '../types'
-import { FieldGroup, NumberField, Subheading, TextField } from '../FormPrimitives'
+import { FieldGroup, NumberField, SelectField, Subheading, TextField } from '../FormPrimitives'
 import { asArray, asRecord } from '../immutable'
+import { useProviderCatalog } from '../useProviderCatalog'
 
 type AgentRow = {
   name: string
@@ -69,6 +70,25 @@ export const MainAgentSection: React.FC<SectionProps> = ({ draft, setDraft, t })
   const subagentTaskTimeoutSecs =
     typeof m.subagentTaskTimeoutSecs === 'number' ? m.subagentTaskTimeoutSecs : 600
   const agents = asArray<unknown>(m.agents).map(rowFromAgent)
+  const catalog = useProviderCatalog()
+
+  // Provider ids are free text in `config.json`, and a typo (e.g. `deepsek`) only shows up as a
+  // failing request at runtime. Once the catalog has loaded, the field becomes a select of built-in
+  // keys plus `providers.extra` names; an unknown current value is kept as its own option so
+  // opening the form never rewrites it.
+  const providerOptions: { value: string; label: string }[] = [
+    { value: '', label: t('config.sections.mainAgent.providerUnset') },
+    ...(catalog?.providers ?? []).map((p) => ({ value: p.key, label: `${p.label} (${p.key})` })),
+    ...(catalog?.extra ?? []).map((e) => ({ value: e.name, label: e.name })),
+  ]
+  const providerOptionsFor = (value: string) =>
+    value && !providerOptions.some((o) => o.value === value)
+      ? [...providerOptions, { value, label: value }]
+      : providerOptions
+
+  // Model ids belong to the provider and change often, so none are hard-coded here: the datalist
+  // only replays ids already used in this config. Free text stays allowed.
+  const modelIds = [...new Set([model, ...agents.map((a) => a.model)].filter(Boolean))]
 
   const patchMain = (patch: Record<string, unknown>) => {
     setDraft((d) => ({
@@ -89,18 +109,37 @@ export const MainAgentSection: React.FC<SectionProps> = ({ draft, setDraft, t })
         value={workspace}
         onChange={(v) => patchMain({ workspace: v })}
       />
-      <TextField
-        id="maProvider"
-        label={t('config.sections.mainAgent.provider')}
-        value={provider}
-        onChange={(v) => patchMain({ provider: v })}
-      />
+      {catalog ? (
+        <SelectField
+          id="maProvider"
+          label={t('config.sections.mainAgent.provider')}
+          value={provider}
+          onChange={(v) => patchMain({ provider: v })}
+          options={providerOptionsFor(provider)}
+        />
+      ) : (
+        <TextField
+          id="maProvider"
+          label={t('config.sections.mainAgent.provider')}
+          value={provider}
+          onChange={(v) => patchMain({ provider: v })}
+        />
+      )}
       <TextField
         id="maModel"
         label={t('config.sections.mainAgent.model')}
         value={model}
+        list="synbot-model-ids"
         onChange={(v) => patchMain({ model: v })}
       />
+      <datalist id="synbot-model-ids">
+        {modelIds.map((id) => (
+          <option key={id} value={id} />
+        ))}
+      </datalist>
+      <p className="-mt-2 text-xs text-text-secondary">
+        {t('config.sections.mainAgent.modelHint')}
+      </p>
       <NumberField
         id="maMaxTokens"
         label={t('config.sections.mainAgent.maxTokens')}
@@ -202,18 +241,33 @@ export const MainAgentSection: React.FC<SectionProps> = ({ draft, setDraft, t })
                 setAgents(n)
               }}
             />
-            <Field
-              label={t('config.sections.mainAgent.agentProvider')}
-              value={row.provider}
-              onChange={(v) => {
-                const n = [...agents]
-                n[idx] = { ...n[idx], provider: v }
-                setAgents(n)
-              }}
-            />
+            {catalog ? (
+              <SelectField
+                id={`agentProvider-${idx}`}
+                label={t('config.sections.mainAgent.agentProvider')}
+                value={row.provider}
+                onChange={(v) => {
+                  const n = [...agents]
+                  n[idx] = { ...n[idx], provider: v }
+                  setAgents(n)
+                }}
+                options={providerOptionsFor(row.provider)}
+              />
+            ) : (
+              <Field
+                label={t('config.sections.mainAgent.agentProvider')}
+                value={row.provider}
+                onChange={(v) => {
+                  const n = [...agents]
+                  n[idx] = { ...n[idx], provider: v }
+                  setAgents(n)
+                }}
+              />
+            )}
             <Field
               label={t('config.sections.mainAgent.agentModel')}
               value={row.model}
+              list="synbot-model-ids"
               onChange={(v) => {
                 const n = [...agents]
                 n[idx] = { ...n[idx], model: v }
@@ -283,13 +337,19 @@ const labelClass = 'block text-sm font-medium text-text mb-1'
 const inputClass =
   'w-full px-3 py-2 rounded-lg bg-surface border border-border text-text text-sm focus:outline-none focus:ring-2 focus:ring-primary/30'
 
-const Field: React.FC<{ label: string; value: string; onChange: (v: string) => void }> = ({
-  label,
-  value,
-  onChange,
-}) => (
+const Field: React.FC<{
+  label: string
+  value: string
+  onChange: (v: string) => void
+  list?: string
+}> = ({ label, value, onChange, list }) => (
   <div>
     <label className={labelClass}>{label}</label>
-    <input className={inputClass} value={value} onChange={(e) => onChange(e.target.value)} />
+    <input
+      className={inputClass}
+      value={value}
+      list={list}
+      onChange={(e) => onChange(e.target.value)}
+    />
   </div>
 )

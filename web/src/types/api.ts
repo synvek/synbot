@@ -638,3 +638,45 @@ export interface PolicyExplain {
   default_applied: boolean;
   approval_timeout_secs: number;
 }
+
+/** One built-in provider as reported by `GET /api/providers` (metadata + configured state). */
+export interface ProviderMetadata {
+  /** Key under `providers` in the config, e.g. `kimiCode`. */
+  key: string;
+  label: string;
+  aliases: string[];
+  /** `openai` | `anthropic`. */
+  apiStyle: string;
+  requiresKey: boolean;
+  local: boolean;
+  embeddings: boolean;
+  defaultBase: string;
+  docsUrl: string;
+  /** Override from the config, null when the default is used. */
+  apiBase: string | null;
+  apiBaseEffective: string;
+  maxTokensCap: number | null;
+  /** A key is set (always true for local runtimes). */
+  configured: boolean;
+  /** `main` or an agent name, when this provider is selected somewhere. */
+  usedBy: string[];
+}
+
+/** A `providers.extra` entry: no built-in metadata, only what the user configured. */
+export interface ExtraProviderMetadata {
+  name: string;
+  apiStyle: string;
+  apiBase: string | null;
+  apiBaseEffective: string | null;
+  maxTokensCap: number | null;
+  configured: boolean;
+  usedBy: string[];
+}
+
+export interface ProviderCatalog {
+  providers: ProviderMetadata[];
+  extra: ExtraProviderMetadata[];
+  /** Provider names selected in `mainAgent` / agents that match no built-in and no extra key. */
+  unknownInUse: { name: string; usedBy: string[] }[];
+  defaults: { provider: string | null; model: string | null };
+}

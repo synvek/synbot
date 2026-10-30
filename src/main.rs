@@ -24,6 +24,7 @@ mod logging;
 mod office;
 mod plugin;
 mod project;
+mod provider_catalog;
 mod rig_provider;
 mod sandbox;
 mod security;
