@@ -58,9 +58,9 @@ npm run prepare:sidecar:release
 npm run build
 ```
 
-`npm run build` 先执行 `beforeBuildCommand`：`build:web`（把 `web/` 编译到 `web/dist`，即 `tauri.conf.json` 中 `frontendDist` 指向的目录）与 `build:sidecar`（复制 release 版 `synbot`）。因为 UI 是编译期内嵌的，新克隆的仓库必须先构建前端，否则连 `cargo check -p synbot-desktop` 都会因缺少 `web/dist` 而失败。
+`npm run build` 先执行 `beforeBuildCommand`：`build:web`（把 `web/` 编译到 `web/dist`）与 `build:sidecar`（复制 release 版 `synbot`）。`tauri.conf.json` 中的 `frontendDist` 是**相对 `desktop/src-tauri/`** 解析的，因此写成 `../../web/dist`；目录缺失时打包阶段会直接报 `Unable to find your web assets`。这个检查属于 `tauri build`，不属于 `cargo check -p synbot-desktop`——壳 crate 没有这些资源也能编译，错误只在真正打包时暴露。
 
-产物位于 `desktop/src-tauri/target/release/bundle/`（例如 macOS Apple Silicon 上为 `bundle/macos/Synbot.app` 与 `Synbot_{version}_aarch64.dmg`）。
+产物位于仓库根目录的 `target/release/bundle/`（workspace 的 target 目录），例如 macOS Apple Silicon 上为 `target/release/bundle/macos/Synbot.app` 与 `target/release/bundle/dmg/Synbot_{version}_aarch64.dmg`。本地构建只有 **ad-hoc 签名**（没有 Team ID）：在构建它的机器上能直接运行，但别人下载的副本需要 Developer ID 签名与公证。
 
 sidecar 二进制复制到 `desktop/src-tauri/binaries/synbot-{target-triple}`（例如 `synbot-aarch64-apple-darwin`），由 `tauri.conf.json` 中的 `externalBin` 配置打包。
 

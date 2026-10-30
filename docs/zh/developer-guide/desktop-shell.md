@@ -124,8 +124,12 @@ cd web && npx vitest --run
 
 ## 构建顺序
 
-`frontendDist` 在编译期被内嵌，因此 `cargo build` 之前必须存在 `web/dist`。`beforeBuildCommand` 会执行 `build:web && build:sidecar`；新克隆的仓库如果只跑 `cargo check -p synbot-desktop`，在前端构建完成前会直接失败。
+`frontendDist` 会被内嵌进可执行文件，且是**相对 `desktop/src-tauri/`** 解析的，所以仓库根的 `web/dist` 要写成 `"../../web/dist"`。写成 `../web/dist` 会静默指向 `desktop/web/dist`，打包时直接报 `Unable to find your web assets`——这是新克隆仓库最先撞上的坑。
+
+`beforeBuildCommand` 会执行 `build:web && build:sidecar`，因此 `tauri build` 的资源顺序是对的。存在性检查发生在**打包**阶段而不在 `cargo check`：壳 crate 没有 `web/dist` 也能编译，只有 `tauri build` 会拒绝继续。
+
+产物落在 workspace 的 target 目录，即 `<repo>/target/release/bundle/`（`macos/Synbot.app`、`dmg/Synbot_{version}_aarch64.dmg`），**不是** `desktop/src-tauri/target/` 下。本地产物只有 ad-hoc 签名（无 Team ID），在自己构建的机器上够用，分发不够用。
 
 ## 尚未覆盖
 
-自动更新与深链**尚未**实现。两者都需要已签名的发行产物与 CI 发布链路（且缺少真实构建就无法验证），因此不在本次范围内；应用仍是普通安装包，升级即手动替换。
+自动更新与深链**尚未**实现。两者都需要已签名的发行产物与 CI 发布链路（且缺少真实构建就无法验证），因此不在本次范围内；应用仍是普通安装包，升级即手动替换。分发签名（Developer ID + 公证）同样属于发布任务，而不是构建步骤。

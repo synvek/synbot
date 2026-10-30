@@ -58,9 +58,9 @@ npm run prepare:sidecar:release
 npm run build
 ```
 
-`npm run build` runs `beforeBuildCommand` first: `build:web` (compiles `web/` into `web/dist`, which `frontendDist` in `tauri.conf.json` points at) and `build:sidecar` (copies the release `synbot`). Because the UI is embedded at compile time, a fresh clone must build the web app before `cargo build` can even run — `cargo check -p synbot-desktop` fails until `web/dist` exists.
+`npm run build` runs `beforeBuildCommand` first: `build:web` (compiles `web/` into `web/dist`) and `build:sidecar` (copies the release `synbot`). `frontendDist` in `tauri.conf.json` is resolved **relative to `desktop/src-tauri/`**, hence `../../web/dist`; when that folder is missing the bundle step aborts with `Unable to find your web assets`. That check belongs to `tauri build`, not to `cargo check -p synbot-desktop` — the shell crate compiles fine without the assets, so the error only appears when you actually bundle.
 
-Artifacts are written under `desktop/src-tauri/target/release/bundle/` (for example `bundle/macos/Synbot.app` and `Synbot_{version}_aarch64.dmg` on macOS Apple Silicon).
+Artifacts are written under `target/release/bundle/` at the repository root (the workspace target directory), for example `target/release/bundle/macos/Synbot.app` and `target/release/bundle/dmg/Synbot_{version}_aarch64.dmg` on macOS Apple Silicon. The local build is **ad-hoc signed only** (no Team ID): it runs on the machine that produced it, but a downloaded copy needs a Developer ID signature and notarization.
 
 The sidecar binary is copied to `desktop/src-tauri/binaries/synbot-{target-triple}` (for example `synbot-aarch64-apple-darwin`). Tauri bundles it via `externalBin` in `tauri.conf.json`.
 

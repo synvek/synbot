@@ -124,8 +124,12 @@ These are unit tests. Nothing here replaces a GUI build plus a manual pass on a 
 
 ## Build order
 
-`frontendDist` is embedded at compile time, so `web/dist` must exist before `cargo build`. `beforeBuildCommand` runs `build:web && build:sidecar`; a fresh clone that only runs `cargo check -p synbot-desktop` fails until the frontend is built.
+`frontendDist` is embedded into the executable and resolved **relative to `desktop/src-tauri/`**, so the repository-level `web/dist` is `"../../web/dist"`. A plain `../web/dist` silently points at `desktop/web/dist` and aborts the bundle with `Unable to find your web assets` — that is the failure mode a fresh clone hits first.
+
+`beforeBuildCommand` runs `build:web && build:sidecar`, so `tauri build` produces the assets in the right order. The existence check happens at **bundle** time, not in `cargo check`: the shell crate compiles without `web/dist`, only `tauri build` refuses to continue.
+
+Bundles land in the workspace target directory, `<repo>/target/release/bundle/` (`macos/Synbot.app`, `dmg/Synbot_{version}_aarch64.dmg`), not under `desktop/src-tauri/target/`. Local packages are ad-hoc signed (no Team ID), which is enough for the building machine but not for distribution.
 
 ## Not covered
 
-Auto-update and deep links are **not** implemented. Both need signed release artifacts and a CI publishing path (and cannot be validated without a real build), so they stay out of scope; the app still ships as a normal bundle you replace manually.
+Auto-update and deep links are **not** implemented. Both need signed release artifacts and a CI publishing path (and cannot be validated without a real build), so they stay out of scope; the app still ships as a normal bundle you replace manually. Distribution signing (Developer ID + notarization) is likewise still a release task, not a build step.

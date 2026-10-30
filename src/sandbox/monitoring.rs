@@ -632,31 +632,37 @@ mod tests {
         let config = create_test_monitoring_config();
         let monitoring = MonitoringModule::new(config);
 
-        // Log first event
-        monitoring
-            .log_file_access("test-sandbox", "/file1", "read", true)
-            .await;
+        for path in ["/file1", "/file2", "/file3"] {
+            monitoring
+                .log_file_access("test-sandbox", path, "read", true)
+                .await;
+            sleep(Duration::from_millis(50)).await;
+        }
 
-        let start_time = Utc::now();
-        sleep(Duration::from_millis(100)).await;
+        // The window is derived from the events themselves instead of being bracketed by two
+        // `Utc::now()` reads. `end_time` is compared inclusively, so on a coarse clock (or when a
+        // sleep lands exactly on a tick) the third event could share the boundary and leak into
+        // the result — that is why this test used to fail intermittently under parallel load.
+        let all = monitoring.query_logs(HashMap::new()).await;
+        assert_eq!(all.len(), 3, "expected three logged events");
+        let (first, second, third) = (&all[0], &all[1], &all[2]);
+        assert!(
+            first.timestamp < second.timestamp && second.timestamp < third.timestamp,
+            "events must be strictly ordered in time"
+        );
 
-        // Log second event
-        monitoring
-            .log_file_access("test-sandbox", "/file2", "read", true)
-            .await;
-
-        sleep(Duration::from_millis(100)).await;
-        let end_time = Utc::now();
-
-        // Log third event
-        monitoring
-            .log_file_access("test-sandbox", "/file3", "read", true)
-            .await;
-
-        // Query for events in time range
+        let midpoint = |earlier: chrono::DateTime<Utc>, later: chrono::DateTime<Utc>| {
+            earlier + (later - earlier) / 2
+        };
         let mut filters = HashMap::new();
-        filters.insert("start_time".to_string(), start_time.to_rfc3339());
-        filters.insert("end_time".to_string(), end_time.to_rfc3339());
+        filters.insert(
+            "start_time".to_string(),
+            midpoint(first.timestamp, second.timestamp).to_rfc3339(),
+        );
+        filters.insert(
+            "end_time".to_string(),
+            midpoint(second.timestamp, third.timestamp).to_rfc3339(),
+        );
 
         let results = monitoring.query_logs(filters).await;
         assert_eq!(results.len(), 1);
