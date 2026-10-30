@@ -23,6 +23,7 @@ import type {
   TaskStatus,
 } from '../types/api';
 import { useI18n } from '../i18n/I18nContext';
+import DeliverablePanel from './DeliverablePanel';
 
 export interface ChangedFile {
   path: string;
@@ -76,7 +77,7 @@ export default function ProjectPanel({
   const [error, setError] = useState<string | null>(null);
   const [openPath, setOpenPath] = useState('');
   const [opening, setOpening] = useState(false);
-  const [tab, setTab] = useState<'files' | 'changes' | 'tasks'>('files');
+  const [tab, setTab] = useState<'files' | 'changes' | 'tasks' | 'delivery'>('files');
   const [preview, setPreview] = useState<ProjectFileContent | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [checkpoint, setCheckpoint] = useState<CheckpointView | null>(null);
@@ -514,6 +515,16 @@ export default function ProjectPanel({
           {t('project.tasks', '任务')}
           {tasks.length > 0 && ` ${doneTasks}/${tasks.length}`}
         </button>
+        <button
+          type="button"
+          onClick={() => setTab('delivery')}
+          className={`flex-1 py-1.5 flex items-center justify-center gap-1 ${
+            tab === 'delivery' ? 'text-text border-b-2 border-primary' : 'text-text-secondary'
+          }`}
+        >
+          <FileIcon size={12} />
+          {t('project.deliverables', '交付物')}
+        </button>
       </div>
 
       {tab === 'files' ? (
@@ -707,7 +718,7 @@ export default function ProjectPanel({
             )}
           </ul>
         </div>
-      ) : (
+      ) : tab === 'tasks' ? (
         <div className="flex flex-col flex-1 min-h-0">
           <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border text-[11px] text-text-secondary">
             <span>
@@ -760,6 +771,12 @@ export default function ProjectPanel({
               ))
             )}
           </ul>
+        </div>
+      ) : project ? (
+        <DeliverablePanel project={project} />
+      ) : (
+        <div className="p-3 text-xs text-text-secondary">
+          {t('project.noProject', '未打开文件夹，本轮运行在默认工作区。')}
         </div>
       )}
 

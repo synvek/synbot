@@ -9189,6 +9189,7 @@ dependencies = [
  "ed25519-dalek",
  "encoding_rs",
  "extism",
+ "flate2",
  "futures-util",
  "glob",
  "hex",

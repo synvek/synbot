@@ -10,6 +10,9 @@ vi.mock('../api', () => ({
     getProjects: vi.fn(),
     getProjectFiles: vi.fn(),
     getProjectFile: vi.fn(),
+    getProjectDeliverables: vi.fn(),
+    getDeliverablePreview: vi.fn(),
+    downloadDeliverable: vi.fn(),
     getCheckpoint: vi.fn(),
     undoCheckpoint: vi.fn(),
     getGitStatus: vi.fn(),
@@ -257,5 +260,46 @@ describe('ProjectPanel checkpoint view', () => {
     await waitFor(() => expect(mocked.getProjectFile).toHaveBeenCalledWith('p1', 'src/agent.rs'));
     // The preview is windowed around the hit, so the line number is visible next to the code.
     expect(await screen.findByText(/line 3 of 3|第 3 行/)).toBeTruthy();
+  });
+
+  it('lists generated documents in the deliverables tab', async () => {
+    mocked.getProjectDeliverables.mockResolvedValue({
+      path: '',
+      truncated: false,
+      scanned: 2,
+      entries: [
+        {
+          name: 'report.docx',
+          path: 'out/report.docx',
+          kind: 'docx',
+          size: 2048,
+          modified_ms: 1_700_000_000_000,
+        },
+      ],
+    });
+
+    render(
+      <I18nProvider>
+        <ProjectPanel
+          project={{
+            id: 'p1',
+            name: 'proj',
+            path: '/tmp/proj',
+            added_at: '2026-01-01T00:00:00Z',
+            git_head: null,
+            rules: [],
+          }}
+          running={false}
+          changedFiles={[]}
+          turnId={null}
+          focusFile={null}
+          onSelect={() => {}}
+        />
+      </I18nProvider>
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Deliverables|交付物/ }));
+    expect(await screen.findByText('report.docx')).toBeInTheDocument();
+    expect(mocked.getProjectDeliverables).toHaveBeenCalledWith('p1');
   });
 });

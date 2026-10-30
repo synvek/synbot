@@ -21,6 +21,7 @@ mod git;
 mod heartbeat;
 mod hooks;
 mod logging;
+mod office;
 mod plugin;
 mod project;
 mod rig_provider;

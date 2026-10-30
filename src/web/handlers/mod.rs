@@ -2,6 +2,7 @@ pub mod api;
 pub mod checkpoints;
 pub mod commands;
 pub mod config_redact;
+pub mod delivery;
 pub mod git;
 pub mod index;
 pub mod market;

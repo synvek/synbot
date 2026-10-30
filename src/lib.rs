@@ -126,6 +126,7 @@ pub mod git;
 pub mod heartbeat;
 pub mod hooks;
 pub mod logging;
+pub mod office;
 pub mod plugin;
 pub mod project;
 pub mod rig_provider;

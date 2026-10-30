@@ -192,6 +192,89 @@ export interface ProjectFileContent {
   truncated: boolean;
 }
 
+// Deliverable types (`/api/projects/{id}/deliverables|preview|download`): the office documents an
+// agent produced. The server extracts text; PDFs and images are rendered by the browser itself.
+export type DeliverableKind =
+  | 'docx'
+  | 'xlsx'
+  | 'pptx'
+  | 'pdf'
+  | 'csv'
+  | 'markdown'
+  | 'html'
+  | 'image'
+  | 'text';
+
+export interface Deliverable {
+  name: string;
+  /** Path relative to the project root, `/`-separated. */
+  path: string;
+  kind: DeliverableKind;
+  size: number;
+  /** Last modification, milliseconds since the Unix epoch. */
+  modified_ms: number;
+}
+
+export interface DeliverableList {
+  path: string;
+  entries: Deliverable[];
+  truncated: boolean;
+  scanned: number;
+}
+
+export interface DocxPreview {
+  title?: string;
+  author?: string;
+  paragraphs_total: number;
+  words: number;
+  paragraphs: string[];
+  truncated: boolean;
+}
+
+export interface SheetPreview {
+  name: string;
+  rows: string[][];
+  rows_total: number;
+  cols: number;
+  truncated: boolean;
+}
+
+export interface XlsxPreview {
+  sheets: SheetPreview[];
+  sheets_total: number;
+  truncated: boolean;
+}
+
+export interface SlidePreview {
+  index: number;
+  title?: string;
+  lines: string[];
+}
+
+export interface PptxPreview {
+  slides_total: number;
+  slides: SlidePreview[];
+  truncated: boolean;
+}
+
+export interface DeliverablePreview {
+  kind: DeliverableKind;
+  size: number;
+  /** The browser should fetch the bytes and render them (PDF, images). */
+  passthrough: boolean;
+  truncated: boolean;
+  text?: string;
+  docx?: DocxPreview;
+  xlsx?: XlsxPreview;
+  pptx?: PptxPreview;
+}
+
+export interface DeliverablePreviewResponse {
+  path: string;
+  name: string;
+  preview: DeliverablePreview;
+}
+
 // Checkpoint types (`/api/checkpoints`): a turn's before/after images and their diff.
 export type CheckpointChangeKind = 'created' | 'modified' | 'deleted' | 'renamed';
 

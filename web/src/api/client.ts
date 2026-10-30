@@ -16,6 +16,8 @@ import type {
   Project,
   ProjectDirectory,
   ProjectFileContent,
+  DeliverableList,
+  DeliverablePreviewResponse,
   CheckpointView,
   CheckpointSummary,
   UndoReport,
@@ -209,6 +211,41 @@ export class ApiClient {
       throw new Error(response.data.error ?? 'Failed to read project file');
     }
     return response.data.data;
+  }
+
+  // Deliverables: office documents the agent produced, previewed and exported.
+  async getProjectDeliverables(id: string, path = ''): Promise<DeliverableList> {
+    const response = await this.client.get<ApiResponse<DeliverableList>>(
+      `/api/projects/${encodeURIComponent(id)}/deliverables`,
+      { params: { path } }
+    );
+    if (!response.data.success || !response.data.data) {
+      throw new Error(response.data.error ?? 'Failed to list deliverables');
+    }
+    return response.data.data;
+  }
+
+  async getDeliverablePreview(id: string, path: string): Promise<DeliverablePreviewResponse> {
+    const response = await this.client.get<ApiResponse<DeliverablePreviewResponse>>(
+      `/api/projects/${encodeURIComponent(id)}/preview`,
+      { params: { path } }
+    );
+    if (!response.data.success || !response.data.data) {
+      throw new Error(response.data.error ?? 'Failed to preview deliverable');
+    }
+    return response.data.data;
+  }
+
+  /**
+   * Raw bytes of a deliverable. Goes through axios (not a plain link) because the Basic auth header
+   * only exists on requests this client makes.
+   */
+  async downloadDeliverable(id: string, path: string): Promise<Blob> {
+    const response = await this.client.get<Blob>(
+      `/api/projects/${encodeURIComponent(id)}/download`,
+      { params: { path }, responseType: 'blob' }
+    );
+    return response.data;
   }
 
   // Checkpoints: what a turn wrote, with diffs, and rolling it back.

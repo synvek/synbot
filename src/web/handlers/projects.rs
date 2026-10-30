@@ -17,7 +17,7 @@ const MAX_FILE_BYTES: usize = 512 * 1024;
 /// Upper bound on entries returned for one directory listing.
 const MAX_DIR_ENTRIES: usize = 500;
 /// Folders that are never interesting in a file tree and can be huge.
-const SKIP_DIRS: &[&str] = &[
+pub(crate) const SKIP_DIRS: &[&str] = &[
     ".git",
     "node_modules",
     "target",
@@ -187,7 +187,7 @@ pub async fn get_project_file(
     })))
 }
 
-async fn project_root(state: &AppState, id: &str) -> Result<PathBuf, ApiError> {
+pub(crate) async fn project_root(state: &AppState, id: &str) -> Result<PathBuf, ApiError> {
     let store = state.projects.read().await;
     let project: &Project = store
         .get(id)
@@ -199,7 +199,7 @@ async fn project_root(state: &AppState, id: &str) -> Result<PathBuf, ApiError> {
 }
 
 /// Reject absolute paths, `..` segments and `.`-prefixed escapes; return a `/`-joined relative path.
-fn normalize_rel(raw: &str) -> Result<String, ApiError> {
+pub(crate) fn normalize_rel(raw: &str) -> Result<String, ApiError> {
     let trimmed = raw.trim().trim_matches('/');
     if trimmed.is_empty() {
         return Ok(String::new());

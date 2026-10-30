@@ -57,7 +57,8 @@ export default defineConfig({
             items: [
               { text: 'Architecture', link: '/developer-guide/architecture' },
               { text: 'Plugins', link: '/developer-guide/plugins' },
-              { text: 'Plugin Market', link: '/developer-guide/plugin-market' }
+              { text: 'Plugin Market', link: '/developer-guide/plugin-market' },
+              { text: 'Office Deliverables', link: '/developer-guide/office-delivery' }
             ]
           },
           {
@@ -110,7 +111,8 @@ export default defineConfig({
           collapsed: false,
           items: [
             { text: '架构', link: '/zh/developer-guide/architecture' },
-            { text: '插件市场', link: '/zh/developer-guide/plugin-market' }
+            { text: '插件市场', link: '/zh/developer-guide/plugin-market' },
+            { text: '办公交付物', link: '/zh/developer-guide/office-delivery' }
           ]
         },
         {

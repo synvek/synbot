@@ -1,7 +1,7 @@
 use crate::config::WebConfig;
 use crate::web::handlers::{
-    api, checkpoints, commands, git, index, market, plugins, projects, security, static_files,
-    tasks, team, ws, ws_agent, ws_terminal,
+    api, checkpoints, commands, delivery, git, index, market, plugins, projects, security,
+    static_files, tasks, team, ws, ws_agent, ws_terminal,
 };
 use crate::web::state::AppState;
 use crate::web::{BasicAuth, Cors};
@@ -51,6 +51,18 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig, state: AppState, auth: Bas
                 .route(
                     "/projects/{id}/file",
                     web::get().to(projects::get_project_file),
+                )
+                .route(
+                    "/projects/{id}/deliverables",
+                    web::get().to(delivery::list_deliverables),
+                )
+                .route(
+                    "/projects/{id}/preview",
+                    web::get().to(delivery::preview_deliverable),
+                )
+                .route(
+                    "/projects/{id}/download",
+                    web::get().to(delivery::download_deliverable),
                 )
                 .route("/checkpoints", web::get().to(checkpoints::list_checkpoints))
                 .route(
