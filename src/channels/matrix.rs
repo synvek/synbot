@@ -576,6 +576,9 @@ impl Channel for MatrixChannel {
                             });
                         (content, vec![])
                     }
+                    crate::bus::OutboundMessageType::ApprovalResolved { receipt } => {
+                        (approval_formatter::format_receipt(&receipt), vec![])
+                    }
                 };
                 if !content.is_empty() {
                     match client_out.get_room(&room_id) {
@@ -700,6 +703,9 @@ impl Channel for MatrixChannel {
                     .unwrap_or_else(|| approval_formatter::format_approval_request(request)),
                 vec![],
             ),
+            crate::bus::OutboundMessageType::ApprovalResolved { receipt } => {
+                (approval_formatter::format_receipt(receipt), vec![])
+            }
             crate::bus::OutboundMessageType::ToolProgress {
                 tool_name,
                 status,

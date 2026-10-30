@@ -225,7 +225,8 @@
     "approve": "Approve",
     "reject": "Reject",
     "approved": "Approved",
-    "rejected": "Rejected"
+    "rejected": "Rejected",
+    "resolvedElsewhere": "{{outcome}} by {{responder}}"
   },
   "config": {
     "title": "Configuration",

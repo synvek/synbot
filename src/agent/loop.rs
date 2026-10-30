@@ -85,6 +85,8 @@ pub struct AgentLoop {
     workflow_user_input_timeout_secs: u64,
     /// Live config (memory, compression, embeddings).
     shared_config: Arc<RwLock<Config>>,
+    /// Approval manager shared with the `exec` tool; `/pending`, `/approve`, `/reject` answer through it.
+    approval_manager: Option<Arc<crate::tools::approval::ApprovalManager>>,
 }
 
 impl AgentLoop {
@@ -135,6 +137,7 @@ impl AgentLoop {
             pending_workflow_confirm: PendingConfirmStore::new(),
             workflow_user_input_timeout_secs,
             shared_config,
+            approval_manager: None,
         }
     }
 
@@ -158,6 +161,12 @@ impl AgentLoop {
     /// `list_subagents` see every teammate instead of two independent pools.
     pub fn set_subagent_manager(&mut self, manager: Arc<Mutex<SubagentManager>>) {
         self.subagent_manager = manager;
+    }
+
+    /// Wire the approval manager so `/pending`, `/approve` and `/reject` can list and answer
+    /// requests that the `exec` tool is waiting on (including ones forwarded from another chat).
+    pub fn set_approval_manager(&mut self, manager: Arc<crate::tools::approval::ApprovalManager>) {
+        self.approval_manager = Some(manager);
     }
 
     /// Filesystem root for one turn: the project bound to `chat_id`, else the agent workspace.
@@ -294,6 +303,37 @@ impl AgentLoop {
                                     vec![],
                                     None,
                                 ));
+                                continue;
+                            }
+                            ControlCommand::Pending => {
+                                loop_ref
+                                    .lock()
+                                    .await
+                                    .handle_pending_approvals(&msg)
+                                    .await
+                                    .ok();
+                                continue;
+                            }
+                            ControlCommand::Approve { target } => {
+                                loop_ref
+                                    .lock()
+                                    .await
+                                    .handle_approval_answer(&msg, target, true)
+                                    .await
+                                    .ok();
+                                continue;
+                            }
+                            ControlCommand::Reject { target } => {
+                                loop_ref
+                                    .lock()
+                                    .await
+                                    .handle_approval_answer(&msg, target, false)
+                                    .await
+                                    .ok();
+                                continue;
+                            }
+                            ControlCommand::Tasks => {
+                                loop_ref.lock().await.handle_tasks(&msg).await.ok();
                                 continue;
                             }
                             ControlCommand::Resume => {
@@ -492,6 +532,22 @@ impl AgentLoop {
                             vec![],
                             None,
                         ));
+                        return Ok(None);
+                    }
+                    ControlCommand::Pending => {
+                        self.handle_pending_approvals(&msg).await?;
+                        return Ok(None);
+                    }
+                    ControlCommand::Approve { target } => {
+                        self.handle_approval_answer(&msg, target, true).await?;
+                        return Ok(None);
+                    }
+                    ControlCommand::Reject { target } => {
+                        self.handle_approval_answer(&msg, target, false).await?;
+                        return Ok(None);
+                    }
+                    ControlCommand::Tasks => {
+                        self.handle_tasks(&msg).await?;
                         return Ok(None);
                     }
                 }
@@ -802,6 +858,104 @@ impl AgentLoop {
             msg.channel.clone(),
             msg.chat_id.clone(),
             format!("[Status]\n{}", text),
+            vec![],
+            None,
+        ));
+        Ok(())
+    }
+
+    /// Handle /pending: list the approvals this chat is allowed to answer.
+    async fn handle_pending_approvals(&self, msg: &InboundMessage) -> Result<()> {
+        let Some(manager) = &self.approval_manager else {
+            return self.reply_control(
+                msg,
+                "[Pending] Approval manager is not wired in this instance.".to_string(),
+            );
+        };
+        let pending = manager
+            .visible_pending(&msg.session_key(), &msg.channel, &msg.chat_id)
+            .await;
+        self.reply_control(
+            msg,
+            format!("[Pending]\n{}", format_pending_approvals(&pending)),
+        )
+    }
+
+    /// Handle /approve and /reject: answer a waiting request from plain text, so a phone without
+    /// buttons (or a forwarded request from the desktop) can still unblock the turn.
+    async fn handle_approval_answer(
+        &self,
+        msg: &InboundMessage,
+        target: Option<String>,
+        approved: bool,
+    ) -> Result<()> {
+        let Some(manager) = &self.approval_manager else {
+            return self.reply_control(
+                msg,
+                "[Approval] Approval manager is not wired in this instance.".to_string(),
+            );
+        };
+        let pending = manager
+            .visible_pending(&msg.session_key(), &msg.channel, &msg.chat_id)
+            .await;
+        let matched: Vec<crate::tools::approval::ApprovalRequest> = match &target {
+            Some(prefix) => pending
+                .into_iter()
+                .filter(|request| request.id.to_ascii_lowercase().starts_with(prefix))
+                .collect(),
+            None => pending,
+        };
+        let reply = match matched.as_slice() {
+            [] => match &target {
+                Some(prefix) => format!("[Approval] No waiting request matches `{prefix}`."),
+                None => "[Approval] Nothing is waiting for an answer.".to_string(),
+            },
+            [one] => {
+                let response = crate::tools::approval::ApprovalResponse {
+                    request_id: one.id.clone(),
+                    approved,
+                    responder: format!("{}:{}", msg.channel, msg.chat_id),
+                    timestamp: chrono::Utc::now(),
+                };
+                match manager.submit_response(response).await {
+                    Ok(crate::tools::approval::SubmitOutcome::Delivered) => format!(
+                        "[Approval] {} {} — `{}`",
+                        if approved { "approved" } else { "rejected" },
+                        short_request_id(&one.id),
+                        one.command
+                    ),
+                    Ok(crate::tools::approval::SubmitOutcome::NotPending) => {
+                        "[Approval] That request was already answered elsewhere; nothing to do."
+                            .to_string()
+                    }
+                    Err(e) => format!("[Approval] Could not submit the answer: {e:#}"),
+                }
+            }
+            many => format!(
+                "[Approval] {} requests are waiting; reply `/approve <id-prefix>` or `/reject <id-prefix>`:\n{}",
+                many.len(),
+                format_pending_approvals(many)
+            ),
+        };
+        self.reply_control(msg, reply)
+    }
+
+    /// Handle /tasks: show the task board of the project this chat works in.
+    async fn handle_tasks(&self, msg: &InboundMessage) -> Result<()> {
+        let workspace = self.turn_workspace(&self.workspace, &msg.chat_id).await;
+        let board = crate::tasks::TaskBoard::load(&workspace);
+        self.reply_control(
+            msg,
+            format!("[Tasks] {}\n{}", workspace.display(), board.summary()),
+        )
+    }
+
+    /// Send a control-command reply back to the chat that asked.
+    fn reply_control(&self, msg: &InboundMessage, text: String) -> Result<()> {
+        let _ = self.outbound_tx.send(OutboundMessage::chat(
+            msg.channel.clone(),
+            msg.chat_id.clone(),
+            text,
             vec![],
             None,
         ));
@@ -2583,6 +2737,71 @@ async fn consume_stream(
             ),
             streamed_any,
         )),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Control-command formatting helpers
+// ---------------------------------------------------------------------------
+
+/// First 8 characters of a request id: enough to disambiguate inside one chat.
+fn short_request_id(id: &str) -> &str {
+    id.get(..8).unwrap_or(id)
+}
+
+/// Human readable list of waiting approvals, shared by `/pending` and the "which one?" reply.
+fn format_pending_approvals(pending: &[crate::tools::approval::ApprovalRequest]) -> String {
+    if pending.is_empty() {
+        return "No approval is waiting for an answer.".to_string();
+    }
+    let mut out = format!("{} approval(s) waiting:", pending.len());
+    for request in pending {
+        let command: String = request.command.chars().take(160).collect();
+        out.push_str(&format!(
+            "\n- {} | timeout {}s | {}",
+            short_request_id(&request.id),
+            request.timeout_secs,
+            command
+        ));
+    }
+    out
+}
+
+#[cfg(test)]
+mod control_command_format_tests {
+    use super::*;
+    use chrono::Utc;
+
+    fn request(id: &str, command: &str) -> crate::tools::approval::ApprovalRequest {
+        crate::tools::approval::ApprovalRequest {
+            id: id.to_string(),
+            session_id: "web:chat".to_string(),
+            channel: "web".to_string(),
+            chat_id: "chat".to_string(),
+            command: command.to_string(),
+            working_dir: "/tmp".to_string(),
+            context: String::new(),
+            timestamp: Utc::now(),
+            timeout_secs: 60,
+            display_message: None,
+        }
+    }
+
+    #[test]
+    fn formats_waiting_approvals_with_short_ids() {
+        let text = format_pending_approvals(&[request("01234567-89ab-cdef", "rm -rf /tmp/x")]);
+        assert!(text.contains("1 approval(s) waiting"));
+        assert!(text.contains("01234567"));
+        assert!(!text.contains("01234567-89ab-cdef"));
+        assert!(text.contains("rm -rf /tmp/x"));
+    }
+
+    #[test]
+    fn empty_pending_says_nothing_is_waiting() {
+        assert_eq!(
+            format_pending_approvals(&[]),
+            "No approval is waiting for an answer."
+        );
     }
 }
 

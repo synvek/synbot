@@ -117,6 +117,9 @@ pub enum AgentServerMessage {
         request_id: String,
         approved: bool,
         message: String,
+        /// Set when another surface (phone, another tab) answered or the request timed out.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        responder: Option<String>,
     },
     Pong,
     /// Active project after `select_project` or on connect; `null` means the global workspace.
@@ -415,6 +418,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for AgentWsSession {
                                         approved,
                                         message: if approved { "approved" } else { "rejected" }
                                             .to_string(),
+                                        responder: None,
                                     },
                                 );
                             }),
@@ -512,8 +516,28 @@ impl Handler<PassthroughMessage> for AgentWsSession {
     type Result = ();
 
     fn handle(&mut self, msg: PassthroughMessage, ctx: &mut Self::Context) {
-        if let OutboundMessageType::ApprovalRequest { request } = msg.0.message_type {
-            self.send_message(ctx, AgentServerMessage::ApprovalRequest { request });
+        match msg.0.message_type {
+            OutboundMessageType::ApprovalRequest { request } => {
+                self.send_message(ctx, AgentServerMessage::ApprovalRequest { request });
+            }
+            // Answered on another surface: retire the card here instead of leaving it clickable.
+            OutboundMessageType::ApprovalResolved { receipt } => {
+                let message = match &receipt.outcome {
+                    crate::bus::ApprovalReceiptOutcome::Approved { .. } => "approved",
+                    crate::bus::ApprovalReceiptOutcome::Rejected { .. } => "rejected",
+                    crate::bus::ApprovalReceiptOutcome::TimedOut => "timeout",
+                };
+                self.send_message(
+                    ctx,
+                    AgentServerMessage::ApprovalResult {
+                        request_id: receipt.request_id.clone(),
+                        approved: receipt.approved(),
+                        message: message.to_string(),
+                        responder: receipt.responder().map(String::from),
+                    },
+                );
+            }
+            _ => {}
         }
     }
 }

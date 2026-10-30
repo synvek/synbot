@@ -9,6 +9,8 @@ interface ApprovalRequestProps {
   result?: {
     approved: boolean;
     message: string;
+    /** Set when another surface (phone, another tab) answered or the request timed out. */
+    responder?: string;
   };
 }
 
@@ -174,10 +176,17 @@ export default function ApprovalRequest({
             </svg>
           )}
           <span className="font-medium">
-            {result?.message ||
-              (result?.approved
-                ? t('approval.approved', '已批准')
-                : t('approval.rejected', '已拒绝'))}
+            {result?.responder
+              ? t('approval.resolvedElsewhere', {
+                  responder: result.responder,
+                  outcome: result.approved
+                    ? t('approval.approved', '已批准')
+                    : t('approval.rejected', '已拒绝'),
+                })
+              : result?.message ||
+                (result?.approved
+                  ? t('approval.approved', '已批准')
+                  : t('approval.rejected', '已拒绝'))}
           </span>
         </div>
       )}

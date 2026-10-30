@@ -98,7 +98,7 @@ export type AgentServerMessage =
   | { type: 'replay'; events: SequencedEvent[] }
   | ({ type: 'event' } & SequencedEvent)
   | { type: 'approval_request'; request: ApprovalRequest }
-  | { type: 'approval_result'; request_id: string; approved: boolean; message: string }
+  | { type: 'approval_result'; request_id: string; approved: boolean; message: string; responder?: string }
   | { type: 'project'; project: ProjectInfo | null }
   | { type: 'pong' }
   | { type: 'error'; message: string };

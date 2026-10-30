@@ -225,7 +225,8 @@
     "approve": "同意",
     "reject": "拒绝",
     "approved": "已批准",
-    "rejected": "已拒绝"
+    "rejected": "已拒绝",
+    "resolvedElsewhere": "已由 {{responder}} {{outcome}}"
   },
   "config": {
     "title": "配置",

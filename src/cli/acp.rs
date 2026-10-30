@@ -48,6 +48,17 @@ pub async fn cmd_acp(provider: Option<String>, model: Option<String>) -> Result<
     let approval_manager = std::sync::Arc::new(
         crate::tools::approval::ApprovalManager::with_outbound(bus.outbound_tx_clone()),
     );
+    if cfg.remote_collab.forward_approvals {
+        approval_manager
+            .set_fanout_targets(
+                cfg.remote_collab
+                    .targets
+                    .iter()
+                    .map(|target| (target.channel.clone(), target.chat_id.clone()))
+                    .collect(),
+            )
+            .await;
+    }
 
     let permission_policy = if cfg.tools.exec.permissions.enabled {
         Some(std::sync::Arc::new(
@@ -149,7 +160,7 @@ pub async fn cmd_acp(provider: Option<String>, model: Option<String>) -> Result<
     }
     let agent_registry = std::sync::Arc::new(agent_registry);
 
-    let agent_loop = crate::agent::r#loop::AgentLoop::new(
+    let mut agent_loop = crate::agent::r#loop::AgentLoop::new(
         completion_model,
         ws,
         skills_loader,
@@ -165,6 +176,8 @@ pub async fn cmd_acp(provider: Option<String>, model: Option<String>) -> Result<
         std::sync::Arc::clone(&shared_config),
     )
     .await;
+    // `/pending`, `/approve`, `/reject` answer the same requests the ACP bridge is waiting on.
+    agent_loop.set_approval_manager(std::sync::Arc::clone(&approval_manager));
     let loop_ref = std::sync::Arc::new(tokio::sync::Mutex::new(agent_loop));
 
     // Agent loop in the background; ACP connection in the foreground.

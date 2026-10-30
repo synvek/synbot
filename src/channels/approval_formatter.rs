@@ -1,3 +1,4 @@
+use crate::bus::{ApprovalReceipt, ApprovalReceiptOutcome};
 use crate::tools::approval::ApprovalRequest;
 use chrono::Utc;
 
@@ -39,6 +40,28 @@ pub fn format_approval_result(
             format!("rejected{}\ncommand: `{}`", who, command)
         }
         ApprovalResult::Timeout => format!("timeout\ncommand: `{}`", command),
+    }
+}
+
+/// Format the receipt broadcast when an approval is answered on another surface (another channel,
+/// another web tab) or times out, so nobody keeps waiting on a dead card.
+pub fn format_receipt(receipt: &ApprovalReceipt) -> String {
+    match &receipt.outcome {
+        ApprovalReceiptOutcome::Approved { responder } => {
+            format!(
+                "approved elsewhere ({responder})\ncommand: `{}`",
+                receipt.command
+            )
+        }
+        ApprovalReceiptOutcome::Rejected { responder } => {
+            format!(
+                "rejected elsewhere ({responder})\ncommand: `{}`",
+                receipt.command
+            )
+        }
+        ApprovalReceiptOutcome::TimedOut => {
+            format!("timed out\ncommand: `{}`", receipt.command)
+        }
     }
 }
 

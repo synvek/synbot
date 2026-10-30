@@ -1021,6 +1021,14 @@ impl Channel for DiscordChannel {
                             .unwrap_or_else(|| Self::format_approval_request(request));
                         (content, vec![])
                     }
+                    crate::bus::OutboundMessageType::ApprovalResolved { receipt } => {
+                        // Answered elsewhere (or timed out): retire the card in this chat too.
+                        pending_approvals_clone
+                            .write()
+                            .await
+                            .retain(|_, (id, _)| id != &receipt.request_id);
+                        (approval_formatter::format_receipt(&receipt), vec![])
+                    }
                 };
                 let url = format!("{}/channels/{}/messages", API_BASE, msg.chat_id);
                 // If we have file paths, send as multipart (content + files). Discord supports multiple files in one message.
@@ -1234,6 +1242,9 @@ impl Channel for DiscordChannel {
                     .unwrap_or_else(|| approval_formatter::format_approval_request(request)),
                 vec![],
             ),
+            crate::bus::OutboundMessageType::ApprovalResolved { receipt } => {
+                (approval_formatter::format_receipt(receipt), vec![])
+            }
             crate::bus::OutboundMessageType::ToolProgress {
                 tool_name,
                 status,

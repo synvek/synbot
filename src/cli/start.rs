@@ -136,6 +136,21 @@ pub async fn cmd_start() -> Result<()> {
     let approval_manager = std::sync::Arc::new(
         crate::tools::approval::ApprovalManager::with_outbound(bus.outbound_tx_clone()),
     );
+    // `remoteCollab`: mirror approvals to configured chats (phone approving desktop work) and let
+    // any of them answer; the others receive a receipt.
+    if cfg.remote_collab.forward_approvals {
+        let targets: Vec<(String, String)> = cfg
+            .remote_collab
+            .targets
+            .iter()
+            .map(|target| (target.channel.clone(), target.chat_id.clone()))
+            .collect();
+        approval_manager.set_fanout_targets(targets).await;
+        tracing::info!(
+            targets = cfg.remote_collab.targets.len(),
+            "Approval forwarding enabled"
+        );
+    }
 
     // Load permission policy if enabled
     let permission_policy = if cfg.tools.exec.permissions.enabled {
@@ -298,6 +313,8 @@ pub async fn cmd_start() -> Result<()> {
     .await;
     // Directive routing and the team tools share one subagent pool.
     agent_loop.set_subagent_manager(std::sync::Arc::clone(&subagent_mgr));
+    // `/pending`, `/approve`, `/reject` answer the same requests the `exec` tool is waiting on.
+    agent_loop.set_approval_manager(std::sync::Arc::clone(&approval_manager));
     // One registry shared by the agent loop and `/api/projects`: opening a folder in the UI and
     // the workspace used by the next turn are the same state.
     let projects = agent_loop.projects();

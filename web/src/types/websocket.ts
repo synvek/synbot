@@ -10,7 +10,7 @@ export type WsClientMessage =
 export type WsServerMessage = 
   | { type: 'chat_response'; content: string; timestamp: string }
   | { type: 'approval_request'; request: ApprovalRequest }
-  | { type: 'approval_result'; request_id: string; approved: boolean; message: string }
+  | { type: 'approval_result'; request_id: string; approved: boolean; message: string; responder?: string }
   | { type: 'error'; message: string }
   | { type: 'pong' }
   | { type: 'connected'; session_id: string }
@@ -44,6 +44,8 @@ export interface ChatMessage {
   approvalResult?: {
     approved: boolean;
     message: string;
+    /** Set when another surface (phone, another tab) answered or the request timed out. */
+    responder?: string;
   };
   /** Assistant text is still streaming (protocol v2). */
   streaming?: boolean;

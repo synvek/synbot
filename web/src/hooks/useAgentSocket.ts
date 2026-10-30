@@ -404,6 +404,7 @@ export function useAgentSocket({
                         approvalResult: {
                           approved: message.approved,
                           message: message.message,
+                          responder: message.responder,
                         },
                       }
                     : m

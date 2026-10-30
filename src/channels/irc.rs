@@ -182,6 +182,9 @@ impl Channel for IrcChannel {
                         .filter(|s| !s.is_empty())
                         .map(String::from)
                         .unwrap_or_else(|| format!("Approval required: {}", request.id)),
+                    crate::bus::OutboundMessageType::ApprovalResolved { receipt } => {
+                        format!("Approval settled: {}", receipt.command)
+                    }
                 };
 
                 // IRC has a 512-byte line limit; split long messages

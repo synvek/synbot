@@ -766,6 +766,9 @@ impl Channel for SlackChannel {
                             });
                         (content, vec![])
                     }
+                    crate::bus::OutboundMessageType::ApprovalResolved { receipt } => {
+                        (approval_formatter::format_receipt(&receipt), vec![])
+                    }
                 };
                 let client = match SlackClientHyperConnector::new() {
                     Ok(connector) => SlackClient::new(connector),
@@ -861,6 +864,9 @@ impl Channel for SlackChannel {
                     .unwrap_or_else(|| approval_formatter::format_approval_request(request)),
                 vec![],
             ),
+            crate::bus::OutboundMessageType::ApprovalResolved { receipt } => {
+                (approval_formatter::format_receipt(receipt), vec![])
+            }
             crate::bus::OutboundMessageType::ToolProgress {
                 tool_name,
                 status,

@@ -103,7 +103,19 @@ pub struct ApprovalManager {
     history: Arc<RwLock<Vec<(ApprovalRequest, ApprovalStatus)>>>,
     history_capacity: usize,
     outbound_tx: Option<tokio::sync::broadcast::Sender<crate::bus::OutboundMessage>>,
+    /// `(channel, chat_id)` chats that also receive every approval request (remote collaboration).
+    /// Empty by default: a request only reaches the chat that started the turn.
+    fanout_targets: Arc<RwLock<Vec<(String, String)>>>,
     metrics: Arc<ApprovalMetrics>,
+}
+
+/// Result of answering an approval request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubmitOutcome {
+    /// The waiting `request_approval` call received the answer.
+    Delivered,
+    /// Nobody is waiting for this id (already answered elsewhere, or timed out).
+    NotPending,
 }
 
 impl ApprovalManager {
@@ -117,6 +129,7 @@ impl ApprovalManager {
             history: Arc::new(RwLock::new(Vec::new())),
             history_capacity: capacity,
             outbound_tx: None,
+            fanout_targets: Arc::new(RwLock::new(Vec::new())),
             metrics: Arc::new(ApprovalMetrics::default()),
         }
     }
@@ -129,6 +142,7 @@ impl ApprovalManager {
             history: Arc::new(RwLock::new(Vec::new())),
             history_capacity: 1000,
             outbound_tx: Some(outbound_tx),
+            fanout_targets: Arc::new(RwLock::new(Vec::new())),
             metrics: Arc::new(ApprovalMetrics::default()),
         }
     }
@@ -142,8 +156,71 @@ impl ApprovalManager {
             history: Arc::new(RwLock::new(Vec::new())),
             history_capacity: capacity,
             outbound_tx: Some(outbound_tx),
+            fanout_targets: Arc::new(RwLock::new(Vec::new())),
             metrics: Arc::new(ApprovalMetrics::default()),
         }
+    }
+
+    /// Mirror every approval request to these chats as well (see `remoteCollab` in config).
+    /// Blank entries and duplicates are dropped; the origin chat is never duplicated at send time.
+    pub async fn set_fanout_targets(&self, targets: Vec<(String, String)>) {
+        let mut cleaned: Vec<(String, String)> = Vec::new();
+        for (channel, chat_id) in targets {
+            let (channel, chat_id) = (channel.trim().to_string(), chat_id.trim().to_string());
+            if channel.is_empty() || chat_id.is_empty() {
+                continue;
+            }
+            if !cleaned.contains(&(channel.clone(), chat_id.clone())) {
+                cleaned.push((channel, chat_id));
+            }
+        }
+        *self.fanout_targets.write().await = cleaned;
+    }
+
+    pub async fn fanout_targets(&self) -> Vec<(String, String)> {
+        self.fanout_targets.read().await.clone()
+    }
+
+    /// Every request currently waiting for an answer, oldest first.
+    pub async fn pending_requests(&self) -> Vec<ApprovalRequest> {
+        let mut out: Vec<ApprovalRequest> = self
+            .pending
+            .read()
+            .await
+            .values()
+            .map(|(request, _)| request.clone())
+            .collect();
+        out.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+        out
+    }
+
+    /// Requests a chat is allowed to answer from a text command.
+    ///
+    /// Only the chat that started the turn may answer it, plus the explicitly configured
+    /// fan-out targets — otherwise anyone who guesses a request id could approve another
+    /// chat's command.
+    pub async fn visible_pending(
+        &self,
+        session_id: &str,
+        channel: &str,
+        chat_id: &str,
+    ) -> Vec<ApprovalRequest> {
+        let is_fanout_target = self
+            .fanout_targets
+            .read()
+            .await
+            .iter()
+            .any(|(c, id)| c == channel && id == chat_id);
+        let mut out: Vec<ApprovalRequest> = self
+            .pending
+            .read()
+            .await
+            .values()
+            .filter(|(request, _)| request.session_id == session_id || is_fanout_target)
+            .map(|(request, _)| request.clone())
+            .collect();
+        out.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+        out
     }
 
     async fn add_to_history(&self, request: ApprovalRequest, status: ApprovalStatus) {
@@ -208,7 +285,8 @@ impl ApprovalManager {
             pending.insert(request_id.clone(), (request.clone(), tx));
         }
 
-        // Broadcast approval request via message bus
+        // Broadcast approval request via message bus (origin first, then configured remote chats).
+        let fanout = self.fanout_targets().await;
         if let Some(outbound_tx) = &self.outbound_tx {
             let approval_msg = crate::bus::OutboundMessage::approval_request(
                 channel.clone(),
@@ -218,9 +296,22 @@ impl ApprovalManager {
             );
             let _ = outbound_tx.send(approval_msg);
 
+            for (target_channel, target_chat) in &fanout {
+                if *target_channel == channel && *target_chat == chat_id {
+                    continue;
+                }
+                let _ = outbound_tx.send(crate::bus::OutboundMessage::approval_request(
+                    target_channel.clone(),
+                    target_chat.clone(),
+                    request.clone(),
+                    None,
+                ));
+            }
+
             info!(
                 request_id = %request_id,
                 channel = %channel,
+                forwarded_to = fanout.len(),
                 "Approval request sent to message bus"
             );
         }
@@ -266,6 +357,12 @@ impl ApprovalManager {
                 } else {
                     ApprovalStatus::Rejected(response)
                 };
+                let receipt = if approved {
+                    crate::bus::ApprovalReceiptOutcome::Approved { responder }
+                } else {
+                    crate::bus::ApprovalReceiptOutcome::Rejected { responder }
+                };
+                self.broadcast_receipt(&request_id, &command, receipt, &channel, &chat_id, &fanout);
                 self.add_to_history(request, status).await;
                 let outcome = if approved {
                     ApprovalOutcome::Approved
@@ -295,19 +392,70 @@ impl ApprovalManager {
             }
         };
 
+        self.broadcast_receipt(
+            &request_id,
+            &command,
+            crate::bus::ApprovalReceiptOutcome::TimedOut,
+            &channel,
+            &chat_id,
+            &fanout,
+        );
         self.add_to_history(request, status).await;
 
         Ok(ApprovalOutcome::Timeout)
     }
 
-    pub async fn submit_response(&self, response: ApprovalResponse) -> anyhow::Result<()> {
-        let pending = self.pending.write().await;
-
-        if let Some((_, tx)) = pending.get(&response.request_id) {
-            tx.send(response).await?;
+    /// Tell every surface that showed the card how it ended, so no card stays pending forever.
+    fn broadcast_receipt(
+        &self,
+        request_id: &str,
+        command: &str,
+        outcome: crate::bus::ApprovalReceiptOutcome,
+        channel: &str,
+        chat_id: &str,
+        fanout: &[(String, String)],
+    ) {
+        let Some(outbound_tx) = &self.outbound_tx else {
+            return;
+        };
+        let receipt = crate::bus::ApprovalReceipt {
+            request_id: request_id.to_string(),
+            command: command.to_string(),
+            outcome,
+        };
+        let _ = outbound_tx.send(crate::bus::OutboundMessage::approval_resolved(
+            channel.to_string(),
+            chat_id.to_string(),
+            receipt.clone(),
+        ));
+        for (target_channel, target_chat) in fanout {
+            if target_channel == channel && target_chat == chat_id {
+                continue;
+            }
+            let _ = outbound_tx.send(crate::bus::OutboundMessage::approval_resolved(
+                target_channel.clone(),
+                target_chat.clone(),
+                receipt.clone(),
+            ));
         }
+    }
 
-        Ok(())
+    /// Answer a waiting request. Returns [SubmitOutcome::NotPending] when it was already answered
+    /// elsewhere (another tab, another channel) or timed out, so callers can say so instead of
+    /// silently doing nothing.
+    pub async fn submit_response(
+        &self,
+        response: ApprovalResponse,
+    ) -> anyhow::Result<SubmitOutcome> {
+        let pending = self.pending.read().await;
+
+        match pending.get(&response.request_id) {
+            Some((_, tx)) => {
+                tx.send(response).await?;
+                Ok(SubmitOutcome::Delivered)
+            }
+            None => Ok(SubmitOutcome::NotPending),
+        }
     }
 
     pub async fn get_pending_request(&self, request_id: &str) -> Option<ApprovalRequest> {
@@ -616,6 +764,7 @@ mod tests {
                 history: Arc::clone(&self.history),
                 history_capacity: self.history_capacity,
                 outbound_tx: self.outbound_tx.clone(),
+                fanout_targets: Arc::clone(&self.fanout_targets),
                 metrics: Arc::clone(&self.metrics),
             }
         }
@@ -800,6 +949,199 @@ mod tests {
         let (size, capacity) = manager.history_stats().await;
         assert_eq!(size, 5);
         assert_eq!(capacity, 5);
+    }
+
+    #[tokio::test]
+    async fn test_fanout_targets_normalizes_input() {
+        let manager = ApprovalManager::new();
+        manager
+            .set_fanout_targets(vec![
+                (" telegram ".to_string(), " ops ".to_string()),
+                ("telegram".to_string(), "ops".to_string()),
+                (String::new(), "chat".to_string()),
+                ("web".to_string(), "   ".to_string()),
+            ])
+            .await;
+
+        assert_eq!(
+            manager.fanout_targets().await,
+            vec![("telegram".to_string(), "ops".to_string())]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_fanout_forwards_request_and_receipt_to_both_surfaces() {
+        let bus = crate::bus::MessageBus::new();
+        let mut rx = bus.subscribe_outbound();
+        let manager = ApprovalManager::with_outbound(bus.outbound_tx_clone());
+        manager
+            .set_fanout_targets(vec![("telegram".to_string(), "ops".to_string())])
+            .await;
+
+        let manager_clone = manager.clone_for_test();
+        let handle = tokio::spawn(async move {
+            manager_clone
+                .request_approval(
+                    "web:chat1".to_string(),
+                    "web".to_string(),
+                    "chat1".to_string(),
+                    "git push".to_string(),
+                    "/home/user".to_string(),
+                    "Test context".to_string(),
+                    5,
+                    None,
+                )
+                .await
+        });
+
+        // Both the origin chat and the configured remote chat must render the card.
+        let mut request_channels = Vec::new();
+        while request_channels.len() < 2 {
+            let msg = rx.recv().await.unwrap();
+            if let crate::bus::OutboundMessageType::ApprovalRequest { request } = &msg.message_type
+            {
+                assert_eq!(request.command, "git push");
+                request_channels.push(format!("{}:{}", msg.channel, msg.chat_id));
+            }
+        }
+        request_channels.sort();
+        assert_eq!(request_channels, vec!["telegram:ops", "web:chat1"]);
+
+        let request_id = manager.pending_requests().await[0].id.clone();
+        let outcome = manager
+            .submit_response(ApprovalResponse {
+                request_id: request_id.clone(),
+                approved: true,
+                responder: "telegram:ops".to_string(),
+                timestamp: Utc::now(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(outcome, SubmitOutcome::Delivered);
+        assert_eq!(handle.await.unwrap().unwrap(), ApprovalOutcome::Approved);
+
+        // The receipt closes the card on every surface, naming the remote responder.
+        let mut receipt_channels = Vec::new();
+        while receipt_channels.len() < 2 {
+            let msg = rx.recv().await.unwrap();
+            if let crate::bus::OutboundMessageType::ApprovalResolved { receipt } = &msg.message_type
+            {
+                assert_eq!(receipt.request_id, request_id);
+                assert!(receipt.approved());
+                assert_eq!(receipt.responder(), Some("telegram:ops"));
+                receipt_channels.push(format!("{}:{}", msg.channel, msg.chat_id));
+            }
+        }
+        receipt_channels.sort();
+        assert_eq!(receipt_channels, vec!["telegram:ops", "web:chat1"]);
+    }
+
+    #[tokio::test]
+    async fn test_second_answer_is_not_pending() {
+        let manager = ApprovalManager::new();
+        let manager_clone = manager.clone_for_test();
+        let handle = tokio::spawn(async move {
+            manager_clone
+                .request_approval(
+                    "web:chat1".to_string(),
+                    "web".to_string(),
+                    "chat1".to_string(),
+                    "git push".to_string(),
+                    "/home/user".to_string(),
+                    "Test context".to_string(),
+                    5,
+                    None,
+                )
+                .await
+        });
+
+        sleep(Duration::from_millis(100)).await;
+        let request_id = manager.pending_requests().await[0].id.clone();
+
+        let first = manager
+            .submit_response(ApprovalResponse {
+                request_id: request_id.clone(),
+                approved: true,
+                responder: "web:chat1".to_string(),
+                timestamp: Utc::now(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(first, SubmitOutcome::Delivered);
+        handle.await.unwrap().unwrap();
+
+        // Answering from a second surface afterwards must be reported, not silently dropped.
+        let second = manager
+            .submit_response(ApprovalResponse {
+                request_id,
+                approved: false,
+                responder: "telegram:ops".to_string(),
+                timestamp: Utc::now(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(second, SubmitOutcome::NotPending);
+    }
+
+    #[tokio::test]
+    async fn test_visible_pending_only_shows_own_session_or_fanout_target() {
+        let manager = ApprovalManager::new();
+        manager
+            .set_fanout_targets(vec![("telegram".to_string(), "ops".to_string())])
+            .await;
+
+        let manager_clone = manager.clone_for_test();
+        let first = tokio::spawn(async move {
+            manager_clone
+                .request_approval(
+                    "web:chat1".to_string(),
+                    "web".to_string(),
+                    "chat1".to_string(),
+                    "git push".to_string(),
+                    "/home/user".to_string(),
+                    "Test context".to_string(),
+                    2,
+                    None,
+                )
+                .await
+        });
+        let manager_clone = manager.clone_for_test();
+        let second = tokio::spawn(async move {
+            manager_clone
+                .request_approval(
+                    "discord:chat9".to_string(),
+                    "discord".to_string(),
+                    "chat9".to_string(),
+                    "git push --force".to_string(),
+                    "/home/user".to_string(),
+                    "Test context".to_string(),
+                    2,
+                    None,
+                )
+                .await
+        });
+
+        sleep(Duration::from_millis(100)).await;
+
+        // Unrelated chats see nothing, so guessing a request id cannot approve someone else's command.
+        assert!(manager
+            .visible_pending("slack:other", "slack", "other")
+            .await
+            .is_empty());
+
+        // The originating chat only sees its own request.
+        let own = manager.visible_pending("web:chat1", "web", "chat1").await;
+        assert_eq!(own.len(), 1);
+        assert_eq!(own[0].command, "git push");
+
+        // A fan-out target sees every request, newest last.
+        let ops = manager
+            .visible_pending("telegram:ops", "telegram", "ops")
+            .await;
+        assert_eq!(ops.len(), 2);
+
+        first.abort();
+        second.abort();
     }
 }
 

@@ -38,6 +38,24 @@ fn create_test_permission_policy() -> CommandPermissionPolicy {
     )
 }
 
+/// 等待某个 session 的审批请求真正进入 pending，并返回其真实 request_id。
+///
+/// request_approval 内部生成 UUID，测试不能自己编一个 id 去回答。
+async fn wait_for_pending(manager: &ApprovalManager, session_id: &str) -> String {
+    for _ in 0..200 {
+        if let Some(request) = manager
+            .pending_requests()
+            .await
+            .into_iter()
+            .find(|request| request.session_id == session_id)
+        {
+            return request.id;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("approval request for {session_id} never became pending");
+}
+
 #[tokio::test]
 async fn test_e2e_web_approval_allow_direct() {
     // 测试允许的命令直接执行
@@ -114,9 +132,12 @@ async fn test_e2e_web_approval_deny_direct() {
     let result = exec_tool.call(args).await;
 
     assert!(result.is_err(), "Denied command should be rejected");
-    let error_msg = result.unwrap_err().to_string();
+    let error_msg = result.unwrap_err().to_string().to_lowercase();
     assert!(
-        error_msg.contains("拒绝") || error_msg.contains("禁止"),
+        error_msg.contains("拒绝")
+            || error_msg.contains("禁止")
+            || error_msg.contains("rejected")
+            || error_msg.contains("denied"),
         "Error message should indicate denial: {}",
         error_msg
     );
@@ -135,25 +156,10 @@ async fn test_e2e_web_approval_manager_basic() {
     // 测试审批管理器的基本功能
     let approval_manager = Arc::new(ApprovalManager::new());
 
-    // 在后台任务中模拟审批响应
+    // 创建审批请求（request_id 由管理器生成）
     let manager_clone = approval_manager.clone();
-    let approval_task = tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(50)).await;
-
-        // 模拟用户批准
-        let response = synbot::tools::approval::ApprovalResponse {
-            request_id: "test_request_1".to_string(),
-            approved: true,
-            responder: "test_user".to_string(),
-            timestamp: chrono::Utc::now(),
-        };
-
-        manager_clone.submit_response(response).await
-    });
-
-    // 创建审批请求
     let request_task = tokio::spawn(async move {
-        approval_manager
+        manager_clone
             .request_approval(
                 "session_1".to_string(),
                 "web".to_string(),
@@ -167,16 +173,21 @@ async fn test_e2e_web_approval_manager_basic() {
             .await
     });
 
-    // 等待两个任务完成
-    let (approval_result, request_result) = tokio::join!(approval_task, request_task);
+    // 用真实 request_id 模拟用户批准
+    let request_id = wait_for_pending(&approval_manager, "session_1").await;
+    let submitted = approval_manager
+        .submit_response(synbot::tools::approval::ApprovalResponse {
+            request_id,
+            approved: true,
+            responder: "test_user".to_string(),
+            timestamp: chrono::Utc::now(),
+        })
+        .await;
+    assert!(submitted.is_ok(), "Approval submission should succeed");
 
-    assert!(
-        approval_result.is_ok(),
-        "Approval submission should succeed"
-    );
-    assert!(request_result.is_ok(), "Request should complete");
+    let outcome = request_task.await.unwrap().unwrap();
     assert_eq!(
-        request_result.unwrap().unwrap(),
+        outcome,
         ApprovalOutcome::Approved,
         "Request should be approved"
     );
@@ -187,24 +198,9 @@ async fn test_e2e_web_approval_rejection() {
     // 测试审批拒绝流程
     let approval_manager = Arc::new(ApprovalManager::new());
 
-    // 在后台任务中模拟拒绝响应
     let manager_clone = approval_manager.clone();
-    let approval_task = tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(50)).await;
-
-        let response = synbot::tools::approval::ApprovalResponse {
-            request_id: "test_request_2".to_string(),
-            approved: false,
-            responder: "test_user".to_string(),
-            timestamp: chrono::Utc::now(),
-        };
-
-        manager_clone.submit_response(response).await
-    });
-
-    // 创建审批请求
     let request_task = tokio::spawn(async move {
-        approval_manager
+        manager_clone
             .request_approval(
                 "session_2".to_string(),
                 "web".to_string(),
@@ -218,15 +214,20 @@ async fn test_e2e_web_approval_rejection() {
             .await
     });
 
-    let (approval_result, request_result) = tokio::join!(approval_task, request_task);
+    let request_id = wait_for_pending(&approval_manager, "session_2").await;
+    let submitted = approval_manager
+        .submit_response(synbot::tools::approval::ApprovalResponse {
+            request_id,
+            approved: false,
+            responder: "test_user".to_string(),
+            timestamp: chrono::Utc::now(),
+        })
+        .await;
+    assert!(submitted.is_ok(), "Approval submission should succeed");
 
-    assert!(
-        approval_result.is_ok(),
-        "Approval submission should succeed"
-    );
-    assert!(request_result.is_ok(), "Request should complete");
+    let outcome = request_task.await.unwrap().unwrap();
     assert_eq!(
-        request_result.unwrap().unwrap(),
+        outcome,
         ApprovalOutcome::Rejected,
         "Request should be rejected"
     );
@@ -267,35 +268,38 @@ async fn test_e2e_web_approval_history() {
     // 创建并完成多个审批请求
     for i in 0..3 {
         let manager_clone = approval_manager.clone();
-        let request_id = format!("history_request_{}", i);
 
-        let approval_task = tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(50)).await;
+        let request_task = tokio::spawn(async move {
+            manager_clone
+                .request_approval(
+                    format!("session_{}", i),
+                    "web".to_string(),
+                    format!("chat_{}", i),
+                    format!("command_{}", i),
+                    "/tmp".to_string(),
+                    format!("context_{}", i),
+                    5,
+                    None,
+                )
+                .await
+        });
 
-            let response = synbot::tools::approval::ApprovalResponse {
+        let session_id = format!("session_{}", i);
+        let request_id = wait_for_pending(&approval_manager, &session_id).await;
+        approval_manager
+            .submit_response(synbot::tools::approval::ApprovalResponse {
                 request_id,
                 approved: true,
                 responder: format!("user_{}", i),
                 timestamp: chrono::Utc::now(),
-            };
+            })
+            .await
+            .expect("submit response");
 
-            manager_clone.submit_response(response).await
-        });
-
-        let _ = approval_manager
-            .request_approval(
-                format!("session_{}", i),
-                "web".to_string(),
-                format!("chat_{}", i),
-                format!("command_{}", i),
-                "/tmp".to_string(),
-                format!("context_{}", i),
-                5,
-                None,
-            )
-            .await;
-
-        let _ = approval_task.await;
+        assert_eq!(
+            request_task.await.unwrap().unwrap(),
+            ApprovalOutcome::Approved
+        );
     }
 
     // 验证历史记录
@@ -314,29 +318,11 @@ async fn test_e2e_web_concurrent_approvals() {
 
     let mut handles = vec![];
 
+    // 先并发发起 3 个请求，再按真实 request_id 逐个回答
     for i in 0..3 {
         let manager_clone = approval_manager.clone();
 
         let handle = tokio::spawn(async move {
-            let request_id = format!("concurrent_{}", i);
-
-            // 在后台响应
-            let manager_inner = manager_clone.clone();
-            let request_id_clone = request_id.clone();
-            tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_millis(50)).await;
-
-                let response = synbot::tools::approval::ApprovalResponse {
-                    request_id: request_id_clone,
-                    approved: i % 2 == 0,
-                    responder: format!("user_{}", i),
-                    timestamp: chrono::Utc::now(),
-                };
-
-                let _ = manager_inner.submit_response(response).await;
-            });
-
-            // 请求审批
             manager_clone
                 .request_approval(
                     format!("session_{}", i),
@@ -353,6 +339,20 @@ async fn test_e2e_web_concurrent_approvals() {
         });
 
         handles.push(handle);
+    }
+
+    for i in 0..3 {
+        let session_id = format!("session_{}", i);
+        let request_id = wait_for_pending(&approval_manager, &session_id).await;
+        approval_manager
+            .submit_response(synbot::tools::approval::ApprovalResponse {
+                request_id,
+                approved: i % 2 == 0,
+                responder: format!("user_{}", i),
+                timestamp: chrono::Utc::now(),
+            })
+            .await
+            .expect("submit response");
     }
 
     // 等待所有请求完成

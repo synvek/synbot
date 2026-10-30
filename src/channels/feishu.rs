@@ -1282,6 +1282,14 @@ impl Channel for FeishuChannel {
                             .unwrap_or_else(|| FeishuChannel::format_approval_request(&request));
                         (content, vec![])
                     }
+                    crate::bus::OutboundMessageType::ApprovalResolved { receipt } => {
+                        // Answered elsewhere (or timed out): retire the card in this chat too.
+                        pending_approvals_clone
+                            .write()
+                            .await
+                            .retain(|_, (id, _)| id != &receipt.request_id);
+                        (approval_formatter::format_receipt(&receipt), vec![])
+                    }
                 };
                 if !content.is_empty() {
                     let started = Instant::now();
@@ -1491,6 +1499,9 @@ impl Channel for FeishuChannel {
                     .unwrap_or_else(|| approval_formatter::format_approval_request(request)),
                 vec![],
             ),
+            crate::bus::OutboundMessageType::ApprovalResolved { receipt } => {
+                (approval_formatter::format_receipt(receipt), vec![])
+            }
             crate::bus::OutboundMessageType::ToolProgress {
                 tool_name,
                 status,

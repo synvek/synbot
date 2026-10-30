@@ -135,6 +135,25 @@ describe('ApprovalRequest Component', () => {
     expect(screen.getByText('Command rejected by user')).toBeInTheDocument();
   });
 
+  it('credits the surface that answered when a receipt arrives', async () => {
+    const onApprove = vi.fn();
+    const onReject = vi.fn();
+
+    renderWithI18n(
+      <ApprovalRequest
+        request={mockRequest}
+        onApprove={onApprove}
+        onReject={onReject}
+        result={{ approved: true, message: 'approved', responder: 'telegram:123' }}
+      />
+    );
+
+    // Remote approvals must name the responder instead of echoing the raw payload.
+    // Locale files load lazily, so wait for the translated string.
+    expect(await screen.findByText('Approved by telegram:123')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^(approve|同意)$/i })).not.toBeInTheDocument();
+  });
+
   it('prevents multiple clicks on approve button', () => {
     const onApprove = vi.fn();
     const onReject = vi.fn();

@@ -727,6 +727,9 @@ async fn run_outbound_dingtalk(
                 }
                 (s, vec![])
             }
+            OutboundMessageType::ApprovalResolved { receipt } => {
+                (approval_formatter::format_receipt(&receipt), vec![])
+            }
             OutboundMessageType::ToolProgress {
                 tool_name,
                 status,

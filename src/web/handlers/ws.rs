@@ -43,6 +43,9 @@ pub enum WsServerMessage {
         request_id: String,
         approved: bool,
         message: String,
+        /// Set when another surface (phone, another tab) answered or the request timed out.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        responder: Option<String>,
     },
     Error {
         message: String,
@@ -326,6 +329,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WsSession {
                                         request_id,
                                         approved,
                                         message,
+                                        responder: None,
                                     },
                                 );
                             }),
@@ -376,6 +380,20 @@ impl Handler<OutboundMessageWrapper> for WsSession {
             }
             crate::bus::OutboundMessageType::ApprovalRequest { request } => {
                 Some(WsServerMessage::ApprovalRequest { request })
+            }
+            // Answered on another surface: retire the card in every open tab.
+            crate::bus::OutboundMessageType::ApprovalResolved { receipt } => {
+                let message = match &receipt.outcome {
+                    crate::bus::ApprovalReceiptOutcome::Approved { .. } => "approved",
+                    crate::bus::ApprovalReceiptOutcome::Rejected { .. } => "rejected",
+                    crate::bus::ApprovalReceiptOutcome::TimedOut => "timeout",
+                };
+                Some(WsServerMessage::ApprovalResult {
+                    request_id: receipt.request_id.clone(),
+                    approved: receipt.approved(),
+                    message: message.to_string(),
+                    responder: receipt.responder().map(String::from),
+                })
             }
             crate::bus::OutboundMessageType::ToolProgress {
                 tool_name,

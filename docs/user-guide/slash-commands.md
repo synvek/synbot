@@ -21,6 +21,9 @@ Synbot supports **slash commands** in chat: type a command (e.g. `/clear`) to co
 | `/commands` (or `/help`) | List available slash commands. |
 | `/skills` | List available skills: each subdirectory with `SKILL.md` under the skills directory, plus skills registered by loaded plugins. |
 | `/tools` | List available tools (name and short description), same formatting and set as the `list_tools` tool. |
+| `/pending` (or `/approvals`) | List approvals waiting for an answer in this chat. |
+| `/approve [id-prefix]` / `/reject [id-prefix]` | Answer a waiting approval from plain text. |
+| `/tasks` (or `/todo`) | Show the task board of the current project. |
 
 ---
 
@@ -91,6 +94,35 @@ List available slash commands and their short descriptions. This is safe to use 
 
 ---
 
+## Approvals and tasks
+
+These commands let you work from a phone or a second chat without buttons. They are safe while a turn is running, and they are the fastest way to settle an approval that was forwarded to another chat (see [Remote Collaboration](/developer-guide/remote-collab)).
+
+### `/pending` (or `/approvals`)
+
+Lists the approval requests waiting for an answer, oldest first, with a short id:
+
+```
+1 waiting approval:
+- 8f14e45f: `git push origin main` (/home/me/repo)
+```
+
+Only requests this chat may answer are listed: the ones it started, plus everything mirrored to it via `remoteCollab`.
+
+### `/approve` and `/reject`
+
+`/approve` answers the only waiting request; `/approve 8f14e45f` answers the one whose id starts with that prefix (the short id from `/pending` is enough). `/reject` works the same way.
+
+- If several requests are waiting and no prefix is given, the bot lists them instead of guessing.
+- The argument must look like a request id (hex digits and `-`, at most 36 characters). Anything else — `/approve please` — is treated as normal text for the agent, so a mistyped command cannot approve the wrong request.
+- If somebody already answered, the reply says so instead of failing silently.
+
+### `/tasks` (or `/todo`)
+
+Shows the task board of the current project at a glance, so you can check progress from a chat instead of opening the dashboard.
+
+---
+
 ## Summary
 
 | Action | Command |
@@ -103,5 +135,8 @@ List available slash commands and their short descriptions. This is safe to use 
 | Clear session and workflow | `/clear` |
 | List skills | `/skills` |
 | List tools | `/tools` |
+| List waiting approvals | `/pending` or `/approvals` |
+| Approve / reject an approval | `/approve [id-prefix]` / `/reject [id-prefix]` |
+| Show the task board | `/tasks` or `/todo` |
 
 All commands are matched by exact prefix with optional trailing spaces only. For more on workflows, see [Workflow Guide](./workflow.md).

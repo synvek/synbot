@@ -233,6 +233,18 @@
         }
       ]
     },
+    "remoteCollab": {
+      "description": "Remote collaboration (`remoteCollab`): mirror approvals to other chats/phones.",
+      "default": {
+        "forwardApprovals": false,
+        "targets": []
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/RemoteCollabConfig"
+        }
+      ]
+    },
     "sandboxMonitoring": {
       "description": "Optional sandbox monitoring (log_level, log_output for sandbox audit).",
       "default": null,
@@ -1945,6 +1957,43 @@
           ]
         }
       }
+    },
+    "RemoteCollabConfig": {
+      "description": "Remote collaboration: answer approvals started on another surface (desktop turn → phone).",
+      "type": "object",
+      "properties": {
+        "forwardApprovals": {
+          "description": "Mirror every approval request to `targets`. Off by default: a request only reaches the chat that started the turn. Any target can answer; the others get a receipt.",
+          "default": false,
+          "type": "boolean"
+        },
+        "targets": {
+          "description": "Chats that also receive approval requests when `forwardApprovals` is on.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RemoteCollabTarget"
+          }
+        }
+      }
+    },
+    "RemoteCollabTarget": {
+      "description": "One chat that mirrors approval requests (remote collaboration).",
+      "type": "object",
+      "properties": {
+        "channel": {
+          "description": "Channel instance name as used by the outbound bus (the channel's `name`, not its type).",
+          "type": "string"
+        },
+        "chatId": {
+          "description": "Chat id inside that channel (the same value the channel reports as `chat_id`).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "channel",
+        "chatId"
+      ]
     },
     "SandboxFilesystemConfig": {
       "type": "object",

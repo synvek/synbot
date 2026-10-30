@@ -42,6 +42,38 @@ pub struct ApprovalResponseMessage {
     pub response: ApprovalResponse,
 }
 
+/// How an approval request ended. One receipt is broadcast per request so every surface that
+/// rendered the card (web tab, phone, another channel) can retire it instead of waiting forever.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum ApprovalReceiptOutcome {
+    Approved { responder: String },
+    Rejected { responder: String },
+    TimedOut,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApprovalReceipt {
+    pub request_id: String,
+    /// Command the request was about; receipts are shown outside the original card context.
+    pub command: String,
+    pub outcome: ApprovalReceiptOutcome,
+}
+
+impl ApprovalReceipt {
+    pub fn approved(&self) -> bool {
+        matches!(self.outcome, ApprovalReceiptOutcome::Approved { .. })
+    }
+
+    pub fn responder(&self) -> Option<&str> {
+        match &self.outcome {
+            ApprovalReceiptOutcome::Approved { responder }
+            | ApprovalReceiptOutcome::Rejected { responder } => Some(responder),
+            ApprovalReceiptOutcome::TimedOut => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OutboundMessageType {
@@ -57,6 +89,10 @@ pub enum OutboundMessageType {
         tool_name: String,
         status: String,
         result_preview: String,
+    },
+    /// Broadcast once per approval request (answered anywhere, or timed out).
+    ApprovalResolved {
+        receipt: ApprovalReceipt,
     },
 }
 
@@ -114,6 +150,15 @@ impl OutboundMessage {
                 status,
                 result_preview,
             },
+            reply_to: None,
+        }
+    }
+
+    pub fn approval_resolved(channel: String, chat_id: String, receipt: ApprovalReceipt) -> Self {
+        Self {
+            channel,
+            chat_id,
+            message_type: OutboundMessageType::ApprovalResolved { receipt },
             reply_to: None,
         }
     }

@@ -46,6 +46,17 @@ pub async fn cmd_agent(
 
     // Create approval manager
     let approval_manager = std::sync::Arc::new(crate::tools::approval::ApprovalManager::new());
+    if cfg.remote_collab.forward_approvals {
+        approval_manager
+            .set_fanout_targets(
+                cfg.remote_collab
+                    .targets
+                    .iter()
+                    .map(|target| (target.channel.clone(), target.chat_id.clone()))
+                    .collect(),
+            )
+            .await;
+    }
 
     // Load permission policy if enabled
     let permission_policy = if cfg.tools.exec.permissions.enabled {
@@ -82,7 +93,7 @@ pub async fn cmd_agent(
         std::sync::Arc::clone(&shared_config),
         &ws,
         std::sync::Arc::clone(&subagent_mgr),
-        approval_manager,
+        std::sync::Arc::clone(&approval_manager),
         permission_policy,
         None,                   // no heartbeat/cron tools in CLI agent mode
         &tool_sandbox_delegate, // use the configured sandbox; Safe mode fails closed if unavailable
@@ -149,7 +160,7 @@ pub async fn cmd_agent(
 
     // Agent loop (CLI agent has no tool sandbox; hooks from plugins are used when configured).
     // Arc<Mutex<>> so /stop or /cancel can cancel a running agent task.
-    let agent_loop = crate::agent::r#loop::AgentLoop::new(
+    let mut agent_loop = crate::agent::r#loop::AgentLoop::new(
         completion_model,
         ws,
         skills_loader,
@@ -165,6 +176,8 @@ pub async fn cmd_agent(
         std::sync::Arc::clone(&shared_config),
     )
     .await;
+    // `/pending`, `/approve`, `/reject` answer the same requests the `exec` tool is waiting on.
+    agent_loop.set_approval_manager(std::sync::Arc::clone(&approval_manager));
     let loop_ref = std::sync::Arc::new(tokio::sync::Mutex::new(agent_loop));
 
     // If one-shot message, inject it and collect response
@@ -197,6 +210,12 @@ pub async fn cmd_agent(
                     crate::bus::OutboundMessageType::ApprovalRequest { request } => {
                         println!("Approval request: {}", request.command);
                     }
+                    crate::bus::OutboundMessageType::ApprovalResolved { receipt } => {
+                        println!(
+                            "Approval settled: {}",
+                            crate::channels::approval_formatter::format_receipt(&receipt)
+                        );
+                    }
                     crate::bus::OutboundMessageType::ToolProgress {
                         tool_name,
                         status,
@@ -227,6 +246,12 @@ pub async fn cmd_agent(
                     }
                     crate::bus::OutboundMessageType::ApprovalRequest { request } => {
                         println!("Approval request: {}", request.command);
+                    }
+                    crate::bus::OutboundMessageType::ApprovalResolved { receipt } => {
+                        println!(
+                            "Approval settled: {}",
+                            crate::channels::approval_formatter::format_receipt(&receipt)
+                        );
                     }
                     crate::bus::OutboundMessageType::ToolProgress {
                         tool_name,

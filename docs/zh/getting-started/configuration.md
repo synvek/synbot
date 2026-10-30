@@ -733,6 +733,33 @@ Synbot 可以从一到多个已发布的索引安装 WASM 插件包。`sources` 
 
 索引格式、版本需求语法、依赖解析与信任模型的边界见[插件市场](/zh/developer-guide/plugin-market)。
 
+## 远程协同配置 {#remote-collaboration-configuration}
+
+审批可以镜像到其它会话，因此在网页工作台发起的命令也能在手机上批准。转发默认关闭：审批只会发到发起该轮对话的会话。
+
+```json
+{
+  "remoteCollab": {
+    "forwardApprovals": true,
+    "targets": [
+      { "channel": "telegram", "chatId": "123456789" },
+      { "channel": "feishu", "chatId": "oc_1a2b3c" }
+    ]
+  }
+}
+```
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `forwardApprovals` | boolean | `false` | 把每个审批请求镜像到 `targets`。 |
+| `targets` | array | `[]` | 同时接收审批卡（以及结束卡片的回执）的会话列表。 |
+| `targets[].channel` | string | — | 渠道**实例名**（渠道配置里的 `name`，如 `telegram`），不是渠道类型。 |
+| `targets[].chatId` | string | — | 渠道上报的会话 id。 |
+
+`forwardApprovals: true` 至少需要一个目标；空白字段与重复的 `(channel, chatId)` 会在启动时校验失败。列表里的任一会话都可以用按钮或 `/approve` / `/reject` 回答，答案会记在该界面名下。
+
+总线 / WebSocket 协议、可见性规则与边界见[远程协同](/zh/developer-guide/remote-collab)。
+
 ## 日志配置
 
 ### 基础日志

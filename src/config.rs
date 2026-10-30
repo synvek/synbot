@@ -1881,6 +1881,31 @@ fn default_market_timeout_secs() -> u64 {
     30
 }
 
+/// One chat that mirrors approval requests (remote collaboration).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteCollabTarget {
+    /// Channel instance name as used by the outbound bus (the channel's `name`, not its type).
+    pub channel: String,
+    /// Chat id inside that channel (the same value the channel reports as `chat_id`).
+    pub chat_id: String,
+}
+
+/// Remote collaboration: answer approvals started on another surface (desktop turn → phone).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteCollabConfig {
+    /// Mirror every approval request to `targets`. Off by default: a request only reaches the
+    /// chat that started the turn. Any target can answer; the others get a receipt.
+    #[serde(default)]
+    pub forward_approvals: bool,
+    /// Chats that also receive approval requests when `forwardApprovals` is on.
+    #[serde(default)]
+    pub targets: Vec<RemoteCollabTarget>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
@@ -1934,6 +1959,9 @@ pub struct Config {
     /// Plugin market sources (`pluginMarket`). Empty keeps the market list empty.
     #[serde(default)]
     pub plugin_market: PluginMarketConfig,
+    /// Remote collaboration (`remoteCollab`): mirror approvals to other chats/phones.
+    #[serde(default)]
+    pub remote_collab: RemoteCollabConfig,
     /// Pairing approvals: supplement allowlist; matched by channel provider + MD5(chat_id) prefix.
     #[serde(default)]
     pub pairings: Vec<PairingEntry>,
@@ -2906,6 +2934,43 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ValidationError>> {
                 field: "pluginMarket.sources".into(),
                 value: source.clone(),
                 constraint: "sources must not be empty strings".into(),
+            });
+        }
+    }
+
+    // --- Remote collaboration ---
+    if config.remote_collab.forward_approvals && config.remote_collab.targets.is_empty() {
+        errors.push(ValidationError {
+            field: "remoteCollab.targets".into(),
+            value: "[]".into(),
+            constraint: "must list at least one target when forwardApprovals is true".into(),
+        });
+    }
+    let mut seen_targets = std::collections::HashSet::new();
+    for (index, target) in config.remote_collab.targets.iter().enumerate() {
+        if target.channel.trim().is_empty() {
+            errors.push(ValidationError {
+                field: format!("remoteCollab.targets[{index}].channel"),
+                value: target.channel.clone(),
+                constraint: "must not be empty".into(),
+            });
+        }
+        if target.chat_id.trim().is_empty() {
+            errors.push(ValidationError {
+                field: format!("remoteCollab.targets[{index}].chatId"),
+                value: target.chat_id.clone(),
+                constraint: "must not be empty".into(),
+            });
+        }
+        let key = (
+            target.channel.trim().to_lowercase(),
+            target.chat_id.trim().to_string(),
+        );
+        if !key.0.is_empty() && !key.1.is_empty() && !seen_targets.insert(key) {
+            errors.push(ValidationError {
+                field: format!("remoteCollab.targets[{index}]"),
+                value: format!("{}:{}", target.channel, target.chat_id),
+                constraint: "duplicate target".into(),
             });
         }
     }
@@ -3897,6 +3962,70 @@ mod tests {
         assert!(text.contains("\"pluginMarket\""));
         let round_tripped: Config = serde_json::from_str(&text).unwrap();
         assert_eq!(round_tripped.plugin_market, cfg.plugin_market);
+    }
+
+    #[test]
+    fn remote_collab_defaults_to_off() {
+        let cfg = Config::default();
+        assert!(!cfg.remote_collab.forward_approvals);
+        assert!(cfg.remote_collab.targets.is_empty());
+        assert!(validate_config(&cfg).is_ok());
+    }
+
+    #[test]
+    fn remote_collab_rejects_forwarding_without_targets() {
+        let mut cfg = valid_config();
+        cfg.remote_collab.forward_approvals = true;
+        let errors = validate_config(&cfg).expect_err("forwarding without targets");
+        assert!(find_error(&errors, "remoteCollab.targets").is_some());
+    }
+
+    #[test]
+    fn remote_collab_rejects_blank_and_duplicate_targets() {
+        let mut cfg = valid_config();
+        cfg.remote_collab.forward_approvals = true;
+        cfg.remote_collab.targets = vec![
+            RemoteCollabTarget {
+                channel: "  ".into(),
+                chat_id: "ops".into(),
+            },
+            RemoteCollabTarget {
+                channel: "telegram".into(),
+                chat_id: " ".into(),
+            },
+            RemoteCollabTarget {
+                channel: "telegram".into(),
+                chat_id: "42".into(),
+            },
+            RemoteCollabTarget {
+                channel: "Telegram".into(),
+                chat_id: "42".into(),
+            },
+        ];
+        let errors = validate_config(&cfg).expect_err("invalid targets");
+        assert!(find_error(&errors, "remoteCollab.targets[0].channel").is_some());
+        assert!(find_error(&errors, "remoteCollab.targets[1].chatId").is_some());
+        assert!(find_error(&errors, "remoteCollab.targets[3]").is_some());
+    }
+
+    #[test]
+    fn remote_collab_round_trips_through_json() {
+        let mut cfg = valid_config();
+        cfg.remote_collab.forward_approvals = true;
+        cfg.remote_collab.targets = vec![RemoteCollabTarget {
+            channel: "telegram".into(),
+            chat_id: "42".into(),
+        }];
+        let text = serde_json::to_string(&cfg).unwrap();
+        assert!(text.contains("\"remoteCollab\""));
+        assert!(text.contains("\"forwardApprovals\""));
+        assert!(text.contains("\"chatId\""));
+        let round_tripped: Config = serde_json::from_str(&text).unwrap();
+        assert!(round_tripped.remote_collab.forward_approvals);
+        assert_eq!(
+            round_tripped.remote_collab.targets,
+            cfg.remote_collab.targets
+        );
     }
 
     #[test]

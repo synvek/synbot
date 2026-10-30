@@ -515,6 +515,16 @@ impl AcpBridge {
                 }
                 None
             }
+            OutboundMessageType::ApprovalResolved { receipt } => {
+                self.send_session_update(
+                    cx,
+                    session_id,
+                    chat_to_session_update(crate::channels::approval_formatter::format_receipt(
+                        &receipt,
+                    )),
+                );
+                None
+            }
         }
     }
 
@@ -558,6 +568,15 @@ impl AcpBridge {
                         }
                         // Approvals after the run ended cannot be answered meaningfully.
                         OutboundMessageType::ApprovalRequest { .. } => {}
+                        OutboundMessageType::ApprovalResolved { receipt } => {
+                            self.send_session_update(
+                                cx,
+                                session_id,
+                                chat_to_session_update(
+                                    crate::channels::approval_formatter::format_receipt(&receipt),
+                                ),
+                            );
+                        }
                     }
                 }
                 _ => break,

@@ -332,6 +332,13 @@ impl Channel for TelegramChannel {
                                 .map(String::from)
                                 .unwrap_or_else(|| Self::format_approval_request(&request))
                         }
+                        crate::bus::OutboundMessageType::ApprovalResolved { receipt } => {
+                            // The request was answered on another surface (or timed out): drop the
+                            // pending entry so a late button press cannot "answer" a settled card.
+                            let mut pending = pending_approvals.write().await;
+                            pending.retain(|_, (id, _)| id != &receipt.request_id);
+                            approval_formatter::format_receipt(&receipt)
+                        }
                     };
                     for chunk in content.as_bytes().chunks(4000) {
                         let chunk_str = String::from_utf8_lossy(chunk);
@@ -733,6 +740,9 @@ impl Channel for TelegramChannel {
                 } else {
                     format!("🔧 {} — {}\n{}", tool_name, status, preview)
                 }
+            }
+            crate::bus::OutboundMessageType::ApprovalResolved { receipt } => {
+                approval_formatter::format_receipt(receipt)
             }
         };
         self.send_text(chat_id, &content).await

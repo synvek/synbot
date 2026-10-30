@@ -736,6 +736,33 @@ Install and update from the **Plugins → Market** tab of the Web dashboard, or 
 
 See [Plugin Market](/developer-guide/plugin-market) for the index format, version requirements, dependency resolution and the boundaries of the trust model.
 
+## Remote Collaboration Configuration
+
+Approvals can be mirrored to other chats, so a command started in the dashboard can be approved from your phone. Forwarding is off by default: an approval only reaches the chat that started the turn.
+
+```json
+{
+  "remoteCollab": {
+    "forwardApprovals": true,
+    "targets": [
+      { "channel": "telegram", "chatId": "123456789" },
+      { "channel": "feishu", "chatId": "oc_1a2b3c" }
+    ]
+  }
+}
+```
+
+| Field               | Type    | Default | Meaning |
+|---------------------|---------|---------|---------|
+| `forwardApprovals`  | boolean | `false` | Mirror every approval request to `targets`. |
+| `targets`           | array   | `[]`    | Chats that also receive approval cards (and the receipt that closes them). |
+| `targets[].channel` | string  | —       | Channel **instance name** (the channel config's `name`, e.g. `telegram`), not the channel type. |
+| `targets[].chatId`  | string  | —       | Chat id as the channel reports it. |
+
+`forwardApprovals: true` requires at least one target; blank fields and duplicate `(channel, chatId)` pairs fail validation at startup. Any listed chat can answer with a button or with `/approve` / `/reject`, and the answer is credited to that surface.
+
+See [Remote Collaboration](/developer-guide/remote-collab) for the bus/WebSocket contract, the visibility rules and the boundaries.
+
 ## Logging Configuration
 
 ### Basic Logging
