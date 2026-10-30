@@ -1,7 +1,7 @@
 use crate::config::WebConfig;
 use crate::web::handlers::{
     api, checkpoints, commands, delivery, git, index, market, plugins, projects, providers,
-    security, static_files, tasks, team, ws, ws_agent, ws_terminal,
+    security, static_files, tasks, team, workflows, ws, ws_agent, ws_terminal,
 };
 use crate::web::state::AppState;
 use crate::web::{BasicAuth, Cors};
@@ -80,6 +80,14 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig, state: AppState, auth: Bas
                 .route("/tasks", web::get().to(tasks::list_tasks))
                 .route("/tasks", web::put().to(tasks::replace_tasks))
                 .route("/tasks/{id}", web::patch().to(tasks::update_task))
+                .route("/workflows", web::get().to(workflows::list_workflows))
+                .route("/workflows", web::delete().to(workflows::delete_workflow))
+                .route("/workflows/detail", web::get().to(workflows::get_workflow))
+                .route("/workflows/run", web::post().to(workflows::run_workflow))
+                .route(
+                    "/workflows/cancel",
+                    web::post().to(workflows::cancel_workflow),
+                )
                 .route("/commands", web::get().to(commands::list_commands))
                 .route("/plugins", web::get().to(plugins::list_plugins))
                 .route("/plugins/install", web::post().to(plugins::install_plugin))

@@ -321,6 +321,9 @@ pub async fn cmd_start() -> Result<()> {
     // Turn snapshots, so `/api/checkpoints` sees exactly what the loop wrote.
     let checkpoints = agent_loop.checkpoints();
     let loop_ref = std::sync::Arc::new(tokio::sync::Mutex::new(agent_loop));
+    // The workflow runner needs the same loop (model + outbound bus) the chat uses, so
+    // `POST /api/workflows/run` resumes a run instead of duplicating the executor.
+    let loop_ref_for_web = std::sync::Arc::clone(&loop_ref);
     let runtime_status_for_agent = std::sync::Arc::clone(&runtime_status);
     tokio::spawn(async move {
         if let Err(e) = crate::agent::r#loop::AgentLoop::run_with_runtime_status(
@@ -458,6 +461,7 @@ pub async fn cmd_start() -> Result<()> {
         );
         // The workbench team panel supervises the same pool the tools spawn into.
         web_state.subagents = std::sync::Arc::clone(&subagent_mgr);
+        web_state.agent_loop = Some(loop_ref_for_web);
 
         // Run web server in the main task (it will block until Ctrl+C)
         tokio::select! {

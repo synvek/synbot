@@ -84,6 +84,35 @@ impl WorkflowStore {
         }
         Ok(())
     }
+
+    /// Every persisted workflow, newest first.
+    ///
+    /// One file per session means the folder *is* the run list (`/api/workflows`). A single
+    /// unreadable or half-written file must not hide the rest, so those are skipped rather than
+    /// propagated: the caller has no per-file error surface anyway.
+    pub async fn list_states(&self) -> Result<Vec<WorkflowState>> {
+        if !self.workflows_root.exists() {
+            return Ok(Vec::new());
+        }
+        let mut entries = fs::read_dir(&self.workflows_root)
+            .await
+            .context("read workflows root")?;
+        let mut states = Vec::new();
+        while let Some(entry) = entries.next_entry().await.context("read workflow entry")? {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            let Ok(data) = fs::read_to_string(&path).await else {
+                continue;
+            };
+            if let Ok(state) = serde_json::from_str::<WorkflowState>(&data) {
+                states.push(state);
+            }
+        }
+        states.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        Ok(states)
+    }
 }
 
 #[cfg(test)]
@@ -177,5 +206,32 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = WorkflowStore::new(dir.path());
         store.delete_state("nonexistent").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn list_states_returns_newest_first_and_skips_junk() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = WorkflowStore::new(dir.path());
+        let mut older = sample_state("telegram:1");
+        older.updated_at = chrono::Utc::now() - chrono::Duration::hours(1);
+        let newer = sample_state("telegram:2");
+        store.save_state("telegram:1", &older).await.unwrap();
+        store.save_state("telegram:2", &newer).await.unwrap();
+
+        // A corrupt file and a stray non-JSON file must not break the listing.
+        std::fs::write(dir.path().join("broken.json"), "{ not json").unwrap();
+        std::fs::write(dir.path().join("README.md"), "note").unwrap();
+
+        let states = store.list_states().await.unwrap();
+        assert_eq!(states.len(), 2);
+        assert_eq!(states[0].session_key, "telegram:2");
+        assert_eq!(states[1].session_key, "telegram:1");
+    }
+
+    #[tokio::test]
+    async fn list_states_empty_when_root_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = WorkflowStore::new(&dir.path().join("absent"));
+        assert!(store.list_states().await.unwrap().is_empty());
     }
 }

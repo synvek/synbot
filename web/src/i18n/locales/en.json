@@ -57,6 +57,7 @@
     "channels": "Channels",
     "sessions": "Sessions",
     "cron": "Cron Jobs",
+    "workflows": "Workflows",
     "roles": "Roles",
     "skills": "Skills",
     "plugins": "Plugins",
@@ -593,6 +594,45 @@
     "disconnected": "Disconnected",
     "error": "Error",
     "status": "Status"
+  },
+  "workflows": {
+    "title": "Workflows",
+    "description": "Persisted TurboWorkflow runs, created with /workflow in any chat. One run per session; an interrupted run resumes from its last finished step.",
+    "refresh": "Refresh",
+    "loading": "Loading…",
+    "empty": "No workflows yet",
+    "emptyHint": "Send /workflow <task> in any chat to create one; its progress shows up here.",
+    "selectHint": "Pick a run on the left to see its steps and outputs.",
+    "progress": "Progress",
+    "steps": "Steps",
+    "inputs": "Inputs",
+    "output": "Show output",
+    "noOutput": "This step has not produced output yet.",
+    "resume": "Resume",
+    "restart": "Restart from step 1",
+    "cancel": "Cancel",
+    "delete": "Delete record",
+    "confirmRestart": "Restarting clears the recorded step outputs. Continue?",
+    "confirmDelete": "Delete this workflow record? Chat history is untouched.",
+    "meta": "Updated {{updated}} · user input times out after {{timeout}} min",
+    "status": {
+      "running": "Running",
+      "waiting_user_input": "Waiting for input",
+      "paused": "Paused",
+      "completed": "Completed",
+      "failed": "Failed",
+      "cancelled": "Cancelled",
+      "waiting_timeout": "Input timed out"
+    },
+    "stepType": {
+      "llm": "Model step",
+      "user_input": "User input"
+    },
+    "stepStatus": {
+      "completed": "Completed",
+      "current": "Current",
+      "pending": "Pending"
+    }
   },
   "cron": {
     "title": "Cron Jobs",

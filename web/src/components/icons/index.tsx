@@ -36,6 +36,18 @@ export const CronIcon: React.FC<IconProps> = ({ className = '', size = 20 }) => 
   </svg>
 )
 
+/** Linear step sequence: a persisted workflow run (TurboWorkflow). */
+export const WorkflowIcon: React.FC<IconProps> = ({ className = '', size = 20 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className}>
+    <circle cx="5" cy="6" r="2"/>
+    <circle cx="5" cy="18" r="2"/>
+    <path d="M5 8.5v7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+    <path d="M8.5 6H14a3 3 0 0 1 3 3v6a3 3 0 0 0 3 3h.5" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round"/>
+    <rect x="8" y="4.5" width="4" height="3" rx="1"/>
+    <rect x="8" y="16.5" width="4" height="3" rx="1"/>
+  </svg>
+)
+
 export const RolesIcon: React.FC<IconProps> = ({ className = '', size = 20 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className}>
     <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>

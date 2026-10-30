@@ -15,7 +15,7 @@ use std::sync::Arc;
 use synbot::agent::subagent::{SubagentScope, SubagentStatus};
 use synbot::config::{ProviderApiStyle, ProviderEntry, WebAuthConfig};
 use synbot::tools::approval::ApprovalManager;
-use synbot::web::handlers::{api, providers, team};
+use synbot::web::handlers::{api, providers, team, workflows};
 use synbot::web::state::AppState;
 use synbot::web::BasicAuth;
 
@@ -1528,4 +1528,302 @@ async fn test_get_providers_flags_unknown_names_in_use() {
             provider["key"]
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// TurboWorkflow runs — `/api/workflows` (list / detail / run / cancel / delete)
+// ---------------------------------------------------------------------------
+
+/// Point the config at `root` so the handlers read the same folder the test writes to.
+async fn state_with_workflow_root(root: &std::path::Path) -> AppState {
+    let state = create_test_state().await;
+    {
+        let mut config = state.config.write().await;
+        config.workflow.workflows_root = Some(root.to_string_lossy().into_owned());
+    }
+    state
+}
+
+/// Two llm steps around a user_input step, stopped at the user_input one with 1 output recorded.
+fn workflow_fixture(session_key: &str) -> synbot::workflow::types::WorkflowState {
+    use synbot::workflow::types::{WorkflowDef, WorkflowState, WorkflowStatus, WorkflowStepDef};
+
+    let definition = WorkflowDef {
+        id: "wf-demo".into(),
+        name: "Ship the release".into(),
+        description: "tag and publish".into(),
+        inputs: Vec::new(),
+        steps: vec![
+            WorkflowStepDef {
+                id: "gather".into(),
+                step_type: "llm".into(),
+                description: "collect the requirements".into(),
+                input_key: None,
+            },
+            WorkflowStepDef {
+                id: "approve".into(),
+                step_type: "user_input".into(),
+                description: "ship it?".into(),
+                input_key: Some("approval".into()),
+            },
+            WorkflowStepDef {
+                id: "tag".into(),
+                step_type: "llm".into(),
+                description: "tag the commit".into(),
+                input_key: None,
+            },
+        ],
+    };
+
+    let mut state =
+        WorkflowState::new(session_key.to_string(), definition, Default::default(), 600);
+    state.status = WorkflowStatus::WaitingUserInput;
+    state.current_step_index = 1;
+    state.step_outputs = vec!["requirements gathered".into()];
+    state.inputs.insert("target".into(), "v1.2.3".into());
+    state
+}
+
+#[actix_web::test]
+async fn test_list_workflows_returns_persisted_runs_newest_first() {
+    let (_dir, root) = common::temp_workflow_root();
+    let store = synbot::workflow::store::WorkflowStore::new(&root);
+
+    let mut older = workflow_fixture("telegram:1");
+    older.updated_at = chrono::Utc::now() - chrono::Duration::hours(2);
+    let mut newer = workflow_fixture("telegram:2");
+    newer.updated_at = chrono::Utc::now() - chrono::Duration::minutes(1);
+    store.save_state("telegram:1", &older).await.unwrap();
+    store.save_state("telegram:2", &newer).await.unwrap();
+
+    let state = state_with_workflow_root(&root).await;
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(state))
+            .route("/api/workflows", web::get().to(workflows::list_workflows)),
+    )
+    .await;
+
+    let req = test::TestRequest::get().uri("/api/workflows").to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["success"], true);
+
+    let runs = body["data"]["workflows"]
+        .as_array()
+        .expect("workflows array");
+    assert_eq!(runs.len(), 2);
+    assert_eq!(runs[0]["sessionKey"], "telegram:2");
+    assert_eq!(runs[1]["sessionKey"], "telegram:1");
+    // camelCase for the workbench, snake_case only inside the persisted file.
+    assert_eq!(runs[0]["workflowId"], "wf-demo");
+    assert_eq!(runs[0]["name"], "Ship the release");
+    assert_eq!(runs[0]["status"], "waiting_user_input");
+    assert_eq!(runs[0]["stepsTotal"], 3);
+    assert_eq!(runs[0]["stepsCompleted"], 1);
+    assert_eq!(runs[0]["currentStepIndex"], 1);
+    assert_eq!(runs[0]["canResume"], true);
+}
+
+#[actix_web::test]
+async fn test_list_workflows_is_empty_before_anything_ran() {
+    let (_dir, root) = common::temp_workflow_root();
+    let state = state_with_workflow_root(&root).await;
+    let app = test::init_service(
+        App::new()
+            .app_data(web::Data::new(state))
+            .route("/api/workflows", web::get().to(workflows::list_workflows)),
+    )
+    .await;
+
+    let req = test::TestRequest::get().uri("/api/workflows").to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["data"]["workflows"].as_array().map(Vec::len), Some(0));
+}
+
+#[actix_web::test]
+async fn test_get_workflow_detail_marks_step_status() {
+    let (_dir, root) = common::temp_workflow_root();
+    synbot::workflow::store::WorkflowStore::new(&root)
+        .save_state("telegram:42", &workflow_fixture("telegram:42"))
+        .await
+        .unwrap();
+
+    let state = state_with_workflow_root(&root).await;
+    let app = test::init_service(App::new().app_data(web::Data::new(state)).route(
+        "/api/workflows/detail",
+        web::get().to(workflows::get_workflow),
+    ))
+    .await;
+
+    let req = test::TestRequest::get()
+        .uri("/api/workflows/detail?session=telegram%3A42")
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    let data = &body["data"];
+
+    // Detail flattens the summary, so the row fields stay available.
+    assert_eq!(data["sessionKey"], "telegram:42");
+    assert_eq!(data["userInputTimeoutSecs"], 600);
+    assert_eq!(data["inputs"]["target"], "v1.2.3");
+
+    let steps = data["steps"].as_array().expect("steps array");
+    assert_eq!(steps.len(), 3);
+    assert_eq!(steps[0]["id"], "gather");
+    assert_eq!(steps[0]["type"], "llm");
+    assert_eq!(steps[0]["status"], "completed");
+    assert_eq!(steps[0]["output"], "requirements gathered");
+    assert_eq!(steps[1]["type"], "user_input");
+    assert_eq!(steps[1]["status"], "current");
+    assert_eq!(steps[1]["output"], serde_json::Value::Null);
+    assert_eq!(steps[2]["status"], "pending");
+}
+
+#[actix_web::test]
+async fn test_get_workflow_requires_a_session_and_404s_unknown_ones() {
+    let (_dir, root) = common::temp_workflow_root();
+    let state = state_with_workflow_root(&root).await;
+    let app = test::init_service(App::new().app_data(web::Data::new(state)).route(
+        "/api/workflows/detail",
+        web::get().to(workflows::get_workflow),
+    ))
+    .await;
+
+    let req = test::TestRequest::get()
+        .uri("/api/workflows/detail")
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 400);
+
+    let req = test::TestRequest::get()
+        .uri("/api/workflows/detail?session=telegram%3A404")
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 404);
+}
+
+#[actix_web::test]
+async fn test_cancel_workflow_marks_it_cancelled_once() {
+    let (_dir, root) = common::temp_workflow_root();
+    let store = synbot::workflow::store::WorkflowStore::new(&root);
+    store
+        .save_state("telegram:42", &workflow_fixture("telegram:42"))
+        .await
+        .unwrap();
+
+    let state = state_with_workflow_root(&root).await;
+    let app = test::init_service(App::new().app_data(web::Data::new(state)).route(
+        "/api/workflows/cancel",
+        web::post().to(workflows::cancel_workflow),
+    ))
+    .await;
+
+    let req = test::TestRequest::post()
+        .uri("/api/workflows/cancel?session=telegram%3A42")
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["data"]["status"], "cancelled");
+    assert_eq!(body["data"]["canResume"], false);
+    // Persisted, not just returned: the chat path must refuse `/workflow continue` afterwards.
+    let saved = store.load_state("telegram:42").await.unwrap().unwrap();
+    assert_eq!(
+        saved.status,
+        synbot::workflow::types::WorkflowStatus::Cancelled
+    );
+
+    // Cancelling twice is a conflict, not a silent no-op.
+    let req = test::TestRequest::post()
+        .uri("/api/workflows/cancel?session=telegram%3A42")
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 409);
+}
+
+#[actix_web::test]
+async fn test_delete_workflow_forgets_the_run() {
+    let (_dir, root) = common::temp_workflow_root();
+    let store = synbot::workflow::store::WorkflowStore::new(&root);
+    store
+        .save_state("telegram:42", &workflow_fixture("telegram:42"))
+        .await
+        .unwrap();
+
+    let state = state_with_workflow_root(&root).await;
+    let app = test::init_service(App::new().app_data(web::Data::new(state)).route(
+        "/api/workflows",
+        web::delete().to(workflows::delete_workflow),
+    ))
+    .await;
+
+    let req = test::TestRequest::delete()
+        .uri("/api/workflows?session=telegram%3A42")
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert_eq!(body["data"]["deleted"], true);
+    assert!(store.load_state("telegram:42").await.unwrap().is_none());
+
+    // Deleting a run that is already gone stays successful (idempotent DELETE).
+    let req = test::TestRequest::delete()
+        .uri("/api/workflows?session=telegram%3A42")
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 200);
+}
+
+#[actix_web::test]
+async fn test_run_workflow_conflicts_when_finished_or_loop_is_missing() {
+    let (_dir, root) = common::temp_workflow_root();
+    let store = synbot::workflow::store::WorkflowStore::new(&root);
+
+    let mut finished = workflow_fixture("telegram:done");
+    finished.status = synbot::workflow::types::WorkflowStatus::Completed;
+    finished.step_outputs = vec!["a".into(), "b".into(), "c".into()];
+    store.save_state("telegram:done", &finished).await.unwrap();
+    store
+        .save_state("telegram:42", &workflow_fixture("telegram:42"))
+        .await
+        .unwrap();
+
+    // AppState::new leaves `agent_loop` empty, which is what an ACP-only daemon looks like.
+    let state = state_with_workflow_root(&root).await;
+    let app = test::init_service(App::new().app_data(web::Data::new(state)).route(
+        "/api/workflows/run",
+        web::post().to(workflows::run_workflow),
+    ))
+    .await;
+
+    // Finishing without `restart` is rejected before the loop is even looked at.
+    let req = test::TestRequest::post()
+        .uri("/api/workflows/run?session=telegram%3Adone")
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 409);
+    let body: serde_json::Value = test::read_body_json(resp).await;
+    assert!(body["error"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("restart"));
+
+    // A resumable run in a process without a loop cannot be executed at all.
+    let req = test::TestRequest::post()
+        .uri("/api/workflows/run?session=telegram%3A42")
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 500);
+
+    // Unknown session is a 404, not a 500.
+    let req = test::TestRequest::post()
+        .uri("/api/workflows/run?session=telegram%3A404")
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), 404);
 }

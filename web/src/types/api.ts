@@ -680,3 +680,44 @@ export interface ProviderCatalog {
   unknownInUse: { name: string; usedBy: string[] }[];
   defaults: { provider: string | null; model: string | null };
 }
+
+// TurboWorkflow runs (`/api/workflows`): the runner persists one state per session, keyed by
+// `channel:chat_id`. The workbench only reads that folder — plus resume/restart/cancel.
+export type WorkflowStatus =
+  | 'running'
+  | 'waiting_user_input'
+  | 'paused'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'waiting_timeout';
+
+export interface WorkflowSummary {
+  sessionKey: string;
+  workflowId: string;
+  name: string;
+  description: string;
+  status: WorkflowStatus;
+  currentStepIndex: number;
+  stepsTotal: number;
+  /** Steps whose output was already recorded. */
+  stepsCompleted: number;
+  createdAt: string;
+  updatedAt: string;
+  /** False once finished: the UI then offers restart instead of resume. */
+  canResume: boolean;
+}
+
+export interface WorkflowStepView {
+  id: string;
+  type: string;
+  description: string;
+  status: 'completed' | 'current' | 'pending';
+  output: string | null;
+}
+
+export interface WorkflowDetail extends WorkflowSummary {
+  inputs: Record<string, string>;
+  userInputTimeoutSecs: number;
+  steps: WorkflowStepView[];
+}

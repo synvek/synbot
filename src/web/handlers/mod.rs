@@ -14,6 +14,7 @@ pub mod security;
 pub mod static_files;
 pub mod tasks;
 pub mod team;
+pub mod workflows;
 pub mod ws;
 pub mod ws_agent;
 pub mod ws_terminal;

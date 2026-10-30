@@ -57,6 +57,7 @@
     "channels": "频道",
     "sessions": "会话",
     "cron": "定时任务",
+    "workflows": "工作流",
     "roles": "角色",
     "skills": "技能",
     "plugins": "插件",
@@ -593,6 +594,45 @@
     "disconnected": "未连接",
     "error": "错误",
     "status": "状态"
+  },
+  "workflows": {
+    "title": "工作流",
+    "description": "TurboWorkflow 的持久化运行：在任意聊天里用 /workflow 创建，每个会话一条，中断后可从断点继续。",
+    "refresh": "刷新",
+    "loading": "加载中…",
+    "empty": "还没有工作流",
+    "emptyHint": "在任意聊天里发送 /workflow <任务描述> 即可创建；运行状态会出现在这里。",
+    "selectHint": "从左侧选择一个运行，查看步骤与输出。",
+    "progress": "进度",
+    "steps": "步骤",
+    "inputs": "输入参数",
+    "output": "查看输出",
+    "noOutput": "该步骤尚未产生输出。",
+    "resume": "继续运行",
+    "restart": "从头重跑",
+    "cancel": "取消",
+    "delete": "删除记录",
+    "confirmRestart": "从头重跑会清空已有的步骤输出，确定继续？",
+    "confirmDelete": "删除该工作流的记录？聊天历史不受影响。",
+    "meta": "更新于 {{updated}} · 用户输入超时 {{timeout}} 分钟",
+    "status": {
+      "running": "运行中",
+      "waiting_user_input": "等待用户输入",
+      "paused": "已暂停",
+      "completed": "已完成",
+      "failed": "失败",
+      "cancelled": "已取消",
+      "waiting_timeout": "输入超时"
+    },
+    "stepType": {
+      "llm": "模型步骤",
+      "user_input": "用户输入"
+    },
+    "stepStatus": {
+      "completed": "已完成",
+      "current": "进行中",
+      "pending": "待执行"
+    }
   },
   "cron": {
     "title": "定时任务",

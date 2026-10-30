@@ -1008,13 +1008,34 @@ impl AgentLoop {
         state: WorkflowState,
         cancel: Option<CancellationToken>,
     ) -> tokio::task::JoinHandle<()> {
+        self.spawn_workflow_run_parts(
+            &msg.channel,
+            &msg.chat_id,
+            history_session_key,
+            session_key,
+            state,
+            cancel,
+        )
+    }
+
+    /// Channel/chat form of [`Self::spawn_workflow_run`], so the workbench can resume a workflow
+    /// without fabricating an `InboundMessage` (and without knowing this daemon's metadata).
+    fn spawn_workflow_run_parts(
+        &self,
+        channel: &str,
+        chat_id: &str,
+        history_session_key: Option<String>,
+        session_key: &str,
+        state: WorkflowState,
+        cancel: Option<CancellationToken>,
+    ) -> tokio::task::JoinHandle<()> {
         let store = self.workflow_store.clone();
         let model = Arc::clone(&self.model);
         let outbound_tx = self.outbound_tx.clone();
         let pending_input = self.pending_workflow_input.clone();
         let session_state = self.session_state.clone();
-        let channel = msg.channel.clone();
-        let chat_id = msg.chat_id.clone();
+        let channel = channel.to_string();
+        let chat_id = chat_id.to_string();
         let session_key = session_key.to_string();
         let cancel_for_run = cancel.as_ref().map(|t| t.clone());
         tokio::spawn(async move {
@@ -1036,6 +1057,46 @@ impl AgentLoop {
                 tracing::error!(session_key = %session_key, "Workflow run error: {e:#}");
             }
         })
+    }
+
+    /// Run or restart the persisted workflow of `session_key` from the workbench
+    /// (`POST /api/workflows/run`).
+    ///
+    /// Deliberately does **not** append to the chat history: the web UI is not a chat client for
+    /// that session, and re-deriving a history key from a synthetic message would risk mixing the
+    /// workflow output into the wrong conversation. Progress still reaches the originating chat
+    /// through `outbound_tx`, which is where the user expects to see it.
+    ///
+    /// `restart` clears inputs/step outputs and runs from step 0; otherwise the run continues from
+    /// `current_step_index`. A finished workflow cannot be resumed — that would silently produce a
+    /// "completed" state with no work done — so callers must ask for `restart` explicitly.
+    pub async fn web_run_workflow(&mut self, session_key: &str, restart: bool) -> Result<String> {
+        let (channel, chat_id) = split_session_key(session_key)
+            .ok_or_else(|| anyhow::anyhow!("session key must look like 'channel:chat_id'"))?;
+        let state = self
+            .workflow_store
+            .load_state(session_key)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("no workflow for this session"))?;
+        let state = if restart {
+            WorkflowState::new(
+                session_key.to_string(),
+                state.definition.clone(),
+                std::collections::HashMap::new(),
+                self.workflow_user_input_timeout_secs,
+            )
+        } else {
+            if state.is_finished() {
+                anyhow::bail!(
+                    "workflow already ended ({:?}); restart it instead of resuming",
+                    state.status
+                );
+            }
+            state
+        };
+        self.workflow_store.save_state(session_key, &state).await?;
+        let _ = self.spawn_workflow_run_parts(&channel, &chat_id, None, session_key, state, None);
+        Ok(if restart { "restarted" } else { "resumed" }.to_string())
     }
 
     /// Append the message to the channel's default agent session and persist to disk, without running completion.
@@ -2744,6 +2805,18 @@ async fn consume_stream(
 // Control-command formatting helpers
 // ---------------------------------------------------------------------------
 
+/// Split `channel:chat_id` (what [`InboundMessage::session_key`] produces, and what the workflow
+/// store keys on) back into its two halves. Only the **first** colon separates them: chat ids in
+/// the wild contain colons of their own (DingTalk conversation ids are the usual offender).
+fn split_session_key(session_key: &str) -> Option<(String, String)> {
+    let (channel, chat_id) = session_key.split_once(':')?;
+    let (channel, chat_id) = (channel.trim(), chat_id.trim());
+    if channel.is_empty() || chat_id.is_empty() {
+        return None;
+    }
+    Some((channel.to_string(), chat_id.to_string()))
+}
+
 /// First 8 characters of a request id: enough to disambiguate inside one chat.
 fn short_request_id(id: &str) -> &str {
     id.get(..8).unwrap_or(id)
@@ -2802,6 +2875,22 @@ mod control_command_format_tests {
             format_pending_approvals(&[]),
             "No approval is waiting for an answer."
         );
+    }
+
+    #[test]
+    fn session_key_splits_on_the_first_colon_only() {
+        assert_eq!(
+            split_session_key("telegram:12345"),
+            Some(("telegram".to_string(), "12345".to_string()))
+        );
+        // DingTalk conversation ids carry colons of their own.
+        assert_eq!(
+            split_session_key("dingtalk:cidABC==:staff:xyz"),
+            Some(("dingtalk".to_string(), "cidABC==:staff:xyz".to_string()))
+        );
+        assert_eq!(split_session_key("nocolon"), None);
+        assert_eq!(split_session_key(":chat"), None);
+        assert_eq!(split_session_key("web:"), None);
     }
 }
 

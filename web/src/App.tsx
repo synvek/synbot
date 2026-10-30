@@ -8,6 +8,7 @@ import Overview from './pages/Overview'
 import Channels from './pages/Channels'
 import Sessions from './pages/Sessions'
 import CronJobs from './pages/CronJobs'
+import Workflows from './pages/Workflows'
 import Roles from './pages/Roles'
 import Skills from './pages/Skills'
 import Plugins from './pages/Plugins'
@@ -38,6 +39,7 @@ function App() {
             <Route path="channels" element={<Channels />} />
             <Route path="sessions" element={<Sessions />} />
             <Route path="cron" element={<CronJobs />} />
+            <Route path="workflows" element={<Workflows />} />
             <Route path="roles" element={<Roles />} />
             <Route path="skills" element={<Skills />} />
             <Route path="plugins" element={<Plugins />} />

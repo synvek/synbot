@@ -81,6 +81,30 @@ The bot will parse it, show the step list, and ask you to confirm (in any langua
 - **`/status`** prints session and workflow state (e.g. `workflow_id`, `status`, `current_step_index`).
 - **`/clear`** clears the conversation and workflow state for this session (fresh start).
 
+## The Workflows page (web UI)
+
+`synbot start` serves a **Workflows** page (in the sidebar) that lists every persisted run across sessions, so you don’t have to remember which chat started one.
+
+- **List**: name, status, `stepsCompleted/stepsTotal` and the last update time, newest first.
+- **Detail**: each step with its status (`completed` / `current` / `pending`), the output it produced, and the inputs recorded so far. While a run is `running` or `waiting_user_input` the page re-reads it every 5 seconds.
+- **Resume**: continues from the last finished step, same as `/workflow continue`. **Restart from step 1** clears the recorded inputs and outputs and runs the definition again — offered once the run has ended.
+- **Cancel** marks a run as cancelled so `/workflow continue` refuses to pick it up again. A run that is *executing right now* finishes its current step first, because the runner owns its copy of the state.
+- **Delete record** removes the persisted state file. That session’s chat history is untouched.
+
+The page uses these endpoints:
+
+| Method and path | Purpose |
+|---|---|
+| `GET /api/workflows` | All runs, newest first, as `{ workflows: [...] }` |
+| `GET /api/workflows/detail?session=channel:chat_id` | One run with per-step status and outputs |
+| `POST /api/workflows/run?session=…&restart=false` | Resume; `restart=true` runs from step 0 |
+| `POST /api/workflows/cancel?session=…` | Mark a non-finished run as cancelled (409 once it ended) |
+| `DELETE /api/workflows?session=…` | Forget a run (idempotent) |
+
+Session keys travel in the query string because they contain a colon (`telegram:42`). `POST /api/workflows/run` answers **409** while a chat turn holds the agent — retry when it finishes — and when the run already ended without `restart=true`.
+
+Unlike a resume from the chat, a resume from the page does not write to the session’s conversation history: the web page is not a participant in that chat. Progress messages still go to the original channel.
+
 ## Configuration
 
 In your Synbot config you can set:
@@ -99,6 +123,7 @@ State is stored per session (one workflow state file per session key). Each step
 | Continue after pause/timeout | `/workflow continue` or `/resume` |
 | Stop current run | `/stop` |
 | See session + workflow state | `/status` |
+| Resume or restart from the browser | **Workflows** page in the web UI |
 | Clear session and workflow | `/clear` |
 
-All workflow-related messages are written to the session’s conversation history so context is preserved across steps and resumes.
+All workflow-related messages are written to the session’s conversation history so context is preserved across steps and resumes. The one exception is a resume started from the Workflows page, which leaves the history alone and only sends progress to the original channel.

@@ -64,6 +64,8 @@ impl ErrorResponse {
 pub enum ApiError {
     NotFound(String),
     BadRequest(String),
+    /// The request is well formed but the current state says no (e.g. the agent loop is busy).
+    Conflict(String),
     InternalError(String),
     Unauthorized(String),
 }
@@ -73,6 +75,7 @@ impl fmt::Display for ApiError {
         match self {
             ApiError::NotFound(msg) => write!(f, "Not found: {}", msg),
             ApiError::BadRequest(msg) => write!(f, "Bad request: {}", msg),
+            ApiError::Conflict(msg) => write!(f, "Conflict: {}", msg),
             ApiError::InternalError(msg) => write!(f, "Internal error: {}", msg),
             ApiError::Unauthorized(msg) => write!(f, "Unauthorized: {}", msg),
         }
@@ -84,6 +87,7 @@ impl ResponseError for ApiError {
         match self {
             ApiError::NotFound(_) => StatusCode::NOT_FOUND,
             ApiError::BadRequest(_) => StatusCode::BAD_REQUEST,
+            ApiError::Conflict(_) => StatusCode::CONFLICT,
             ApiError::InternalError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             ApiError::Unauthorized(_) => StatusCode::UNAUTHORIZED,
         }
@@ -94,6 +98,7 @@ impl ResponseError for ApiError {
         let code = match self {
             ApiError::NotFound(_) => "NOT_FOUND",
             ApiError::BadRequest(_) => "BAD_REQUEST",
+            ApiError::Conflict(_) => "CONFLICT",
             ApiError::InternalError(_) => "INTERNAL_ERROR",
             ApiError::Unauthorized(_) => "UNAUTHORIZED",
         };

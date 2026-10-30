@@ -38,6 +38,10 @@ pub struct AppState {
     /// Subagents (spawn / run_team / directive routing) shown in the workbench team panel.
     /// Startup replaces this with the pool the tools actually spawn into.
     pub subagents: Arc<tokio::sync::Mutex<crate::agent::subagent::SubagentManager>>,
+    /// The agent loop, so the workbench can resume or restart a persisted workflow
+    /// (`POST /api/workflows/run`) with the same model and event bus the chat uses.
+    /// `None` in tests and in instances that never start the loop (e.g. ACP-only).
+    pub agent_loop: Option<Arc<tokio::sync::Mutex<crate::agent::r#loop::AgentLoop>>>,
 }
 
 impl AppState {
@@ -78,6 +82,7 @@ impl AppState {
             subagents: Arc::new(tokio::sync::Mutex::new(
                 crate::agent::subagent::SubagentManager::new(4, None),
             )),
+            agent_loop: None,
         }
     }
 

@@ -40,6 +40,8 @@ import type {
   SecurityKind,
   PolicyExplain,
   ProviderCatalog,
+  WorkflowSummary,
+  WorkflowDetail,
 } from '../types/api';
 
 // API response wrapper from backend
@@ -378,6 +380,58 @@ export class ApiClient {
       throw new Error(response.data.error ?? 'Failed to update the task');
     }
     return response.data.data;
+  }
+
+  // TurboWorkflow runs: one persisted state per session, keyed by `channel:chat_id`.
+  async listWorkflows(): Promise<WorkflowSummary[]> {
+    const response = await this.client.get<ApiResponse<{ workflows: WorkflowSummary[] }>>(
+      '/api/workflows'
+    );
+    return response.data.data?.workflows ?? [];
+  }
+
+  async getWorkflow(session: string): Promise<WorkflowDetail> {
+    const response = await this.client.get<ApiResponse<WorkflowDetail>>('/api/workflows/detail', {
+      params: { session },
+    });
+    if (!response.data.success || !response.data.data) {
+      throw new Error(response.data.error ?? 'Failed to read the workflow');
+    }
+    return response.data.data;
+  }
+
+  /** Resume (`restart=false`) or rerun from step 0 (`restart=true`). */
+  async runWorkflow(session: string, restart = false): Promise<string> {
+    const response = await this.client.post<ApiResponse<{ sessionKey: string; action: string }>>(
+      '/api/workflows/run',
+      null,
+      { params: { session, restart } }
+    );
+    if (!response.data.success) {
+      throw new Error(response.data.error ?? 'Failed to start the workflow');
+    }
+    return response.data.data?.action ?? 'resumed';
+  }
+
+  async cancelWorkflow(session: string): Promise<WorkflowSummary> {
+    const response = await this.client.post<ApiResponse<WorkflowSummary>>(
+      '/api/workflows/cancel',
+      null,
+      { params: { session } }
+    );
+    if (!response.data.success || !response.data.data) {
+      throw new Error(response.data.error ?? 'Failed to cancel the workflow');
+    }
+    return response.data.data;
+  }
+
+  async deleteWorkflow(session: string): Promise<void> {
+    const response = await this.client.delete<ApiResponse<unknown>>('/api/workflows', {
+      params: { session },
+    });
+    if (!response.data.success) {
+      throw new Error(response.data.error ?? 'Failed to delete the workflow');
+    }
   }
 
   // Custom slash commands for the composer picker
