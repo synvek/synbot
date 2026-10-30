@@ -7,6 +7,7 @@
     "prepare:sidecar": "node scripts/copy-sidecar.mjs --debug --skip-build",
     "prepare:sidecar:release": "node scripts/copy-sidecar.mjs",
     "build:sidecar": "node scripts/copy-sidecar.mjs --skip-build",
+    "build:web": "npm --prefix ../web run build",
     "dev": "npm run prepare:sidecar && tauri dev",
     "build": "tauri build",
     "tauri": "tauri"

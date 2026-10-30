@@ -43,10 +43,7 @@ const Logs: React.FC = () => {
   }
 
   const startStreaming = () => {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${protocol}//${window.location.host}/ws/logs`
-    
-    const ws = new WebSocket(wsUrl)
+    const ws = new WebSocket(apiClient.wsUrl('/ws/logs'))
     
     ws.onopen = () => {
       setIsStreaming(true)

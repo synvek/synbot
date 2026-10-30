@@ -51,6 +51,11 @@ interface ApiResponse<T> {
 export class ApiClient {
   private client: AxiosInstance;
   private authHeader?: string;
+  /** Per-launch bearer secret handed over by the desktop shell (never persisted). */
+  private desktopToken?: string;
+  /** `ws://127.0.0.1:18888` in the desktop app; `undefined` means "same origin as the page". */
+  private wsBase?: string;
+  private desktop = false;
 
   constructor(baseUrl: string = '') {
     this.client = axios.create({
@@ -73,6 +78,13 @@ export class ApiClient {
       (response) => response,
       (error: AxiosError) => {
         if (error.response?.status === 401) {
+          // The desktop shell owns the credentials; a 401 there means the daemon restarted with a
+          // new secret, so bounce through a reload (which re-runs the IPC bootstrap) instead of
+          // showing the web login form.
+          if (this.desktop) {
+            window.location.reload();
+            return Promise.reject(error);
+          }
           // Clear auth and redirect to login
           this.clearAuth();
           window.location.href = '/login';
@@ -88,6 +100,40 @@ export class ApiClient {
     sessionStorage.setItem('auth', this.authHeader);
   }
 
+  /**
+   * Switches this client to the desktop transport: absolute loopback base URL, bearer token
+   * instead of the web password, and an explicit WebSocket origin.
+   */
+  configureDesktop(session: { apiBase: string; wsBase: string; token: string }): void {
+    this.desktop = true;
+    this.client.defaults.baseURL = session.apiBase;
+    this.wsBase = session.wsBase.replace(/\/+$/, '');
+    this.desktopToken = session.token;
+    this.authHeader = `Bearer ${session.token}`;
+    // A stale Basic header from an earlier web session would win over the token on reload.
+    sessionStorage.removeItem('auth');
+  }
+
+  /** True when the client was configured by the desktop shell. */
+  isDesktop(): boolean {
+    return this.desktop;
+  }
+
+  /**
+   * Absolute WebSocket URL for a `/ws/*` endpoint, carrying the desktop token as a query parameter
+   * (browsers cannot set headers on a handshake). On the web the URL stays origin-relative.
+   */
+  wsUrl(path: string): string {
+    const normalized = path.startsWith('/') ? path : `/${path}`;
+    const base =
+      this.wsBase ??
+      `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`;
+    const url = `${base}${normalized}`;
+    if (!this.desktopToken) return url;
+    const separator = url.includes('?') ? '&' : '?';
+    return `${url}${separator}token=${encodeURIComponent(this.desktopToken)}`;
+  }
+
   loadAuth(): boolean {
     const stored = sessionStorage.getItem('auth');
     if (stored) {
@@ -99,6 +145,7 @@ export class ApiClient {
 
   clearAuth(): void {
     this.authHeader = undefined;
+    this.desktopToken = undefined;
     sessionStorage.removeItem('auth');
   }
 

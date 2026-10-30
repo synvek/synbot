@@ -130,7 +130,8 @@ describe('Plugins', () => {
 
     expect(await screen.findByText('Demo plugin')).toBeInTheDocument();
     expect(screen.getByText('demo@1.2.3')).toBeInTheDocument();
-    expect(screen.getByText(/Signed|已签名/)).toBeInTheDocument();
+    // Locale files load lazily, so the translated trust badge can land a tick later.
+    expect(await screen.findByText(/Signed|已签名/)).toBeInTheDocument();
     expect(screen.getByText('fs:rw')).toBeInTheDocument();
     expect(screen.getByText('net:api.example.com')).toBeInTheDocument();
     expect(screen.getByText(/3\.0 MB/)).toBeInTheDocument();

@@ -138,6 +138,7 @@
     "globalWorkspace": "默认工作区（~/.synbot/workspace）",
     "open": "打开文件夹",
     "openPathPlaceholder": "输入文件夹路径…",
+    "browse": "选择文件夹…",
     "close": "移除",
     "switchNextTurn": "切换将在下一轮生效",
     "files": "文件",
@@ -788,5 +789,9 @@
     "timestamp": "时间戳",
     "target": "目标",
     "message": "消息"
+  },
+  "desktop": {
+    "turnFinishedTitle": "Synbot 已完成",
+    "turnFinishedBody": "本轮已结束，回到 Synbot 查看结果。"
   }
 }

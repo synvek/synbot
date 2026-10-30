@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo, lazy, Suspense } from 'react';
 import { useAgentSocket } from '../hooks/useAgentSocket';
 import { useI18n } from '../i18n/I18nContext';
+import { notifyDesktop } from '../desktop/bridge';
 import { apiClient } from '../api';
 import type { CommandInfo } from '../types/api';
 import ApprovalRequest from '../components/ApprovalRequest';
@@ -35,9 +36,9 @@ export default function Chat() {
   const [terminalMounted, setTerminalMounted] = useState(false);
   const [teamMounted, setTeamMounted] = useState(false);
   const { t } = useI18n();
-  
-  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${wsProtocol}//${window.location.host}/ws/agent`;
+
+  // Same-origin on the web, absolute loopback URL plus the desktop token in the app.
+  const wsUrl = useMemo(() => apiClient.wsUrl('/ws/agent'), []);
   const {
     connected,
     running,
@@ -54,6 +55,23 @@ export default function Chat() {
     url: wsUrl,
     autoConnect: true,
   });
+
+  /**
+   * Desktop only: a turn that finishes while the window is in the background raises a system
+   * notification, so long runs do not have to be watched.
+   */
+  const wasRunning = useRef(false);
+  useEffect(() => {
+    if (wasRunning.current && !running && document.hidden) {
+      const lastReply = [...messages].reverse().find((message) => message.role === 'assistant');
+      const preview = (lastReply?.content ?? '').replace(/\s+/g, ' ').trim().slice(0, 200);
+      void notifyDesktop(
+        t('desktop.turnFinishedTitle', 'Synbot 已完成'),
+        preview || t('desktop.turnFinishedBody', '本轮已结束，回到 Synbot 查看结果。')
+      );
+    }
+    wasRunning.current = running;
+  }, [running, messages, t]);
 
   /** Files reported by the most recent finished turn (`file_changed` events). */
   const lastTurnFiles = useMemo(() => {

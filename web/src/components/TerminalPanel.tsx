@@ -5,6 +5,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import { RotateCcw, X } from 'lucide-react';
 import { useI18n } from '../i18n/I18nContext';
+import { apiClient } from '../api';
 import { useTheme } from '../contexts/ThemeContext';
 import type { ColorScheme } from '../contexts/ThemeContext';
 
@@ -147,8 +148,8 @@ export default function TerminalPanel({ projectId, active, onClose }: TerminalPa
       // ignore: fitted again on the first resize/visibility change
     }
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/terminal`);
+    // Same-origin on the web; absolute loopback URL plus the desktop token in the app.
+    const ws = new WebSocket(apiClient.wsUrl('/ws/terminal'));
     wsRef.current = ws;
     setStatus('connecting');
     setMessage(null);

@@ -11,6 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import { apiClient } from '../api';
+import { isDesktop, onOpenProject, pickFolder } from '../desktop/bridge';
 import type {
   CheckpointFile,
   CheckpointView,
@@ -330,23 +331,39 @@ export default function ProjectPanel({
   const diffFile = diffPath ? shownFiles.find((f) => f.display_path === diffPath) : undefined;
   const doneTasks = tasks.filter((task) => task.status === 'completed').length;
 
+  const openProjectPath = useCallback(
+    async (rawPath: string) => {
+      const path = rawPath.trim();
+      if (!path) return;
+      setOpening(true);
+      setError(null);
+      try {
+        const opened = await apiClient.openProject(path);
+        await refreshProjects();
+        setOpenPath('');
+        setDirPath('');
+        onSelect(opened.id);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setOpening(false);
+      }
+    },
+    [onSelect, refreshProjects]
+  );
+
   const handleOpen = async (event: React.FormEvent) => {
     event.preventDefault();
-    const path = openPath.trim();
-    if (!path) return;
-    setOpening(true);
-    setError(null);
-    try {
-      const opened = await apiClient.openProject(path);
-      await refreshProjects();
-      setOpenPath('');
-      setDirPath('');
-      onSelect(opened.id);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setOpening(false);
-    }
+    await openProjectPath(openPath);
+  };
+
+  // The tray menu's "Open Project…" sends the folder it picked as a DOM event.
+  useEffect(() => onOpenProject((path) => void openProjectPath(path)), [openProjectPath]);
+
+  /** Desktop only: the path comes from the native folder picker instead of typing. */
+  const handleBrowse = async () => {
+    const path = await pickFolder();
+    if (path) await openProjectPath(path);
   };
 
   const handleClose = async () => {
@@ -471,6 +488,17 @@ export default function ProjectPanel({
             placeholder={t('project.openPathPlaceholder', '输入文件夹路径…')}
             className="flex-1 min-w-0 text-xs px-2 py-1 rounded border border-border bg-background text-text focus:outline-none focus:ring-1 focus:ring-primary"
           />
+          {isDesktop() && (
+            <button
+              type="button"
+              onClick={handleBrowse}
+              disabled={opening}
+              className="p-1.5 rounded border border-border text-text-secondary hover:text-text disabled:opacity-50"
+              title={t('project.browse', '选择文件夹…')}
+            >
+              <Folder size={13} />
+            </button>
+          )}
           <button
             type="submit"
             disabled={opening || !openPath.trim()}

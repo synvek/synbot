@@ -1,273 +1,89 @@
-use std::net::{SocketAddr, TcpStream};
-use std::path::PathBuf;
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
+//! Desktop shell for Synbot.
+//!
+//! Shape of the app after this module was rewritten: the window loads the *bundled* web UI
+//! (`frontendDist`) on a Tauri custom scheme, and the UI asks the shell over IPC where the
+//! local daemon is and which per-launch token to use. The daemon itself is still the `synbot`
+//! sidecar — it owns the agent runtime, channels, cron and the database — but it is no longer
+//! the page the user looks at, which is what makes CSP, tray, notifications and the native
+//! folder picker possible at all.
 
-use tauri::{AppHandle, Manager, RunEvent};
-use tauri_plugin_shell::process::{CommandChild, CommandEvent};
-use tauri_plugin_shell::ShellExt;
+mod commands;
+mod daemon;
+mod tray;
 
-const SYNBOT_HOST: &str = "127.0.0.1";
-const SYNBOT_PORT: u16 = 18888;
-#[cfg(not(debug_assertions))]
-const DASHBOARD_URL: &str = "http://127.0.0.1:18888";
-const HEALTH_TIMEOUT: Duration = Duration::from_secs(60);
-const HEALTH_INTERVAL: Duration = Duration::from_millis(500);
+use tauri::Manager;
+use tauri::RunEvent;
+use tauri_plugin_shell::process::CommandChild;
 
-struct SidecarState {
-    child: Mutex<Option<CommandChild>>,
+/// Shared shell state: where the daemon lives and the secret that proves the page may talk to it.
+pub struct DesktopState {
+    token: String,
+    endpoint: daemon::Endpoint,
+    daemon: daemon::DaemonProcess,
+    /// Serialises bootstrap attempts so a reload while the daemon is starting does not fork it.
+    start_gate: tokio::sync::Mutex<()>,
 }
 
-impl SidecarState {
-    fn new() -> Self {
+impl DesktopState {
+    pub fn new(token: String, endpoint: daemon::Endpoint) -> Self {
         Self {
-            child: Mutex::new(None),
+            token,
+            endpoint,
+            daemon: daemon::DaemonProcess::default(),
+            start_gate: tokio::sync::Mutex::new(()),
         }
     }
 
-    fn set_child(&self, child: CommandChild) {
-        *self.child.lock().expect("sidecar lock poisoned") = Some(child);
+    pub fn token(&self) -> &str {
+        &self.token
     }
 
-    #[allow(dead_code)]
-    fn kill(&self) {
-        if let Some(child) = self.child.lock().expect("sidecar lock poisoned").take() {
-            let _ = child.kill();
-        }
-    }
-}
-
-fn synbot_config_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".synbot")
-        .join("config.json")
-}
-
-fn synbot_config_exists() -> bool {
-    synbot_config_path().exists()
-}
-
-fn is_synbot_port_open() -> bool {
-    let addr: SocketAddr = format!("{SYNBOT_HOST}:{SYNBOT_PORT}")
-        .parse()
-        .expect("valid socket addr");
-    TcpStream::connect_timeout(&addr, Duration::from_secs(1)).is_ok()
-}
-
-async fn wait_for_synbot() -> Result<(), String> {
-    let deadline = Instant::now() + HEALTH_TIMEOUT;
-    while Instant::now() < deadline {
-        if is_synbot_port_open() {
-            return Ok(());
-        }
-        tokio::time::sleep(HEALTH_INTERVAL).await;
-    }
-    Err(format!(
-        "Timed out waiting for synbot on {SYNBOT_HOST}:{SYNBOT_PORT}. \
-         The port may be in use or synbot failed to start."
-    ))
-}
-
-/// Production shows progress on the bundled loading page; the dev window hosts the Vite UI
-/// instead, so there is nothing to update there.
-#[cfg(debug_assertions)]
-fn set_loading_status(_window: Option<&tauri::WebviewWindow>, _message: &str, _is_error: bool) {}
-
-#[cfg(not(debug_assertions))]
-fn set_loading_status(window: Option<&tauri::WebviewWindow>, message: &str, is_error: bool) {
-    let Some(window) = window else {
-        return;
-    };
-    let escaped = message
-        .replace('\\', "\\\\")
-        .replace('\'', "\\'")
-        .replace('\n', "\\n");
-    let spinner = if is_error { "none" } else { "block" };
-    let class = if is_error { " error" } else { "" };
-    let script = format!(
-        "document.getElementById('spinner').style.display='{spinner}';\
-         document.getElementById('status').className='{class}';\
-         document.getElementById('status').textContent='{escaped}';"
-    );
-    let _ = window.eval(&script);
-}
-
-#[cfg(not(debug_assertions))]
-async fn run_sidecar_command(app: &AppHandle, args: &[&str]) -> Result<(), String> {
-    let sidecar = app
-        .shell()
-        .sidecar("synbot")
-        .map_err(|e| format!("Failed to resolve synbot sidecar: {e}"))?
-        .args(args)
-        .env("SYNBOT_DESKTOP", "1");
-
-    let (mut rx, child) = sidecar
-        .spawn()
-        .map_err(|e| format!("Failed to spawn synbot sidecar: {e}"))?;
-
-    let mut exit_code: Option<i32> = None;
-    while let Some(event) = rx.recv().await {
-        match event {
-            CommandEvent::Terminated(payload) => {
-                exit_code = payload.code;
-                break;
-            }
-            CommandEvent::Error(err) => {
-                return Err(format!("Sidecar error: {err}"));
-            }
-            CommandEvent::Stdout(line) | CommandEvent::Stderr(line) => {
-                let _ = String::from_utf8_lossy(&line);
-            }
-            _ => {}
-        }
+    pub fn endpoint(&self) -> daemon::Endpoint {
+        self.endpoint.clone()
     }
 
-    let _ = child.kill();
-
-    match exit_code {
-        Some(0) | None => Ok(()),
-        Some(code) => Err(format!("synbot {} exited with code {code}", args.join(" "))),
-    }
-}
-
-#[cfg(not(debug_assertions))]
-async fn ensure_onboarded(app: &AppHandle, window: &tauri::WebviewWindow) -> Result<(), String> {
-    if synbot_config_exists() {
-        return Ok(());
+    pub fn start_gate(&self) -> &tokio::sync::Mutex<()> {
+        &self.start_gate
     }
 
-    set_loading_status(
-        Some(window),
-        "First run: initializing synbot workspace…",
-        false,
-    );
-    run_sidecar_command(app, &["onboard"]).await
-}
-
-async fn start_sidecar_daemon(
-    app: &AppHandle,
-    sidecar_state: &SidecarState,
-    window: Option<&tauri::WebviewWindow>,
-) -> Result<(), String> {
-    if is_synbot_port_open() {
-        return Ok(());
+    pub fn record_child(&self, child: CommandChild) {
+        self.daemon.record(child);
     }
 
-    set_loading_status(window, "Starting synbot daemon…", false);
-
-    let sidecar = app
-        .shell()
-        .sidecar("synbot")
-        .map_err(|e| format!("Failed to resolve synbot sidecar: {e}"))?
-        .args(["start"])
-        .env("SYNBOT_DESKTOP", "1");
-
-    let (mut rx, child) = sidecar
-        .spawn()
-        .map_err(|e| format!("Failed to spawn synbot start: {e}"))?;
-
-    sidecar_state.set_child(child);
-
-    tauri::async_runtime::spawn(async move {
-        while let Some(event) = rx.recv().await {
-            if matches!(event, CommandEvent::Terminated(_)) {
-                break;
-            }
-        }
-    });
-
-    wait_for_synbot().await
-}
-
-#[cfg(not(debug_assertions))]
-fn navigate_to_dashboard(window: &tauri::WebviewWindow) -> Result<(), String> {
-    let url: url::Url = DASHBOARD_URL
-        .parse()
-        .map_err(|e| format!("Invalid dashboard URL: {e}"))?;
-    window
-        .navigate(url)
-        .map_err(|e| format!("Failed to open dashboard: {e}"))
-}
-
-#[cfg(not(debug_assertions))]
-async fn bootstrap_production(app: AppHandle) {
-    let window = match app.get_webview_window("main") {
-        Some(window) => window,
-        None => return,
-    };
-
-    let sidecar_state = app.state::<SidecarState>();
-
-    if let Err(err) = ensure_onboarded(&app, &window).await {
-        set_loading_status(Some(&window), &err, true);
-        return;
-    }
-
-    if let Err(err) = start_sidecar_daemon(&app, sidecar_state.inner(), Some(&window)).await {
-        set_loading_status(Some(&window), &err, true);
-        return;
-    }
-
-    if let Err(err) = navigate_to_dashboard(&window) {
-        set_loading_status(Some(&window), &err, true);
-    }
-}
-
-/// `tauri dev` serves the UI from the Vite dev server (see `devUrl`), but `/api` and `/ws` are
-/// proxied to `SYNBOT_HOST:SYNBOT_PORT`, so the daemon still has to be running. Nothing spawns it
-/// otherwise, which made every request — including the login probe — fail against a dead port.
-#[cfg(debug_assertions)]
-async fn bootstrap_dev(app: AppHandle) {
-    if is_synbot_port_open() {
-        println!(
-            "[synbot-desktop] reusing the daemon already listening on {SYNBOT_HOST}:{SYNBOT_PORT}"
-        );
-        return;
-    }
-
-    if !synbot_config_exists() {
-        eprintln!(
-            "[synbot-desktop] no synbot config at {}; run `cargo run -- onboard` once, then restart",
-            synbot_config_path().display()
-        );
-        return;
-    }
-
-    println!("[synbot-desktop] starting local synbot daemon for the dev UI…");
-    let sidecar_state = app.state::<SidecarState>();
-    match start_sidecar_daemon(&app, sidecar_state.inner(), None).await {
-        Ok(()) => println!("[synbot-desktop] synbot daemon ready on {SYNBOT_HOST}:{SYNBOT_PORT}"),
-        Err(err) => eprintln!("[synbot-desktop] failed to start synbot daemon: {err}"),
+    pub fn kill_daemon(&self) {
+        self.daemon.kill();
     }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let endpoint = daemon::endpoint_from_file(&daemon::config_path());
+    let token = daemon::new_desktop_token();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .manage(SidecarState::new())
-        .setup(|_app| {
-            let handle = _app.handle().clone();
-
-            #[cfg(debug_assertions)]
-            tauri::async_runtime::spawn(async move {
-                bootstrap_dev(handle).await;
-            });
-
-            #[cfg(not(debug_assertions))]
-            tauri::async_runtime::spawn(async move {
-                bootstrap_production(handle).await;
-            });
-
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
+        .manage(DesktopState::new(token, endpoint))
+        .invoke_handler(tauri::generate_handler![
+            commands::desktop_bootstrap,
+            commands::desktop_pick_folder,
+            commands::desktop_notify,
+        ])
+        .setup(|app| {
+            let handle = app.handle().clone();
+            tray::install(&handle);
+            if let Some(window) = daemon::main_window(&handle) {
+                tray::install_close_to_tray(&window);
+            }
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
             if matches!(event, RunEvent::Exit) {
-                if let Some(state) = app.try_state::<SidecarState>() {
-                    state.kill();
+                if let Some(state) = app.try_state::<DesktopState>() {
+                    state.kill_daemon();
                 }
             }
         });

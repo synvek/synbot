@@ -1,5 +1,6 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, HashRouter, Routes, Route } from 'react-router-dom'
 import { I18nProvider } from './i18n/I18nContext'
+import { isDesktop } from './desktop/bridge'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
 import Login from './pages/Login'
@@ -16,9 +17,13 @@ import Logs from './pages/Logs'
 import Chat from './pages/Chat'
 
 function App() {
+  // The desktop app loads `index.html` from bundled assets, where nothing rewrites deep links to
+  // the SPA, so a reload on `/chat` would 404. Hash routing keeps every route reloadable.
+  const Router = isDesktop() ? HashRouter : BrowserRouter;
+
   return (
     <I18nProvider>
-      <BrowserRouter>
+      <Router>
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route
@@ -42,7 +47,7 @@ function App() {
             <Route path="chat" element={<Chat />} />
           </Route>
         </Routes>
-      </BrowserRouter>
+      </Router>
     </I18nProvider>
   )
 }

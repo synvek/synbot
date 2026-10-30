@@ -133,8 +133,13 @@ pub async fn start_web_server(config: WebConfig, state: AppState) -> Result<()> 
     let bind_addr = format!("{}:{}", config.host, config.port);
     tracing::info!("Starting web server on {}", bind_addr);
 
-    let auth = BasicAuth::new(config.auth.clone());
-    let cors = Cors::new(config.cors_origins.clone());
+    let auth = BasicAuth::from_env(config.auth.clone());
+    let mut cors = Cors::new(config.cors_origins.clone());
+    // The desktop shell loads the UI from a custom scheme, which makes every call cross-origin.
+    // Only widen CORS when the shell actually handed us its per-launch secret.
+    if auth.desktop_enabled() {
+        cors = cors.allow_desktop_origins();
+    }
 
     HttpServer::new(move || {
         let state = state.clone();

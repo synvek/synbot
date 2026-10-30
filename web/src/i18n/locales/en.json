@@ -138,6 +138,7 @@
     "globalWorkspace": "Default workspace (~/.synbot/workspace)",
     "open": "Open folder",
     "openPathPlaceholder": "Folder path…",
+    "browse": "Choose folder…",
     "close": "Remove",
     "switchNextTurn": "Switching applies to the next turn",
     "files": "Files",
@@ -788,5 +789,9 @@
     "timestamp": "Timestamp",
     "target": "Target",
     "message": "Message"
+  },
+  "desktop": {
+    "turnFinishedTitle": "Synbot finished a turn",
+    "turnFinishedBody": "The turn ended. Open Synbot to read the result."
   }
 }
