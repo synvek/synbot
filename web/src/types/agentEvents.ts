@@ -74,6 +74,8 @@ export type AgentEvent =
       total_tokens: number;
     }
   | { type: 'turn_finished'; turn_id: string; reason: TurnFinishReason; iterations: number }
+  // Control-command replies (`/clear`, `/stop`, `/tools`, …) — outside any turn.
+  | { type: 'notice'; message: string }
   | { type: 'error'; turn_id: string; message: string };
 
 /** Wire envelope: one sequenced event for a conversation. */

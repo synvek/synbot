@@ -293,6 +293,12 @@ export default function Chat() {
                       </div>
                     )}
                   </div>
+                ) : message.role === 'notice' ? (
+                  <div className="flex justify-start">
+                    <div className="max-w-[85%] rounded-lg border border-dashed border-border bg-surface px-3 py-2 text-xs text-text-secondary whitespace-pre-wrap break-words">
+                      {message.content}
+                    </div>
+                  </div>
                 ) : message.role === 'turn' ? (
                   <div className="flex flex-col items-center gap-1">
                     <span

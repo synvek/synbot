@@ -217,6 +217,19 @@ impl AgentLoop {
         info!("Agent loop started");
         let mut join_set: JoinSet<String> = JoinSet::new();
         let mut cancel_by_session: HashMap<String, CancellationToken> = HashMap::new();
+        // Clones the dispatcher needs to answer control commands. A running turn holds the loop
+        // lock until it ends, so `/stop` (and busy notices) must work without it — otherwise the
+        // only escape from a long turn would queue up behind that very turn.
+        let (outbound_tx, events, tools, skills, approval_manager) = {
+            let guard = loop_ref.lock().await;
+            (
+                guard.outbound_tx.clone(),
+                Arc::clone(&guard.events),
+                Arc::clone(&guard.tools),
+                Arc::clone(&guard.skills),
+                guard.approval_manager.clone(),
+            )
+        };
 
         loop {
             tokio::select! {
@@ -240,106 +253,133 @@ impl AgentLoop {
                     if let Some(cmd) = parse_control_command(&msg.content) {
                         match cmd {
                             ControlCommand::Stop => {
-                                let guard = loop_ref.lock().await;
+                                // No loop lock: the turn we are stopping is holding it.
                                 if let Some(token) = cancel_by_session.remove(&sk) {
                                     token.cancel();
-                                    let _ = guard.outbound_tx.send(OutboundMessage::chat(
-                                        msg.channel.clone(),
-                                        msg.chat_id.clone(),
+                                    Self::send_control_reply(
+                                        &outbound_tx,
+                                        &events,
+                                        &msg,
                                         "[Control] Stopped.".to_string(),
-                                        vec![],
-                                        None,
-                                    ));
+                                    );
                                 } else {
-                                    let _ = guard.outbound_tx.send(OutboundMessage::chat(
-                                        msg.channel.clone(),
-                                        msg.chat_id.clone(),
-                                        "[Control] Nothing is currently running. Use /status to check.".to_string(),
-                                        vec![],
-                                        None,
-                                    ));
+                                    Self::send_control_reply(
+                                        &outbound_tx,
+                                        &events,
+                                        &msg,
+                                        "[Control] Nothing is currently running. Use /status to check."
+                                            .to_string(),
+                                    );
                                 }
                                 continue;
                             }
                             ControlCommand::Status => {
-                                loop_ref.lock().await.handle_status(&msg).await.ok();
+                                match loop_ref.try_lock() {
+                                    Ok(guard) => {
+                                        guard.handle_status(&msg).await.ok();
+                                    }
+                                    Err(_) => Self::busy_notice(&outbound_tx, &events, &msg),
+                                }
                                 continue;
                             }
                             ControlCommand::Clear => {
-                                loop_ref.lock().await.handle_clear(&msg).await.ok();
+                                match loop_ref.try_lock() {
+                                    Ok(guard) => {
+                                        guard.handle_clear(&msg).await.ok();
+                                    }
+                                    Err(_) => Self::busy_notice(&outbound_tx, &events, &msg),
+                                }
                                 continue;
                             }
                             ControlCommand::Commands => {
-                                let _ = loop_ref.lock().await.outbound_tx.send(OutboundMessage::chat(
-                                    msg.channel.clone(),
-                                    msg.chat_id.clone(),
+                                Self::send_control_reply(
+                                    &outbound_tx,
+                                    &events,
+                                    &msg,
                                     format!("[Commands]\n{}", slash_commands_help_text()),
-                                    vec![],
-                                    None,
-                                ));
+                                );
                                 continue;
                             }
                             ControlCommand::Skills => {
-                                let guard = loop_ref.lock().await;
-                                let body = Self::skills_list_body(&guard.skills);
-                                let _ = guard.outbound_tx.send(OutboundMessage::chat(
-                                    msg.channel.clone(),
-                                    msg.chat_id.clone(),
+                                let body = Self::skills_list_body(&skills);
+                                Self::send_control_reply(
+                                    &outbound_tx,
+                                    &events,
+                                    &msg,
                                     format!("[Skills]\n{}", body),
-                                    vec![],
-                                    None,
-                                ));
+                                );
                                 continue;
                             }
                             ControlCommand::Tools => {
-                                let guard = loop_ref.lock().await;
                                 let body = crate::tools::list_tools::format_tool_list_markdown(
-                                    guard.tools.list_tools(),
+                                    tools.list_tools(),
                                 );
-                                let _ = guard.outbound_tx.send(OutboundMessage::chat(
-                                    msg.channel.clone(),
-                                    msg.chat_id.clone(),
+                                Self::send_control_reply(
+                                    &outbound_tx,
+                                    &events,
+                                    &msg,
                                     format!("[Tools]\n{}", body),
-                                    vec![],
-                                    None,
-                                ));
+                                );
                                 continue;
                             }
                             ControlCommand::Pending => {
-                                loop_ref
-                                    .lock()
-                                    .await
-                                    .handle_pending_approvals(&msg)
-                                    .await
-                                    .ok();
+                                Self::reply_pending_approvals(
+                                    &approval_manager,
+                                    &outbound_tx,
+                                    &events,
+                                    &msg,
+                                )
+                                .await
+                                .ok();
                                 continue;
                             }
                             ControlCommand::Approve { target } => {
-                                loop_ref
-                                    .lock()
-                                    .await
-                                    .handle_approval_answer(&msg, target, true)
-                                    .await
-                                    .ok();
+                                Self::reply_approval_answer(
+                                    &approval_manager,
+                                    &outbound_tx,
+                                    &events,
+                                    &msg,
+                                    target,
+                                    true,
+                                )
+                                .await
+                                .ok();
                                 continue;
                             }
                             ControlCommand::Reject { target } => {
-                                loop_ref
-                                    .lock()
-                                    .await
-                                    .handle_approval_answer(&msg, target, false)
-                                    .await
-                                    .ok();
+                                Self::reply_approval_answer(
+                                    &approval_manager,
+                                    &outbound_tx,
+                                    &events,
+                                    &msg,
+                                    target,
+                                    false,
+                                )
+                                .await
+                                .ok();
                                 continue;
                             }
                             ControlCommand::Tasks => {
-                                loop_ref.lock().await.handle_tasks(&msg).await.ok();
+                                match loop_ref.try_lock() {
+                                    Ok(guard) => {
+                                        guard.handle_tasks(&msg).await.ok();
+                                    }
+                                    Err(_) => Self::busy_notice(&outbound_tx, &events, &msg),
+                                }
                                 continue;
                             }
                             ControlCommand::Resume => {
+                                let loop_guard = match loop_ref.try_lock() {
+                                    Ok(guard) => guard,
+                                    Err(_) => {
+                                        Self::busy_notice(&outbound_tx, &events, &msg);
+                                        continue;
+                                    }
+                                };
                                 let wf_result = {
-                                    let loop_guard = loop_ref.lock().await;
-                                    if let Some(ref k) = loop_guard.resolve_history_session_key(&msg).await {
+                                    if let Some(ref k) =
+                                        loop_guard.resolve_history_session_key(&msg).await
+                                    {
                                         let _ = loop_guard
                                             .session_state
                                             .append_user_message_and_save(k, &msg.content)
@@ -347,6 +387,7 @@ impl AgentLoop {
                                     }
                                     loop_guard.handle_workflow_continue(&msg, &sk).await
                                 };
+                                drop(loop_guard);
                                 match wf_result {
                                     Ok(Some((handle, token, run_sk))) => {
                                         cancel_by_session.insert(run_sk.clone(), token);
@@ -356,15 +397,12 @@ impl AgentLoop {
                                         });
                                     }
                                     Ok(None) => {}
-                                    Err(e) => {
-                                        let _ = loop_ref.lock().await.outbound_tx.send(OutboundMessage::chat(
-                                            msg.channel.clone(),
-                                            msg.chat_id.clone(),
-                                            format!("[Workflow] Resume failed: {}", e),
-                                            vec![],
-                                            None,
-                                        ));
-                                    }
+                                    Err(e) => Self::send_control_reply(
+                                        &outbound_tx,
+                                        &events,
+                                        &msg,
+                                        format!("[Workflow] Resume failed: {}", e),
+                                    ),
                                 }
                                 continue;
                             }
@@ -372,13 +410,7 @@ impl AgentLoop {
                     }
 
                     if cancel_by_session.contains_key(&sk) {
-                        let _ = loop_ref.lock().await.outbound_tx.send(OutboundMessage::chat(
-                            msg.channel.clone(),
-                            msg.chat_id.clone(),
-                            format!("[Control] Busy. {}", busy_hint_commands()),
-                            vec![],
-                            None,
-                        ));
+                        Self::busy_notice(&outbound_tx, &events, &msg);
                         continue;
                     }
 
@@ -803,14 +835,7 @@ impl AgentLoop {
         let history_key = match self.resolve_history_session_key(msg).await {
             Some(k) => k,
             None => {
-                let _ = self.outbound_tx.send(OutboundMessage::chat(
-                    msg.channel.clone(),
-                    msg.chat_id.clone(),
-                    "[Status] Could not resolve session.".to_string(),
-                    vec![],
-                    None,
-                ));
-                return Ok(());
+                return self.reply_control(msg, "[Status] Could not resolve session.".to_string());
             }
         };
         let session_key = msg.session_key();
@@ -853,32 +878,42 @@ impl AgentLoop {
         } else {
             lines.push("Workflow: none for this session.".to_string());
         }
-        let text = lines.join("\n");
-        let _ = self.outbound_tx.send(OutboundMessage::chat(
-            msg.channel.clone(),
-            msg.chat_id.clone(),
-            format!("[Status]\n{}", text),
-            vec![],
-            None,
-        ));
-        Ok(())
+        self.reply_control(msg, format!("[Status]\n{}", lines.join("\n")))
     }
 
     /// Handle /pending: list the approvals this chat is allowed to answer.
     async fn handle_pending_approvals(&self, msg: &InboundMessage) -> Result<()> {
-        let Some(manager) = &self.approval_manager else {
-            return self.reply_control(
+        Self::reply_pending_approvals(&self.approval_manager, &self.outbound_tx, &self.events, msg)
+            .await
+    }
+
+    /// [`Self::handle_pending_approvals`] for callers that only hold clones: answering approvals
+    /// must not need the loop lock, because the turn waiting on the approval is holding it.
+    async fn reply_pending_approvals(
+        approval_manager: &Option<Arc<crate::tools::approval::ApprovalManager>>,
+        outbound_tx: &broadcast::Sender<OutboundMessage>,
+        events: &EventBus,
+        msg: &InboundMessage,
+    ) -> Result<()> {
+        let Some(manager) = approval_manager else {
+            Self::send_control_reply(
+                outbound_tx,
+                events,
                 msg,
                 "[Pending] Approval manager is not wired in this instance.".to_string(),
             );
+            return Ok(());
         };
         let pending = manager
             .visible_pending(&msg.session_key(), &msg.channel, &msg.chat_id)
             .await;
-        self.reply_control(
+        Self::send_control_reply(
+            outbound_tx,
+            events,
             msg,
             format!("[Pending]\n{}", format_pending_approvals(&pending)),
-        )
+        );
+        Ok(())
     }
 
     /// Handle /approve and /reject: answer a waiting request from plain text, so a phone without
@@ -889,11 +924,36 @@ impl AgentLoop {
         target: Option<String>,
         approved: bool,
     ) -> Result<()> {
-        let Some(manager) = &self.approval_manager else {
-            return self.reply_control(
+        Self::reply_approval_answer(
+            &self.approval_manager,
+            &self.outbound_tx,
+            &self.events,
+            msg,
+            target,
+            approved,
+        )
+        .await
+    }
+
+    /// [`Self::handle_approval_answer`] without the loop lock: the turn that is waiting for this
+    /// answer is the one holding that lock, so `/approve` typed as text would otherwise deadlock
+    /// until the request timed out.
+    async fn reply_approval_answer(
+        approval_manager: &Option<Arc<crate::tools::approval::ApprovalManager>>,
+        outbound_tx: &broadcast::Sender<OutboundMessage>,
+        events: &EventBus,
+        msg: &InboundMessage,
+        target: Option<String>,
+        approved: bool,
+    ) -> Result<()> {
+        let Some(manager) = approval_manager else {
+            Self::send_control_reply(
+                outbound_tx,
+                events,
                 msg,
                 "[Approval] Approval manager is not wired in this instance.".to_string(),
             );
+            return Ok(());
         };
         let pending = manager
             .visible_pending(&msg.session_key(), &msg.channel, &msg.chat_id)
@@ -937,7 +997,8 @@ impl AgentLoop {
                 format_pending_approvals(many)
             ),
         };
-        self.reply_control(msg, reply)
+        Self::send_control_reply(outbound_tx, events, msg, reply);
+        Ok(())
     }
 
     /// Handle /tasks: show the task board of the project this chat works in.
@@ -952,14 +1013,51 @@ impl AgentLoop {
 
     /// Send a control-command reply back to the chat that asked.
     fn reply_control(&self, msg: &InboundMessage, text: String) -> Result<()> {
-        let _ = self.outbound_tx.send(OutboundMessage::chat(
+        Self::send_control_reply(&self.outbound_tx, &self.events, msg, text);
+        Ok(())
+    }
+
+    /// Control replies travel on two paths: the outbound bus (channels such as Feishu/DingTalk)
+    /// and the event bus (the web workbench, which drops plain outbound chat text so streamed
+    /// turn output is not duplicated). Without the event, `/clear`, `/stop` and `/tools` would
+    /// reply into a void and the UI would look frozen.
+    fn send_control_reply(
+        outbound_tx: &broadcast::Sender<OutboundMessage>,
+        events: &EventBus,
+        msg: &InboundMessage,
+        text: String,
+    ) {
+        events.publish(
+            &msg.channel,
+            &msg.chat_id,
+            AgentEvent::Notice {
+                message: text.clone(),
+            },
+        );
+        let _ = outbound_tx.send(OutboundMessage::chat(
             msg.channel.clone(),
             msg.chat_id.clone(),
             text,
             vec![],
             None,
         ));
-        Ok(())
+    }
+
+    /// Tells the user this chat is busy instead of queueing behind a running turn.
+    ///
+    /// A turn holds the loop lock until it ends, so blocking here would freeze the receive loop
+    /// and with it the very `/stop` that is supposed to end the turn.
+    fn busy_notice(
+        outbound_tx: &broadcast::Sender<OutboundMessage>,
+        events: &EventBus,
+        msg: &InboundMessage,
+    ) {
+        Self::send_control_reply(
+            outbound_tx,
+            events,
+            msg,
+            format!("[Control] Busy. {}", busy_hint_commands()),
+        );
     }
 
     /// Handle /clear: clear session (same as reset_session tool) and workflow state for this chat.
@@ -967,36 +1065,18 @@ impl AgentLoop {
         let history_key = match self.resolve_history_session_key(msg).await {
             Some(k) => k,
             None => {
-                let _ = self.outbound_tx.send(OutboundMessage::chat(
-                    msg.channel.clone(),
-                    msg.chat_id.clone(),
-                    "[Clear] Could not resolve session.".to_string(),
-                    vec![],
-                    None,
-                ));
-                return Ok(());
+                return self.reply_control(msg, "[Clear] Could not resolve session.".to_string());
             }
         };
         let session_key = msg.session_key();
         if let Err(e) = self.session_state.clear_session(&history_key).await {
-            let _ = self.outbound_tx.send(OutboundMessage::chat(
-                msg.channel.clone(),
-                msg.chat_id.clone(),
-                format!("[Clear] Failed: {}.", e),
-                vec![],
-                None,
-            ));
-            return Ok(());
+            return self.reply_control(msg, format!("[Clear] Failed: {}.", e));
         }
         let _ = self.workflow_store.delete_state(&session_key).await;
-        let _ = self.outbound_tx.send(OutboundMessage::chat(
-            msg.channel.clone(),
-            msg.chat_id.clone(),
+        self.reply_control(
+            msg,
             "[Clear] Session cleared. Conversation will continue as a fresh chat.".to_string(),
-            vec![],
-            None,
-        ));
-        Ok(())
+        )
     }
 
     /// Spawns workflow run and returns the JoinHandle so the caller can wait or cancel via token.
@@ -3468,6 +3548,61 @@ mod plan_event_tests {
             plan.1[1].status,
             crate::agent::events::PlanStepStatus::Pending
         );
+    }
+}
+
+#[cfg(test)]
+mod control_reply_tests {
+    use super::*;
+
+    fn inbound(content: &str) -> InboundMessage {
+        InboundMessage {
+            channel: "web".to_string(),
+            sender_id: "web_admin".to_string(),
+            chat_id: "web_admin".to_string(),
+            content: content.to_string(),
+            timestamp: chrono::Utc::now(),
+            media: vec![],
+            metadata: serde_json::Value::Null,
+        }
+    }
+
+    #[tokio::test]
+    async fn control_replies_reach_the_event_bus_and_the_outbound_channel() {
+        let events = EventBus::new();
+        let (outbound_tx, mut outbound_rx) = broadcast::channel(8);
+        let mut event_rx = events.subscribe();
+
+        AgentLoop::send_control_reply(
+            &outbound_tx,
+            &events,
+            &inbound("/clear"),
+            "[Clear] Session cleared.".to_string(),
+        );
+
+        let chat = outbound_rx.try_recv().expect("outbound chat message");
+        assert_eq!(chat.chat_id, "web_admin");
+        match chat.message_type {
+            crate::bus::OutboundMessageType::Chat { content, .. } => {
+                assert_eq!(content, "[Clear] Session cleared.");
+            }
+            other => panic!("unexpected outbound message: {other:?}"),
+        }
+
+        // The web workbench drops outbound chat text, so the notice is the only thing it sees.
+        let published = event_rx.try_recv().expect("notice event");
+        match published.event {
+            AgentEvent::Notice { message } => assert_eq!(message, "[Clear] Session cleared."),
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn busy_notices_name_the_commands_that_still_work() {
+        let hint = busy_hint_commands();
+        for command in ["/stop", "/status", "/clear"] {
+            assert!(hint.contains(command), "{command} missing from: {hint}");
+        }
     }
 }
 

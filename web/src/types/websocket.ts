@@ -37,7 +37,7 @@ export interface HistoryMessage {
 
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant' | 'approval' | 'tool_call' | 'tool_result' | 'turn';
+  role: 'user' | 'assistant' | 'approval' | 'tool_call' | 'tool_result' | 'turn' | 'notice';
   content: string;
   timestamp: string;
   approvalRequest?: ApprovalRequest;

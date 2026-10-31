@@ -9,6 +9,7 @@ import {
   SubagentInfo,
 } from '../types/agentEvents';
 import { ChatMessage, HistoryMessage } from '../types/websocket';
+import { endsTurn, isControlCommand } from './controlCommands';
 
 interface UseAgentSocketOptions {
   url: string;
@@ -241,12 +242,29 @@ export function useAgentSocket({
         }
 
         case 'error':
+          // Terminal for the turn (`turn_finished` follows); clearing here as well keeps the
+          // composer usable if a turn ever dies without publishing its end event.
+          setRunning(false);
           setMessages((prev) => [
             ...prev,
             {
               id: `error-${event.turn_id}-${Date.now()}`,
               role: 'assistant',
               content: `[error] ${event.message}`,
+              timestamp: new Date().toISOString(),
+            },
+          ]);
+          break;
+
+        // Control-command replies live outside any turn (`src/agent/events.rs`): show them as a
+        // system line instead of dropping them, which made `/clear` look like a freeze.
+        case 'notice':
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `notice-${Date.now()}-${prev.length}`,
+              role: 'notice',
+              content: event.message,
               timestamp: new Date().toISOString(),
             },
           ]);
@@ -456,7 +474,11 @@ export function useAgentSocket({
         console.error('Agent socket is not connected');
         return;
       }
-      setRunning(true);
+      // Only a real turn is bracketed by `turn_started`/`turn_finished`. Control commands are
+      // answered inline by the daemon, so setting `running` for them would never be cleared and
+      // would leave the composer disabled (`/clear` was the worst case: nothing was running).
+      if (endsTurn(content)) setRunning(false);
+      else if (!isControlCommand(content)) setRunning(true);
       setMessages((prev) => [
         ...prev,
         {
@@ -472,6 +494,9 @@ export function useAgentSocket({
 
   const cancel = useCallback(() => {
     sendRaw({ type: 'cancel' });
+    // A cancelled turn publishes `turn_finished`; `/stop` with nothing running only answers with a
+    // notice, so clearing the flag here is what un-sticks a UI that already thinks it is running.
+    setRunning(false);
   }, [sendRaw]);
 
   const sendApprovalResponse = useCallback(

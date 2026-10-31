@@ -21,6 +21,8 @@
 //! - `{"type":"history","messages":[...]}` — same shape as v1, sent once on connect
 //! - `{"type":"replay","events":[...]}` — missed events, oldest first
 //! - `{"type":"event","seq":13,"channel":"web","chat_id":"web_admin","event":{"type":"message_delta",...}}`
+//! - `{"type":"event",...,"event":{"type":"notice","message":"[Clear] Session cleared."}}` —
+//!   control-command replies (`/clear`, `/stop`, `/tools`, …), which belong to no turn
 //! - `{"type":"approval_request","request":{...}}`
 //! - `{"type":"approval_result","request_id":"...","approved":true,"message":"approved"}`
 //! - `{"type":"pong"}` / `{"type":"error","message":"..."}`

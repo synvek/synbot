@@ -162,6 +162,10 @@ pub enum AgentEvent {
         reason: TurnFinishReason,
         iterations: u32,
     },
+    /// Out-of-band text for this conversation: a control-command reply (`/clear`, `/stop`,
+    /// `/tools`, …). It belongs to no turn — the web workbench drops plain outbound chat text to
+    /// avoid duplicating streamed answers, so control replies need this path to be visible at all.
+    Notice { message: String },
     /// A recoverable or terminal error for this turn.
     Error { turn_id: String, message: String },
 }
@@ -363,6 +367,14 @@ mod tests {
         assert!(json.contains("\"state\":\"failed\""));
         // A running subagent has no `finished_at`, so the field is omitted rather than null.
         assert!(!json.contains("finished_at"), "json was {json}");
+
+        // A control-command reply travels outside any turn, so it carries no `turn_id`.
+        let notice = AgentEvent::Notice {
+            message: "[Clear] Session cleared.".to_string(),
+        };
+        let json = serde_json::to_string(&notice).unwrap();
+        assert!(json.contains("\"type\":\"notice\""));
+        assert!(!json.contains("turn_id"), "json was {json}");
 
         // Every variant must round-trip, so the UI contract stays in sync.
         let envelope = SequencedEvent {
