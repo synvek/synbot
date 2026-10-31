@@ -11,6 +11,7 @@ use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
+use crate::agent::events::{AgentEvent, EventBus};
 use crate::agent::session_state::SharedSessionState;
 use crate::bus::OutboundMessage;
 use crate::rig_provider::SynbotCompletionModel;
@@ -38,14 +39,26 @@ fn truncate_preview(s: &str, max_chars: usize) -> String {
 
 /// Send a chat message to the user and append to session history when history_session_key is set.
 /// Session persist is spawned so we don't block the next step on disk I/O.
+///
+/// Progress goes out on two paths: the outbound bus (Feishu/DingTalk/channels) and the event bus
+/// as a `Notice` — the web workbench drops plain outbound chat text, so without the event the
+/// chat that started the workflow would see nothing until the run finished.
 async fn send_workflow_message(
     outbound_tx: &broadcast::Sender<OutboundMessage>,
+    events: &EventBus,
     session_state: &SharedSessionState,
     history_session_key: Option<&str>,
     channel: &str,
     chat_id: &str,
     content: &str,
 ) {
+    events.publish(
+        channel,
+        chat_id,
+        AgentEvent::Notice {
+            message: content.to_string(),
+        },
+    );
     let _ = outbound_tx.send(OutboundMessage::chat(
         channel.to_string(),
         chat_id.to_string(),
@@ -74,6 +87,7 @@ pub async fn run_workflow(
     workflow_store: &WorkflowStore,
     model: &dyn SynbotCompletionModel,
     outbound_tx: &broadcast::Sender<OutboundMessage>,
+    events: &EventBus,
     pending_input: &PendingWorkflowInputStore,
     session_state: &SharedSessionState,
     history_session_key: Option<&str>,
@@ -119,6 +133,7 @@ pub async fn run_workflow(
                     let content = format!("[Workflow] Completed. Final result:\n\n{}", preview);
                     send_workflow_message(
                         outbound_tx,
+                        events,
                         session_state,
                         history_session_key,
                         channel,
@@ -129,6 +144,7 @@ pub async fn run_workflow(
                 } else {
                     send_workflow_message(
                         outbound_tx,
+                        events,
                         session_state,
                         history_session_key,
                         channel,
@@ -212,6 +228,7 @@ pub async fn run_workflow(
                 let content = format!("[Workflow] Previous step output:\n\n{}", preview);
                 send_workflow_message(
                     outbound_tx,
+                    events,
                     session_state,
                     history_session_key,
                     channel,
@@ -228,6 +245,7 @@ pub async fn run_workflow(
             );
             send_workflow_message(
                 outbound_tx,
+                events,
                 session_state,
                 history_session_key,
                 channel,
@@ -320,6 +338,7 @@ pub async fn run_workflow(
                     });
                     send_workflow_message(
                         outbound_tx,
+                        events,
                         session_state,
                         history_session_key,
                         channel,
@@ -346,4 +365,54 @@ pub async fn run_workflow(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod notice_tests {
+    use super::*;
+    use crate::agent::session::SessionStore;
+    use crate::bus::OutboundMessageType;
+
+    #[tokio::test]
+    async fn workflow_progress_reaches_the_event_bus_as_a_notice() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let session_state = SharedSessionState::new(SessionStore::new(dir.path()));
+        let (outbound_tx, mut outbound_rx) = broadcast::channel(8);
+        let events = EventBus::new();
+        let mut event_rx = events.subscribe();
+
+        // No history key: this test only cares about the two delivery paths.
+        send_workflow_message(
+            &outbound_tx,
+            &events,
+            &session_state,
+            None,
+            "web",
+            "web_admin",
+            "[Workflow] Step 1 completed.",
+        )
+        .await;
+
+        // Channel clients keep getting the outbound chat message…
+        let outbound = outbound_rx.try_recv().expect("outbound chat message");
+        assert_eq!(outbound.channel, "web");
+        assert_eq!(outbound.chat_id, "web_admin");
+        match outbound.message_type {
+            OutboundMessageType::Chat { content, .. } => {
+                assert_eq!(content, "[Workflow] Step 1 completed.");
+            }
+            other => panic!("unexpected outbound message: {other:?}"),
+        }
+
+        // …and the workbench, which drops outbound chat text, sees it as a notice.
+        let published = event_rx.try_recv().expect("notice event");
+        assert_eq!(published.channel, "web");
+        assert_eq!(published.chat_id, "web_admin");
+        match published.event {
+            AgentEvent::Notice { message } => {
+                assert_eq!(message, "[Workflow] Step 1 completed.");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
 }

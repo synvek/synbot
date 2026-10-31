@@ -270,6 +270,12 @@ export function useAgentSocket({
           ]);
           break;
 
+        // Accepted without a turn: e.g. the text answered a workflow's pending input prompt, so no
+        // `turn_finished` will arrive and the composer has to be released here.
+        case 'turn_skipped':
+          setRunning(false);
+          break;
+
         case 'file_changed': {
           const files = changedFilesRef.current;
           const existing = files.findIndex((f) => f.path === event.path);

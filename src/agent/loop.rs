@@ -6,7 +6,7 @@ use rig::completion::request::CompletionError;
 use rig::completion::CompletionRequest;
 use rig::message::{AssistantContent, Message, ToolCall, ToolResultContent, UserContent};
 use rig::OneOrMany;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, Mutex, RwLock};
@@ -217,6 +217,10 @@ impl AgentLoop {
         info!("Agent loop started");
         let mut join_set: JoinSet<String> = JoinSet::new();
         let mut cancel_by_session: HashMap<String, CancellationToken> = HashMap::new();
+        // `/clear` that arrived while a turn held the loop lock. Flushed at the top of every
+        // iteration, i.e. before the next inbound message, so a fresh turn can never start inside
+        // a session that is about to be wiped.
+        let mut deferred_clears: VecDeque<InboundMessage> = VecDeque::new();
         // Clones the dispatcher needs to answer control commands. A running turn holds the loop
         // lock until it ends, so `/stop` (and busy notices) must work without it — otherwise the
         // only escape from a long turn would queue up behind that very turn.
@@ -232,6 +236,8 @@ impl AgentLoop {
         };
 
         loop {
+            Self::flush_deferred_clears(&loop_ref, &mut deferred_clears).await;
+
             tokio::select! {
                 Some(join_result) = join_set.join_next(), if !join_set.is_empty() => {
                     match join_result {
@@ -243,6 +249,11 @@ impl AgentLoop {
                         }
                     }
                 }
+                // A queued /clear only needs the lock to be free, and a turn that unwinds through
+                // a non-tracked path (or another handler) publishes no event to wake us up, so
+                // poll — but only while something is actually pending.
+                _ = tokio::time::sleep(std::time::Duration::from_millis(150)),
+                    if !deferred_clears.is_empty() => {}
                 msg_opt = inbound_rx.recv() => {
                     let msg = match msg_opt {
                         None => break,
@@ -287,7 +298,36 @@ impl AgentLoop {
                                     Ok(guard) => {
                                         guard.handle_clear(&msg).await.ok();
                                     }
-                                    Err(_) => Self::busy_notice(&outbound_tx, &events, &msg),
+                                    Err(_) => {
+                                        // A turn holds the lock. Abort it and queue the clear instead
+                                        // of dropping it: letting that turn finish would only write
+                                        // an answer into the session we are about to reset. The token
+                                        // stays registered so messages arriving during shutdown keep
+                                        // getting the busy notice rather than starting a doomed turn.
+                                        let stopping = cancel_by_session
+                                            .get(&sk)
+                                            .map(|token| token.cancel())
+                                            .is_some();
+                                        let already_queued = deferred_clears
+                                            .iter()
+                                            .any(|m| m.session_key() == sk);
+                                        let reply = if already_queued {
+                                            "[Clear] Already queued; the session is cleared as soon as the running turn stops."
+                                        } else if stopping {
+                                            "[Clear] Stopping the running turn; the session is cleared as soon as it stops."
+                                        } else {
+                                            "[Clear] Agent is busy with another chat; the session is cleared as soon as it is free."
+                                        };
+                                        Self::send_control_reply(
+                                            &outbound_tx,
+                                            &events,
+                                            &msg,
+                                            reply.to_string(),
+                                        );
+                                        if !already_queued {
+                                            deferred_clears.push_back(msg);
+                                        }
+                                    }
                                 }
                                 continue;
                             }
@@ -409,11 +449,23 @@ impl AgentLoop {
                         }
                     }
 
+                    if deferred_clears.iter().any(|m| m.session_key() == sk) {
+                        Self::send_control_reply(
+                            &outbound_tx,
+                            &events,
+                            &msg,
+                            "[Clear] This session is being cleared; please resend in a moment."
+                                .to_string(),
+                        );
+                        continue;
+                    }
+
                     if cancel_by_session.contains_key(&sk) {
                         Self::busy_notice(&outbound_tx, &events, &msg);
                         continue;
                     }
 
+                    let (channel, chat_id) = (msg.channel.clone(), msg.chat_id.clone());
                     let result = {
                         let mut guard = loop_ref.lock().await;
                         guard.handle_message(msg, loop_ref.clone()).await
@@ -427,7 +479,12 @@ impl AgentLoop {
                                 run_sk
                             });
                         }
-                        Ok(None) => {}
+                        Ok(None) => {
+                            // The message was consumed without starting a turn (workflow pending
+                            // input, save-only message, confirmation prompt). Nothing will publish
+                            // `turn_finished`, so tell the UI to leave its running state.
+                            events.publish(&channel, &chat_id, AgentEvent::TurnSkipped);
+                        }
                     }
                 }
             }
@@ -500,37 +557,22 @@ impl AgentLoop {
                         return Ok(None);
                     }
                     ControlCommand::Commands => {
-                        let _ = self.outbound_tx.send(OutboundMessage::chat(
-                            msg.channel.clone(),
-                            msg.chat_id.clone(),
+                        self.reply_control(
+                            &msg,
                             format!("[Commands]\n{}", slash_commands_help_text()),
-                            vec![],
-                            None,
-                        ));
+                        )?;
                         return Ok(None);
                     }
                     ControlCommand::Skills => {
                         let body = Self::skills_list_body(&self.skills);
-                        let _ = self.outbound_tx.send(OutboundMessage::chat(
-                            msg.channel.clone(),
-                            msg.chat_id.clone(),
-                            format!("[Skills]\n{}", body),
-                            vec![],
-                            None,
-                        ));
+                        self.reply_control(&msg, format!("[Skills]\n{}", body))?;
                         return Ok(None);
                     }
                     ControlCommand::Tools => {
                         let body = crate::tools::list_tools::format_tool_list_markdown(
                             self.tools.list_tools(),
                         );
-                        let _ = self.outbound_tx.send(OutboundMessage::chat(
-                            msg.channel.clone(),
-                            msg.chat_id.clone(),
-                            format!("[Tools]\n{}", body),
-                            vec![],
-                            None,
-                        ));
+                        self.reply_control(&msg, format!("[Tools]\n{}", body))?;
                         return Ok(None);
                     }
                     ControlCommand::Resume => {
@@ -544,26 +586,20 @@ impl AgentLoop {
                             Ok(Some(task)) => return Ok(Some(task)),
                             Ok(None) => {}
                             Err(e) => {
-                                let _ = self.outbound_tx.send(OutboundMessage::chat(
-                                    msg.channel.clone(),
-                                    msg.chat_id.clone(),
+                                self.reply_control(
+                                    &msg,
                                     format!("[Workflow] Resume failed: {}", e),
-                                    vec![],
-                                    None,
-                                ));
+                                )?;
                             }
                         }
                         return Ok(None);
                     }
                     ControlCommand::Stop => {
-                        let _ = self.outbound_tx.send(OutboundMessage::chat(
-                            msg.channel.clone(),
-                            msg.chat_id.clone(),
+                        self.reply_control(
+                            &msg,
                             "[Control] Nothing is currently running. Use /status to check."
                                 .to_string(),
-                            vec![],
-                            None,
-                        ));
+                        )?;
                         return Ok(None);
                     }
                     ControlCommand::Pending => {
@@ -597,13 +633,7 @@ impl AgentLoop {
                         Ok(Some(task)) => return Ok(Some(task)),
                         Ok(None) => {}
                         Err(e) => {
-                            let _ = self.outbound_tx.send(OutboundMessage::chat(
-                                msg.channel.clone(),
-                                msg.chat_id.clone(),
-                                format!("[Workflow] Continue failed: {}", e),
-                                vec![],
-                                None,
-                            ));
+                            self.reply_control(&msg, format!("[Workflow] Continue failed: {}", e))?;
                         }
                     }
                     return Ok(None);
@@ -625,13 +655,7 @@ impl AgentLoop {
                         Ok(Some(task)) => return Ok(Some(task)),
                         Ok(None) => {}
                         Err(e) => {
-                            let _ = self.outbound_tx.send(OutboundMessage::chat(
-                                msg.channel.clone(),
-                                msg.chat_id.clone(),
-                                format!("[Workflow] Create failed: {}", e),
-                                vec![],
-                                None,
-                            ));
+                            self.reply_control(&msg, format!("[Workflow] Create failed: {}", e))?;
                         }
                     }
                     return Ok(None);
@@ -687,24 +711,16 @@ impl AgentLoop {
         let state: WorkflowState = match self.workflow_store.load_state(session_key).await? {
             Some(s) => s,
             None => {
-                let _ = self.outbound_tx.send(OutboundMessage::chat(
-                    msg.channel.clone(),
-                    msg.chat_id.clone(),
+                // Control-style reply: must reach the event bus too, or the workbench sees nothing.
+                self.reply_control(
+                    msg,
                     "[Workflow] No workflow in progress for this session.".to_string(),
-                    vec![],
-                    None,
-                ));
+                )?;
                 return Ok(None);
             }
         };
         if state.is_finished() {
-            let _ = self.outbound_tx.send(OutboundMessage::chat(
-                msg.channel.clone(),
-                msg.chat_id.clone(),
-                "[Workflow] Workflow already ended.".to_string(),
-                vec![],
-                None,
-            ));
+            self.reply_control(msg, "[Workflow] Workflow already ended.".to_string())?;
             return Ok(None);
         }
         let history_session_key = self.resolve_history_session_key(msg).await;
@@ -728,16 +744,13 @@ impl AgentLoop {
     ) -> Result<Option<(tokio::task::JoinHandle<()>, CancellationToken, String)>> {
         if let Some(def) = user_provided_def {
             if let Err(e) = def.validate() {
-                let _ = self.outbound_tx.send(OutboundMessage::chat(
-                    msg.channel.clone(),
-                    msg.chat_id.clone(),
+                self.reply_control(
+                    msg,
                     format!(
                         "[Workflow] Definition validation failed: {}. Please fix and retry.",
                         e
                     ),
-                    vec![],
-                    None,
-                ));
+                )?;
                 return Ok(None);
             }
             let steps_preview: String = def
@@ -748,16 +761,13 @@ impl AgentLoop {
                 .collect::<Vec<_>>()
                 .join("\n");
             self.pending_workflow_confirm.set(session_key, def).await;
-            let _ = self.outbound_tx.send(OutboundMessage::chat(
-                msg.channel.clone(),
-                msg.chat_id.clone(),
+            self.reply_control(
+                msg,
                 format!(
                     "[Workflow] Parsed steps:\n{}\nReply to approve and start (any language).",
                     steps_preview
                 ),
-                vec![],
-                None,
-            ));
+            )?;
             return Ok(None);
         }
         let def = generate_workflow(self.model.as_ref(), description).await?;
@@ -781,13 +791,7 @@ impl AgentLoop {
         self.workflow_store.save_state(session_key, &state).await?;
         let history_session_key = self.resolve_history_session_key(msg).await;
         let created_msg = "[Workflow] Created and started.".to_string();
-        let _ = self.outbound_tx.send(OutboundMessage::chat(
-            msg.channel.clone(),
-            msg.chat_id.clone(),
-            created_msg.clone(),
-            vec![],
-            None,
-        ));
+        self.reply_control(msg, created_msg.clone())?;
         if let Some(ref k) = history_session_key {
             let _ = self
                 .session_state
@@ -1043,6 +1047,28 @@ impl AgentLoop {
         ));
     }
 
+    /// Runs queued `/clear` requests once the turn that blocked them has released the loop lock.
+    ///
+    /// `/clear` cannot wait for the lock (that would freeze the dispatcher and with it `/stop`),
+    /// and it must not be dropped either, or a user who clears a long turn would silently keep the
+    /// old session. Queued clears run in arrival order, one per lock acquisition.
+    async fn flush_deferred_clears(
+        loop_ref: &Arc<Mutex<AgentLoop>>,
+        deferred: &mut VecDeque<InboundMessage>,
+    ) {
+        while !deferred.is_empty() {
+            let Ok(guard) = loop_ref.try_lock() else {
+                return;
+            };
+            let Some(msg) = deferred.pop_front() else {
+                return;
+            };
+            info!(chat = %msg.chat_id, "Running queued /clear");
+            guard.handle_clear(&msg).await.ok();
+            drop(guard);
+        }
+    }
+
     /// Tells the user this chat is busy instead of queueing behind a running turn.
     ///
     /// A turn holds the loop lock until it ends, so blocking here would freeze the receive loop
@@ -1112,17 +1138,19 @@ impl AgentLoop {
         let store = self.workflow_store.clone();
         let model = Arc::clone(&self.model);
         let outbound_tx = self.outbound_tx.clone();
+        let events = Arc::clone(&self.events);
         let pending_input = self.pending_workflow_input.clone();
         let session_state = self.session_state.clone();
         let channel = channel.to_string();
         let chat_id = chat_id.to_string();
         let session_key = session_key.to_string();
-        let cancel_for_run = cancel.as_ref().map(|t| t.clone());
+        let cancel_for_run = cancel.clone();
         tokio::spawn(async move {
             if let Err(e) = run_workflow(
                 &store,
                 model.as_ref(),
                 &outbound_tx,
+                &events,
                 &pending_input,
                 &session_state,
                 history_session_key.as_deref(),

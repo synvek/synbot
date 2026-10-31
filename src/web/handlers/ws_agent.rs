@@ -22,7 +22,10 @@
 //! - `{"type":"replay","events":[...]}` — missed events, oldest first
 //! - `{"type":"event","seq":13,"channel":"web","chat_id":"web_admin","event":{"type":"message_delta",...}}`
 //! - `{"type":"event",...,"event":{"type":"notice","message":"[Clear] Session cleared."}}` —
-//!   control-command replies (`/clear`, `/stop`, `/tools`, …), which belong to no turn
+//!   out-of-band text for this conversation: control-command replies (`/clear`, `/stop`, `/tools`, …)
+//!   and workflow progress (`[Workflow] …`), neither of which belongs to a turn
+//! - `{"type":"event",...,"event":{"type":"turn_skipped"}}` — the message started no turn, so no
+//!   `turn_finished` follows (workflow pending input, save-only message); release the composer
 //! - `{"type":"approval_request","request":{...}}`
 //! - `{"type":"approval_result","request_id":"...","approved":true,"message":"approved"}`
 //! - `{"type":"pong"}` / `{"type":"error","message":"..."}`

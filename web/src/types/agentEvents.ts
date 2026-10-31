@@ -74,8 +74,11 @@ export type AgentEvent =
       total_tokens: number;
     }
   | { type: 'turn_finished'; turn_id: string; reason: TurnFinishReason; iterations: number }
-  // Control-command replies (`/clear`, `/stop`, `/tools`, …) — outside any turn.
+  // Control-command replies (`/clear`, `/stop`, `/tools`, …) and workflow progress — outside any turn.
   | { type: 'notice'; message: string }
+  // The message was accepted without starting a turn (workflow pending input, save-only): no
+  // `turn_finished` follows, so this is the only signal that the composer may resume.
+  | { type: 'turn_skipped' }
   | { type: 'error'; turn_id: string; message: string };
 
 /** Wire envelope: one sequenced event for a conversation. */

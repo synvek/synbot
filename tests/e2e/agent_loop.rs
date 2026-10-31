@@ -290,3 +290,49 @@ async fn test_control_command_status_returns_response() {
         .any(|m| m.channel == "telegram" && m.chat_id == "chat-status");
     assert!(status_response, "Should receive a response to /status");
 }
+
+/// `/clear` must not be dropped when a turn holds the loop lock: it is queued, reported, and run
+/// as soon as the lock is free. Holding the lock here stands in for a running turn, which the
+/// dispatcher can never wait for (waiting would also freeze `/stop`).
+#[tokio::test]
+async fn test_clear_is_queued_while_loop_is_locked_and_runs_after_unlock() {
+    let config = common::default_test_config();
+    let (loop_ref, inbound_tx, mut outbound_rx) = build_agent_loop(&config).await;
+
+    // Wait for the dispatcher to take the loop lock once at startup, so the lock taken below
+    // really looks like a running turn rather than racing with initialisation.
+    inbound_tx
+        .send(inbound("web", "web_admin", "/status"))
+        .await
+        .expect("send /status");
+    let _ = collect_outbound(&mut outbound_rx, 1000).await;
+
+    let guard = loop_ref.lock().await;
+
+    inbound_tx
+        .send(inbound("web", "web_admin", "/clear"))
+        .await
+        .expect("send /clear");
+
+    let queued = collect_outbound(&mut outbound_rx, 1000).await;
+    let explained = queued.iter().any(|m| {
+        matches!(&m.message_type, OutboundMessageType::Chat { content, .. }
+            if content.contains("[Clear]") && content.contains("cleared as soon as"))
+    });
+    assert!(
+        explained,
+        "a /clear that cannot get the lock should be queued and explained, got {queued:?}"
+    );
+
+    drop(guard);
+
+    let after = collect_outbound(&mut outbound_rx, 3000).await;
+    let cleared = after.iter().any(|m| {
+        matches!(&m.message_type, OutboundMessageType::Chat { content, .. }
+            if content.contains("[Clear] Session cleared."))
+    });
+    assert!(
+        cleared,
+        "the queued /clear should run once the lock is released, got {after:?}"
+    );
+}

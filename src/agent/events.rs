@@ -166,6 +166,10 @@ pub enum AgentEvent {
     /// `/tools`, …). It belongs to no turn — the web workbench drops plain outbound chat text to
     /// avoid duplicating streamed answers, so control replies need this path to be visible at all.
     Notice { message: String },
+    /// The message was accepted but produced no turn — e.g. it answered a workflow's pending input
+    /// prompt, or it was saved without triggering the agent. No `turn_finished` will follow, so the
+    /// UI has to leave its "running" state on this event instead.
+    TurnSkipped,
     /// A recoverable or terminal error for this turn.
     Error { turn_id: String, message: String },
 }
