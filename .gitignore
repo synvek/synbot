@@ -6,6 +6,7 @@
 /.docs
 /.test
 /.cursor
+/.qoder
 /docs/.vitepress/cache
 /docs/.vitepress/dist
 /docs/node_modules
@@ -21,3 +22,15 @@
 /.synbot/index/
 /.synbot/repowiki/
 
+# Impeccable runtime state. Durable artifacts (config.json, design.json, surfaces/)
+# stay tracked: they are the design context contributors and agents read. The tool
+# keeps questions/ local with its own .gitignore.
+/.impeccable/hook.cache.json
+/.impeccable/hook.pending.json
+/.impeccable/config.local.json
+/.impeccable/live/
+/.impeccable/build/
+/.impeccable/review/
+/.impeccable/mocks/
+/.impeccable/component-reviews/
+/.impeccable-live/

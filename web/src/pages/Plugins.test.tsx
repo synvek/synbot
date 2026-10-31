@@ -158,15 +158,17 @@ describe('Plugins', () => {
   });
 
   it('only uninstalls after the confirmation is accepted', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
     renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: /^Uninstall$|^卸载$/ }));
-    expect(confirm).toHaveBeenCalled();
     expect(mocked.uninstallPlugin).not.toHaveBeenCalled();
 
-    confirm.mockReturnValue(true);
+    // Dismissing the dialog leaves the package installed.
+    fireEvent.click(screen.getByRole('button', { name: /^Close$|^关闭$/ }));
+    expect(mocked.uninstallPlugin).not.toHaveBeenCalled();
+
     fireEvent.click(screen.getByRole('button', { name: /^Uninstall$|^卸载$/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Confirm$|^确认$/ }));
 
     await waitFor(() => expect(mocked.uninstallPlugin).toHaveBeenCalledWith('demo'));
     await waitFor(() => expect(mocked.listPlugins).toHaveBeenCalledTimes(2));
@@ -234,7 +236,7 @@ describe('Plugins', () => {
     );
     renderPage();
 
-    fireEvent.click(await screen.findByRole('button', { name: MARKET_TAB }));
+    fireEvent.click(await screen.findByRole('tab', { name: MARKET_TAB }));
     expect(await screen.findByText('demo@1.2.3')).toBeInTheDocument();
     expect(screen.getByText('base >=1.0.0')).toBeInTheDocument();
 
@@ -254,7 +256,7 @@ describe('Plugins', () => {
     );
     renderPage();
 
-    fireEvent.click(await screen.findByRole('button', { name: MARKET_TAB }));
+    fireEvent.click(await screen.findByRole('tab', { name: MARKET_TAB }));
     const updateButtons = await screen.findAllByRole('button', { name: /Update to 1\.2\.3|更新到 1\.2\.3/ });
     fireEvent.click(updateButtons[0]);
 
@@ -269,7 +271,7 @@ describe('Plugins', () => {
     );
     renderPage();
 
-    fireEvent.click(await screen.findByRole('button', { name: MARKET_TAB }));
+    fireEvent.click(await screen.findByRole('tab', { name: MARKET_TAB }));
     fireEvent.click(
       await screen.findByRole('button', { name: /Update all|全部更新/ })
     );
@@ -289,7 +291,7 @@ describe('Plugins', () => {
     );
     renderPage();
 
-    fireEvent.click(await screen.findByRole('button', { name: MARKET_TAB }));
+    fireEvent.click(await screen.findByRole('tab', { name: MARKET_TAB }));
 
     expect(await screen.findByText(/Market source failed|市场源读取失败/)).toBeInTheDocument();
     expect(
@@ -301,7 +303,7 @@ describe('Plugins', () => {
     mocked.listMarket.mockResolvedValue({ sources: [], plugins: [], errors: [] });
     renderPage();
 
-    fireEvent.click(await screen.findByRole('button', { name: MARKET_TAB }));
+    fireEvent.click(await screen.findByRole('tab', { name: MARKET_TAB }));
 
     expect(
       await screen.findByText(/No market source configured|还没有配置市场源/)
@@ -319,7 +321,7 @@ describe('Plugins', () => {
     );
     renderPage();
 
-    fireEvent.click(await screen.findByRole('button', { name: MARKET_TAB }));
+    fireEvent.click(await screen.findByRole('tab', { name: MARKET_TAB }));
     fireEvent.change(
       await screen.findByPlaceholderText(/Search name, id or tag|搜索名称/),
       { target: { value: 'other' } }

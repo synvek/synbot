@@ -19,7 +19,7 @@ export const CronSection: React.FC<SectionProps> = ({ draft, setDraft, t }) => {
       {tasks.map((task, idx) => {
         const row = asRecord(task)
         return (
-          <div key={idx} className="border border-border rounded-lg p-4 space-y-2">
+          <div key={idx} className="border border-line rounded-lg p-4 space-y-2">
             <div className="flex justify-between">
               <span className="text-sm font-medium">
                 {t('config.sections.cron.task')} {idx + 1}
@@ -110,7 +110,7 @@ export const CronSection: React.FC<SectionProps> = ({ draft, setDraft, t }) => {
       })}
       <button
         type="button"
-        className="px-4 py-2 rounded-lg bg-surface border border-border text-sm"
+        className="px-4 py-2 rounded-lg bg-surface border border-line text-sm"
         onClick={() =>
           patch({
             tasks: [

@@ -9,7 +9,7 @@ interface TeamPanelProps {
 }
 
 const STATE_DOT: Record<SubagentState, string> = {
-  running: 'bg-primary animate-pulse',
+  running: 'bg-accent animate-pulse',
   completed: 'bg-success',
   failed: 'bg-error',
   cancelled: 'bg-border',
@@ -83,9 +83,9 @@ export default function TeamPanel({ live }: TeamPanelProps) {
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border text-xs shrink-0">
-        <span className="text-text">{t('team.title', '代理团队')}</span>
-        <span className="text-text-secondary">
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-line text-xs shrink-0">
+        <span className="text-ink">{t('team.title', '代理团队')}</span>
+        <span className="text-ink-2">
           {t('team.counts', { running, total: agents.length })}
         </span>
         {running > 0 && (
@@ -93,7 +93,7 @@ export default function TeamPanel({ live }: TeamPanelProps) {
             type="button"
             onClick={() => cancel('all', true)}
             disabled={busy !== null}
-            className="ml-auto px-2 py-0.5 rounded border border-border hover:bg-background disabled:opacity-50"
+            className="ml-auto px-2 py-0.5 rounded border border-line hover:bg-surface-2 disabled:opacity-50"
           >
             {t('team.cancelAll', '全部停止')}
           </button>
@@ -101,7 +101,7 @@ export default function TeamPanel({ live }: TeamPanelProps) {
         <button
           type="button"
           onClick={load}
-          className={`px-2 py-0.5 rounded border border-border hover:bg-background ${
+          className={`px-2 py-0.5 rounded border border-line hover:bg-surface-2 ${
             running > 0 ? '' : 'ml-auto'
           }`}
         >
@@ -113,25 +113,25 @@ export default function TeamPanel({ live }: TeamPanelProps) {
 
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
         {agents.length === 0 ? (
-          <p className="text-xs text-text-secondary">{t('team.empty')}</p>
+          <p className="text-xs text-ink-2">{t('team.empty')}</p>
         ) : (
           agents.map((agent) => (
             <div
               key={agent.id}
-              className="rounded border border-border bg-surface px-3 py-2 space-y-1"
+              className="rounded border border-line bg-surface px-3 py-2 space-y-1"
             >
               <div className="flex items-center gap-2 text-xs">
                 <span className={`w-1.5 h-1.5 rounded-full ${STATE_DOT[agent.state]}`} />
-                <span className="font-medium text-text truncate" title={agent.label}>
+                <span className="font-medium text-ink truncate" title={agent.label}>
                   {agent.label}
                 </span>
-                <span className="font-mono text-[11px] text-text-secondary">{agent.id}</span>
+                <span className="font-mono text-[11px] text-ink-2">{agent.id}</span>
                 {agent.role && (
-                  <span className="px-1.5 rounded bg-background text-text-secondary">
+                  <span className="px-1.5 rounded bg-surface-2 text-ink-2">
                     {t('team.role', '角色')}: {agent.role}
                   </span>
                 )}
-                <span className="ml-auto text-text-secondary">
+                <span className="ml-auto text-ink-2">
                   {t(STATE_KEY[agent.state])} ·{' '}
                   {t('team.elapsed', { seconds: elapsedSeconds(agent) })}
                 </span>
@@ -140,14 +140,14 @@ export default function TeamPanel({ live }: TeamPanelProps) {
                     type="button"
                     onClick={() => cancel(agent.id)}
                     disabled={busy !== null}
-                    className="px-2 py-0.5 rounded border border-border hover:bg-background disabled:opacity-50"
+                    className="px-2 py-0.5 rounded border border-line hover:bg-surface-2 disabled:opacity-50"
                   >
                     {t('team.cancel', '停止')}
                   </button>
                 )}
               </div>
               {agent.activity && (
-                <div className="text-[11px] text-text-secondary truncate" title={agent.activity}>
+                <div className="text-[11px] text-ink-2 truncate" title={agent.activity}>
                   {t('team.activity', '当前动作')}:{' '}
                   <span className="font-mono">{agent.activity}</span>
                 </div>

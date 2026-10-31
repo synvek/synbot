@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { apiClient } from '../api/client';
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { RefreshCw } from 'lucide-react'
+import { apiClient } from '../api/client'
 import type {
   InstalledPlugin,
   MarketInstallReport,
@@ -8,376 +9,382 @@ import type {
   PluginListResponse,
   PluginTrust,
   TrustedKey,
-} from '../types/api';
-import { useI18n } from '../i18n/I18nContext';
+} from '../types/api'
+import { useI18n } from '../i18n/I18nContext'
+import { formatDateTime } from '../utils/datetime'
+import {
+  Badge,
+  Button,
+  Checkbox,
+  Dialog,
+  Field,
+  Input,
+  PageHeader,
+  type BadgeTone,
+} from '../ui'
 
-/** Colour classes per trust verdict (also the order they appear in the legend). */
-const TRUST_STYLE: Record<PluginTrust, string> = {
-  trusted: 'bg-success/10 text-success border-success/40',
-  unsigned: 'bg-primary-muted text-primary border-primary/40',
-  untrusted: 'bg-error/10 text-error border-error/40',
-  tampered: 'bg-error text-white border-error',
-};
+/** Badge tone per trust verdict. A tampered package is the only one that earns a filled chip. */
+const TRUST_TONE: Record<PluginTrust, BadgeTone> = {
+  trusted: 'success',
+  unsigned: 'accent',
+  untrusted: 'danger',
+  tampered: 'danger',
+}
 
 const TRUST_KEY: Record<PluginTrust, string> = {
   trusted: 'plugins.trustTrusted',
   unsigned: 'plugins.trustUnsigned',
   untrusted: 'plugins.trustUntrusted',
   tampered: 'plugins.trustTampered',
-};
+}
 
-type Tab = 'installed' | 'market';
+type Tab = 'installed' | 'market'
 
 function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
 function shortKey(publicKey: string): string {
-  return publicKey.length <= 16 ? publicKey : `${publicKey.slice(0, 8)}…${publicKey.slice(-6)}`;
+  return publicKey.length <= 16 ? publicKey : `${publicKey.slice(0, 8)}…${publicKey.slice(-6)}`
 }
 
 function errorText(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
+  return e instanceof Error ? e.message : String(e)
 }
 
-const Plugins: React.FC = () => {
-  const { t } = useI18n();
-  const [tab, setTab] = useState<Tab>('installed');
-  const [data, setData] = useState<PluginListResponse | null>(null);
-  const [keys, setKeys] = useState<TrustedKey[]>([]);
-  const [installPath, setInstallPath] = useState('');
-  const [keyName, setKeyName] = useState('');
-  const [keyValue, setKeyValue] = useState('');
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [market, setMarket] = useState<MarketResponse | null>(null);
-  const [marketQuery, setMarketQuery] = useState('');
-  const [marketBusy, setMarketBusy] = useState<string | null>(null);
+function Chips({ values }: { values: string[] }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {values.map((value) => (
+        <span
+          key={value}
+          className="rounded-control bg-surface-2 px-1.5 py-0.5 font-mono text-micro text-ink-2"
+        >
+          {value}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+export default function Plugins() {
+  const { t } = useI18n()
+  const [tab, setTab] = useState<Tab>('installed')
+  const [data, setData] = useState<PluginListResponse | null>(null)
+  const [keys, setKeys] = useState<TrustedKey[]>([])
+  const [installPath, setInstallPath] = useState('')
+  const [keyName, setKeyName] = useState('')
+  const [keyValue, setKeyValue] = useState('')
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [market, setMarket] = useState<MarketResponse | null>(null)
+  const [marketQuery, setMarketQuery] = useState('')
+  const [marketBusy, setMarketBusy] = useState<string | null>(null)
+  const [pendingUninstall, setPendingUninstall] = useState<InstalledPlugin | null>(null)
 
   const load = useCallback(async () => {
     try {
-      const [plugins, trusted] = await Promise.all([
-        apiClient.listPlugins(),
-        apiClient.listPluginKeys(),
-      ]);
-      setData(plugins);
-      setKeys(trusted);
-      setError(null);
+      const [plugins, trusted] = await Promise.all([apiClient.listPlugins(), apiClient.listPluginKeys()])
+      setData(plugins)
+      setKeys(trusted)
+      setError(null)
     } catch (e: unknown) {
-      setError(errorText(e));
+      setError(errorText(e))
     }
-  }, []);
+  }, [])
 
   /** The market fetches every configured source, so it loads separately from the plugin list. */
   const loadMarket = useCallback(async () => {
     try {
-      setMarket(await apiClient.listMarket());
-      setError(null);
+      setMarket(await apiClient.listMarket())
+      setError(null)
     } catch (e: unknown) {
-      setError(errorText(e));
+      setError(errorText(e))
     }
-  }, []);
+  }, [])
 
   useEffect(() => {
-    load();
-    loadMarket();
-  }, [load, loadMarket]);
+    void load()
+    void loadMarket()
+  }, [load, loadMarket])
 
   const run = useCallback(
     async (label: string, action: () => Promise<unknown>, success?: string) => {
-      setBusy(label);
-      setError(null);
-      setNotice(null);
+      setBusy(label)
+      setError(null)
+      setNotice(null)
       try {
-        await action();
-        if (success) setNotice(success);
-        await load();
-        return true;
+        await action()
+        if (success) setNotice(success)
+        await load()
+        return true
       } catch (e: unknown) {
-        setError(errorText(e));
-        return false;
+        setError(errorText(e))
+        return false
       } finally {
-        setBusy(null);
+        setBusy(null)
       }
     },
     [load]
-  );
+  )
 
   /** Install or update from the market, then refresh both the list and the market state. */
   const runMarket = useCallback(
     async (label: string, action: () => Promise<MarketInstallReport>) => {
-      setMarketBusy(label);
-      setError(null);
-      setNotice(null);
+      setMarketBusy(label)
+      setError(null)
+      setNotice(null)
       try {
-        const report = await action();
+        const report = await action()
         if (report.installed.length > 0) {
-          const ids = report.installed.map((item) => `${item.id}@${item.version}`).join(', ');
-          setNotice(t('plugins.marketInstallOk', { count: report.installed.length, ids }));
+          const ids = report.installed.map((item) => `${item.id}@${item.version}`).join(', ')
+          setNotice(t('plugins.marketInstallOk', { count: report.installed.length, ids }))
         } else if (report.failed.length === 0) {
-          setNotice(t('plugins.marketUpToDateAll'));
+          setNotice(t('plugins.marketUpToDateAll'))
         }
         if (report.failed.length > 0) {
-          const details = report.failed.map((item) => `${item.id}: ${item.error}`).join('; ');
-          setError(`${t('plugins.marketInstallFailed')}: ${details}`);
+          const details = report.failed.map((item) => `${item.id}: ${item.error}`).join('; ')
+          setError(`${t('plugins.marketInstallFailed')}: ${details}`)
         }
-        await Promise.all([load(), loadMarket()]);
+        await Promise.all([load(), loadMarket()])
       } catch (e: unknown) {
-        setError(errorText(e));
+        setError(errorText(e))
       } finally {
-        setMarketBusy(null);
+        setMarketBusy(null)
       }
     },
     [load, loadMarket, t]
-  );
+  )
 
   const install = async () => {
-    const path = installPath.trim();
-    if (!path) return;
+    const path = installPath.trim()
+    if (!path) return
     // Keep the typed path on failure so the user can fix a typo instead of retyping it.
-    const ok = await run(
-      'install',
-      () => apiClient.installPlugin(path),
-      t('plugins.installed', '已安装')
-    );
-    if (ok) setInstallPath('');
-  };
+    const ok = await run('install', () => apiClient.installPlugin(path), t('plugins.installed', 'Installed'))
+    if (ok) setInstallPath('')
+  }
 
-  const uninstall = (plugin: InstalledPlugin) => {
-    if (!window.confirm(t('plugins.uninstallConfirm', { name: plugin.name }))) return;
-    void run(`uninstall:${plugin.id}`, () => apiClient.uninstallPlugin(plugin.id));
-  };
+  const uninstall = async (plugin: InstalledPlugin) => {
+    setPendingUninstall(null)
+    await run(`uninstall:${plugin.id}`, () => apiClient.uninstallPlugin(plugin.id))
+  }
 
   const toggle = (plugin: InstalledPlugin) =>
-    void run(`toggle:${plugin.id}`, () =>
-      apiClient.setPluginEnabled(plugin.id, !plugin.enabled)
-    );
+    void run(`toggle:${plugin.id}`, () => apiClient.setPluginEnabled(plugin.id, !plugin.enabled))
 
   const installFromMarket = (plugin: MarketPlugin) =>
     void runMarket(`market:${plugin.id}`, () =>
       apiClient.installMarketPlugin(plugin.id, plugin.update_available ? plugin.version : undefined)
-    );
+    )
 
-  const updateAll = () =>
-    void runMarket('market:update-all', () => apiClient.updateMarketPlugins());
+  const updateAll = () => void runMarket('market:update-all', () => apiClient.updateMarketPlugins())
 
   const addKey = async () => {
-    if (!keyName.trim() || !keyValue.trim()) return;
+    if (!keyName.trim() || !keyValue.trim()) return
     const ok = await run(
       'add-key',
       () => apiClient.addPluginKey(keyName.trim(), keyValue.trim()),
-      t('plugins.keyAdded', '已信任该公钥')
-    );
+      t('plugins.keyAdded', 'Key trusted')
+    )
     if (ok) {
-      setKeyName('');
-      setKeyValue('');
+      setKeyName('')
+      setKeyValue('')
     }
-  };
+  }
 
-  const marketPlugins = market?.plugins ?? [];
-  const updateCount = marketPlugins.filter((plugin) => plugin.update_available).length;
+  const marketPlugins = market?.plugins ?? []
+  const updateCount = marketPlugins.filter((plugin) => plugin.update_available).length
   const visibleMarketPlugins = useMemo(() => {
-    const query = marketQuery.trim().toLowerCase();
-    if (!query) return marketPlugins;
+    const query = marketQuery.trim().toLowerCase()
+    if (!query) return marketPlugins
     return marketPlugins.filter((plugin) =>
       [plugin.id, plugin.name, plugin.description, plugin.author, ...plugin.tags]
         .join(' ')
         .toLowerCase()
         .includes(query)
-    );
-  }, [marketPlugins, marketQuery]);
+    )
+  }, [marketPlugins, marketQuery])
+
+  const installed = data?.plugins ?? []
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-text">{t('plugins.title')}</h2>
-        <p className="text-text-secondary mt-1">{t('plugins.description')}</p>
-        {data && (
-          <p className="text-[11px] text-text-secondary mt-1 font-mono break-all">
-            {t('plugins.root', '插件目录')}: {data.root} · {t('plugins.trustStore', '信任库')}:{' '}
-            {data.trust_store}
-          </p>
-        )}
-      </div>
+    <div className="space-y-4">
+      <PageHeader
+        title={t('plugins.title', 'Plugins')}
+        count={installed.length}
+        description={t('plugins.description', 'WASM packages the agent can call as tools')}
+        actions={
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<RefreshCw className="h-3.5 w-3.5" />}
+            onClick={() => {
+              void load()
+              void loadMarket()
+            }}
+          >
+            {t('common.refresh', 'Refresh')}
+          </Button>
+        }
+      />
 
-      {error && (
-        <div className="rounded-lg border border-error/40 bg-error/10 px-4 py-2 text-sm text-error">
-          {error}
-        </div>
-      )}
-      {notice && (
-        <div className="rounded-lg border border-success/40 bg-success/10 px-4 py-2 text-sm text-success">
-          {notice}
-        </div>
+      {data && (
+        <p className="-mt-1 break-all font-mono text-micro text-ink-3">
+          {t('plugins.root', 'Plugins')}: {data.root} · {t('plugins.trustStore', 'Trust store')}:{' '}
+          {data.trust_store}
+        </p>
       )}
 
-      <div className="flex gap-1 border-b border-border">
+      {error && <div className="rounded-panel border px-3 py-2 text-small tone-danger">{error}</div>}
+      {notice && <div className="rounded-panel border px-3 py-2 text-small tone-success">{notice}</div>}
+
+      <div role="tablist" className="flex gap-1 border-b border-line">
         {(['installed', 'market'] as Tab[]).map((value) => (
           <button
             key={value}
             type="button"
+            role="tab"
             onClick={() => setTab(value)}
-            className={`px-3 py-1.5 text-sm -mb-px border-b-2 ${
+            aria-selected={tab === value}
+            className={
               tab === value
-                ? 'border-primary text-primary'
-                : 'border-transparent text-text-secondary hover:text-text'
-            }`}
+                ? '-mb-px border-b-2 border-accent px-2 py-1.5 text-small font-medium text-ink'
+                : '-mb-px border-b-2 border-transparent px-2 py-1.5 text-small text-ink-2 transition-colors duration-fast hover:text-ink'
+            }
           >
-            {value === 'installed' ? t('plugins.tabInstalled') : t('plugins.tabMarket')}
+            {value === 'installed' ? t('plugins.tabInstalled', 'Installed') : t('plugins.tabMarket', 'Market')}
             {value === 'market' && updateCount > 0 ? ` (${updateCount})` : ''}
           </button>
         ))}
       </div>
 
       {tab === 'installed' && (
-        <>
-          <div className="bg-surface rounded-lg shadow border border-border p-4">
-            <h3 className="text-sm font-semibold text-text">
-              {t('plugins.installTitle', '安装插件包')}
-            </h3>
-            <p className="text-xs text-text-secondary mt-1">{t('plugins.installHint')}</p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              <input
-                type="text"
-                value={installPath}
-                onChange={(e) => setInstallPath(e.target.value)}
-                placeholder={t('plugins.installPlaceholder')}
-                className="flex-1 min-w-[16rem] px-3 py-1.5 rounded border border-border bg-background text-text text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary"
-              />
-              <button
-                type="button"
-                onClick={install}
+        <div className="space-y-4">
+          <div className="rounded-panel border border-line p-3">
+            <h2 className="text-section font-semibold text-ink">{t('plugins.installTitle', 'Install a package')}</h2>
+            <p className="mb-2 mt-0.5 text-small text-ink-2">{t('plugins.installHint', 'Point at a directory that contains plugin.json.')}</p>
+            <div className="flex flex-wrap items-end gap-2">
+              <Field label={t('plugins.installPlaceholder', '/path/to/plugin-package')} htmlFor="plugin-path" className="min-w-[16rem] flex-1">
+                <Input
+                  id="plugin-path"
+                  value={installPath}
+                  onChange={(event) => setInstallPath(event.target.value)}
+                  placeholder={t('plugins.installPlaceholder', '/path/to/plugin-package')}
+                  className="font-mono"
+                />
+              </Field>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => void install()}
                 disabled={busy !== null || !installPath.trim()}
-                className="px-4 py-1.5 rounded bg-primary text-white text-sm hover:bg-secondary disabled:bg-border disabled:cursor-not-allowed"
+                loading={busy === 'install'}
               >
-                {busy === 'install' ? t('common.loading') : t('plugins.install', '安装')}
-              </button>
-              <button
-                type="button"
-                onClick={() => void load()}
-                className="px-3 py-1.5 rounded border border-border text-sm text-text hover:bg-background"
-              >
-                {t('common.refresh', '刷新')}
-              </button>
+                {t('plugins.install', 'Install')}
+              </Button>
             </div>
           </div>
 
-          <section className="space-y-3">
-            <div className="flex items-baseline gap-2">
-              <h3 className="text-lg font-semibold text-text">{t('plugins.installed')}</h3>
-              <span className="text-xs text-text-secondary">
-                {t('plugins.count', { count: data?.plugins.length ?? 0 })}
-              </span>
+          <section>
+            <div className="mb-2 flex items-baseline gap-2">
+              <h2 className="text-section font-semibold text-ink">{t('plugins.installed', 'Installed')}</h2>
+              <span className="text-micro text-ink-3">{t('plugins.count', { count: installed.length })}</span>
             </div>
-            {data && data.plugins.length === 0 ? (
-              <p className="text-sm text-text-secondary">{t('plugins.empty')}</p>
+
+            {installed.length === 0 ? (
+              <p className="rounded-panel border border-line px-4 py-10 text-center text-small text-ink-2">
+                {t('plugins.empty', 'No plugin packages installed yet')}
+              </p>
             ) : (
-              (data?.plugins ?? []).map((plugin) => (
-                <div
-                  key={plugin.id}
-                  className={`bg-surface rounded-lg shadow border p-4 space-y-2 ${
-                    plugin.loadable ? 'border-border' : 'border-error/50'
-                  }`}
-                >
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-base font-semibold text-text">{plugin.name}</span>
-                    <span className="font-mono text-[11px] text-text-secondary">
-                      {plugin.id}@{plugin.version}
-                    </span>
-                    <span
-                      className={`px-1.5 py-0.5 rounded border text-[11px] ${TRUST_STYLE[plugin.trust]}`}
-                      title={t('plugins.sha256', 'sha256') + ': ' + plugin.sha256}
-                    >
-                      {t(TRUST_KEY[plugin.trust])}
-                    </span>
-                    {!plugin.loadable && (
-                      <span className="text-[11px] text-error">{t('plugins.notLoaded')}</span>
-                    )}
-                    <span className="ml-auto flex items-center gap-2">
-                      <label className="flex items-center gap-1 text-xs text-text-secondary">
-                        <input
-                          type="checkbox"
+              <ul className="overflow-hidden rounded-panel border border-line">
+                {installed.map((plugin) => (
+                  <li
+                    key={plugin.id}
+                    className={
+                      plugin.loadable
+                        ? 'space-y-1.5 border-b border-line px-3 py-2.5 last:border-b-0'
+                        : 'space-y-1.5 border-b border-l-2 border-line border-l-error px-3 py-2.5 last:border-b-0'
+                    }
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-body font-medium text-ink">{plugin.name}</span>
+                      <span className="font-mono text-micro text-ink-3">
+                        {plugin.id}@{plugin.version}
+                      </span>
+                      <Badge tone={TRUST_TONE[plugin.trust]}>{t(TRUST_KEY[plugin.trust])}</Badge>
+                      {!plugin.loadable && (
+                        <span className="text-micro text-error">{t('plugins.notLoaded', 'Integrity check failed')}</span>
+                      )}
+                      <span className="ml-auto flex items-center gap-2">
+                        <Checkbox
                           checked={plugin.enabled}
                           disabled={busy !== null}
                           onChange={() => toggle(plugin)}
+                          label={
+                            <span className="text-micro">
+                              {plugin.enabled ? t('plugins.enabled', 'Enabled') : t('plugins.disabled', 'Disabled')}
+                            </span>
+                          }
                         />
-                        {plugin.enabled ? t('plugins.enabled') : t('plugins.disabled')}
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => uninstall(plugin)}
-                        disabled={busy !== null}
-                        className="px-2 py-0.5 rounded border border-border text-xs text-error hover:bg-background disabled:opacity-50"
-                      >
-                        {busy === `uninstall:${plugin.id}`
-                          ? t('common.loading')
-                          : t('plugins.uninstall')}
-                      </button>
-                    </span>
-                  </div>
-
-                  {plugin.description && (
-                    <p className="text-sm text-text-secondary">{plugin.description}</p>
-                  )}
-
-                  <div className="flex flex-wrap items-center gap-1 text-[11px]">
-                    <span className="text-text-secondary">{t('plugins.permissions')}:</span>
-                    {plugin.permission_summary === 'none' ? (
-                      <span className="px-1.5 rounded bg-background text-text-secondary">
-                        {t('plugins.permissionNone')}
-                      </span>
-                    ) : (
-                      plugin.permission_summary.split(' ').map((chip) => (
-                        <span
-                          key={chip}
-                          className="px-1.5 rounded bg-background border border-border font-mono text-text-secondary"
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          disabled={busy !== null}
+                          loading={busy === `uninstall:${plugin.id}`}
+                          onClick={() => setPendingUninstall(plugin)}
                         >
-                          {chip}
-                        </span>
-                      ))
-                    )}
-                  </div>
+                          {t('plugins.uninstall', 'Uninstall')}
+                        </Button>
+                      </span>
+                    </div>
 
-                  <div className="flex flex-wrap items-center gap-3 text-[11px] text-text-secondary">
-                    <span>
-                      {t('plugins.size', '大小')}: {formatBytes(plugin.wasm_bytes)}
-                    </span>
-                    {plugin.installed_at && (
-                      <span>{new Date(plugin.installed_at).toLocaleString()}</span>
-                    )}
-                    <span className="font-mono truncate max-w-[24rem]" title={plugin.path}>
-                      {plugin.path}
-                    </span>
-                  </div>
-                </div>
-              ))
+                    {plugin.description && <p className="text-small text-ink-2">{plugin.description}</p>}
+
+                    <div className="flex flex-wrap items-center gap-1">
+                      <span className="text-micro text-ink-3">{t('plugins.permissions', 'Permissions')}:</span>
+                      {plugin.permission_summary === 'none' ? (
+                        <span className="text-micro text-ink-3">{t('plugins.permissionNone', 'none')}</span>
+                      ) : (
+                        <Chips values={plugin.permission_summary.split(' ')} />
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-3 text-micro text-ink-3">
+                      <span className="tabular">
+                        {t('plugins.size', 'Size')}: {formatBytes(plugin.wasm_bytes)}
+                      </span>
+                      {plugin.installed_at && (
+                        <span className="tabular">{formatDateTime(plugin.installed_at)}</span>
+                      )}
+                      <span className="max-w-[24rem] truncate font-mono" title={plugin.path}>
+                        {plugin.path}
+                      </span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
             )}
           </section>
 
           {data && data.legacy.length > 0 && (
-            <section className="space-y-2">
-              <h3 className="text-lg font-semibold text-text">{t('plugins.legacy')}</h3>
-              <p className="text-xs text-text-secondary">{t('plugins.legacyHint')}</p>
-              {data.legacy.map((plugin) => (
-                <div
-                  key={plugin.id}
-                  className="flex items-center gap-2 bg-surface rounded-lg border border-border px-4 py-2"
-                >
-                  <span className="font-mono text-sm text-text">{plugin.id}</span>
-                  {plugin.internal && (
-                    <span className="px-1.5 rounded bg-background text-[11px] text-text-secondary">
-                      internal
+            <section>
+              <h2 className="text-section font-semibold text-ink">{t('plugins.legacy', 'Config-only plugins')}</h2>
+              <p className="mb-2 mt-0.5 text-small text-ink-2">{t('plugins.legacyHint', 'Declared in the configuration file; no package on disk.')}</p>
+              <ul className="overflow-hidden rounded-panel border border-line">
+                {data.legacy.map((plugin) => (
+                  <li
+                    key={plugin.id}
+                    className="flex items-center gap-2 border-b border-line px-3 py-1.5 last:border-b-0"
+                  >
+                    <span className="font-mono text-small text-ink">{plugin.id}</span>
+                    {plugin.internal && <Badge tone="neutral">internal</Badge>}
+                    <span className="ml-auto text-micro text-ink-3">
+                      {plugin.enabled ? t('plugins.enabled', 'Enabled') : t('plugins.disabled', 'Disabled')}
                     </span>
-                  )}
-                  <span className="ml-auto text-xs text-text-secondary">
-                    {plugin.enabled ? t('plugins.enabled') : t('plugins.disabled')}
-                  </span>
-                  <label className="flex items-center gap-1 text-xs text-text-secondary">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={plugin.enabled}
                       disabled={busy !== null}
                       onChange={() =>
@@ -385,123 +392,122 @@ const Plugins: React.FC = () => {
                           apiClient.setPluginEnabled(plugin.id, !plugin.enabled)
                         )
                       }
+                      label={<span className="sr-only">{t('common.toggle', 'Toggle')}</span>}
                     />
-                    {t('plugins.enabled')}
-                  </label>
-                </div>
-              ))}
+                  </li>
+                ))}
+              </ul>
             </section>
           )}
 
-          <section className="bg-surface rounded-lg shadow border border-border p-4 space-y-3">
-            <div>
-              <h3 className="text-sm font-semibold text-text">{t('plugins.keys')}</h3>
-              <p className="text-xs text-text-secondary mt-1">{t('plugins.keysHint')}</p>
-            </div>
+          <section className="rounded-panel border border-line p-3">
+            <h2 className="text-section font-semibold text-ink">{t('plugins.keys', 'Trusted keys')}</h2>
+            <p className="mb-2 mt-0.5 text-small text-ink-2">{t('plugins.keysHint', 'A package signed by a trusted key loads without a warning.')}</p>
             {keys.length === 0 ? (
-              <p className="text-xs text-text-secondary">{t('plugins.keysEmpty')}</p>
+              <p className="text-small text-ink-3">{t('plugins.keysEmpty', 'No publisher key trusted yet.')}</p>
             ) : (
-              <ul className="space-y-1">
+              <ul className="mb-2 space-y-1">
                 {keys.map((key) => (
-                  <li key={key.name} className="flex items-center gap-2 text-xs">
-                    <span className="text-text">{key.name}</span>
-                    <span className="font-mono text-text-secondary" title={key.public_key}>
+                  <li key={key.name} className="flex items-center gap-2 text-small">
+                    <span className="text-ink">{key.name}</span>
+                    <span className="truncate font-mono text-micro text-ink-3" title={key.public_key}>
                       {shortKey(key.public_key)}
                     </span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        void run(`key:${key.name}`, () => apiClient.removePluginKey(key.name))
-                      }
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      className="ml-auto"
                       disabled={busy !== null}
-                      className="ml-auto px-2 py-0.5 rounded border border-border text-error hover:bg-background disabled:opacity-50"
+                      onClick={() => void run(`key:${key.name}`, () => apiClient.removePluginKey(key.name))}
                     >
-                      {t('plugins.removeKey')}
-                    </button>
+                      {t('plugins.removeKey', 'Remove key')}
+                    </Button>
                   </li>
                 ))}
               </ul>
             )}
-            <div className="flex flex-wrap gap-2">
-              <input
-                type="text"
-                value={keyName}
-                onChange={(e) => setKeyName(e.target.value)}
-                placeholder={t('plugins.keyName')}
-                className="w-40 px-3 py-1.5 rounded border border-border bg-background text-text text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-              />
-              <input
-                type="text"
-                value={keyValue}
-                onChange={(e) => setKeyValue(e.target.value)}
-                placeholder={t('plugins.keyPlaceholder')}
-                className="flex-1 min-w-[16rem] px-3 py-1.5 rounded border border-border bg-background text-text text-sm font-mono focus:outline-none focus:ring-2 focus:ring-primary"
-              />
-              <button
-                type="button"
-                onClick={addKey}
-                disabled={busy !== null || !keyName.trim() || !keyValue.trim()}
-                className="px-4 py-1.5 rounded bg-primary text-white text-sm hover:bg-secondary disabled:bg-border disabled:cursor-not-allowed"
+            <div className="flex flex-wrap items-end gap-2">
+              <Field label={t('plugins.keyName', 'Name')} htmlFor="plugin-key-name" className="w-40">
+                <Input
+                  id="plugin-key-name"
+                  value={keyName}
+                  onChange={(event) => setKeyName(event.target.value)}
+                  placeholder={t('plugins.keyName', 'Name')}
+                />
+              </Field>
+              <Field
+                label={t('plugins.keyValue', 'Public key')}
+                htmlFor="plugin-key-value"
+                className="min-w-[16rem] flex-1"
               >
-                {t('plugins.addKey')}
-              </button>
+                <Input
+                  id="plugin-key-value"
+                  value={keyValue}
+                  onChange={(event) => setKeyValue(event.target.value)}
+                  placeholder={t('plugins.keyPlaceholder', 'base64 public key')}
+                  className="font-mono"
+                />
+              </Field>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => void addKey()}
+                disabled={busy !== null || !keyName.trim() || !keyValue.trim()}
+                loading={busy === 'add-key'}
+              >
+                {t('plugins.addKey', 'Add key')}
+              </Button>
             </div>
           </section>
-        </>
+        </div>
       )}
 
       {tab === 'market' && (
-        <section className="space-y-3">
-          <div className="bg-surface rounded-lg shadow border border-border p-4 space-y-2">
+        <div className="space-y-3">
+          <div className="rounded-panel border border-line p-3">
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-sm font-semibold text-text">{t('plugins.tabMarket')}</h3>
-              <span className="text-xs text-text-secondary">
-                {t('plugins.count', { count: marketPlugins.length })}
-              </span>
-              <span className="ml-auto flex flex-wrap items-center gap-2">
+              <h2 className="text-section font-semibold text-ink">{t('plugins.tabMarket', 'Market')}</h2>
+              <span className="text-micro text-ink-3">{t('plugins.count', { count: marketPlugins.length })}</span>
+              <div className="ml-auto flex flex-wrap items-center gap-2">
                 {updateCount > 0 && (
-                  <button
-                    type="button"
+                  <Button
+                    variant="primary"
+                    size="sm"
                     onClick={updateAll}
                     disabled={marketBusy !== null}
-                    className="px-3 py-1.5 rounded bg-primary text-white text-sm hover:bg-secondary disabled:bg-border disabled:cursor-not-allowed"
+                    loading={marketBusy === 'market:update-all'}
                   >
-                    {marketBusy === 'market:update-all'
-                      ? t('common.loading')
-                      : t('plugins.marketUpdateAll', { count: updateCount })}
-                  </button>
+                    {t('plugins.marketUpdateAll', { count: updateCount })}
+                  </Button>
                 )}
-                <button
-                  type="button"
-                  onClick={() => void loadMarket()}
-                  className="px-3 py-1.5 rounded border border-border text-sm text-text hover:bg-background"
-                >
-                  {t('common.refresh', '刷新')}
-                </button>
-              </span>
+                <Button variant="ghost" size="sm" onClick={() => void loadMarket()}>
+                  {t('common.refresh', 'Refresh')}
+                </Button>
+              </div>
             </div>
-            <p className="text-xs text-text-secondary">{t('plugins.marketHint')}</p>
+            <p className="mb-1 mt-0.5 text-small text-ink-2">{t('plugins.marketHint', 'Indexes are fetched from the configured sources.')}</p>
             {market && market.sources.length > 0 ? (
-              <p className="text-[11px] text-text-secondary font-mono break-all">
-                {market.sources.join(' · ')}
-              </p>
+              <p className="break-all font-mono text-micro text-ink-3">{market.sources.join(' · ')}</p>
             ) : (
-              <p className="text-xs text-warning">{t('plugins.marketNoSources')}</p>
+              <p className="text-small text-warning">{t('plugins.marketNoSources', 'No market source configured')}</p>
             )}
-            <input
-              type="text"
-              value={marketQuery}
-              onChange={(e) => setMarketQuery(e.target.value)}
-              placeholder={t('plugins.marketSearch')}
-              className="w-full px-3 py-1.5 rounded border border-border bg-background text-text text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-            />
+            <div className="mt-2">
+              <Field label={t('plugins.marketSearch', 'Search')} htmlFor="market-search">
+                <Input
+                  id="market-search"
+                  value={marketQuery}
+                  onChange={(event) => setMarketQuery(event.target.value)}
+                  placeholder={t('plugins.marketSearch', 'Search name, id or tag')}
+                />
+              </Field>
+            </div>
           </div>
 
           {market && market.errors.length > 0 && (
-            <div className="rounded-lg border border-error/40 bg-error/10 px-4 py-2 text-xs text-error space-y-1">
-              <p className="font-semibold">{t('plugins.marketSourceErrors')}</p>
+            <div className="space-y-0.5 rounded-panel border px-3 py-2 tone-danger">
+              <p className="text-small font-medium">{t('plugins.marketSourceErrors', 'Market source failed')}</p>
               {market.errors.map((sourceError) => (
-                <p key={sourceError.source} className="font-mono break-all">
+                <p key={sourceError.source} className="break-all font-mono text-micro">
                   {sourceError.source}: {sourceError.error}
                 </p>
               ))}
@@ -509,81 +515,93 @@ const Plugins: React.FC = () => {
           )}
 
           {visibleMarketPlugins.length === 0 ? (
-            <p className="text-sm text-text-secondary">{t('plugins.marketEmpty')}</p>
+            <p className="rounded-panel border border-line px-4 py-10 text-center text-small text-ink-2">
+              {t('plugins.marketEmpty', 'Nothing to install from the configured sources.')}
+            </p>
           ) : (
-            visibleMarketPlugins.map((plugin) => (
-              <div
-                key={plugin.id}
-                className="bg-surface rounded-lg shadow border border-border p-4 space-y-2"
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-base font-semibold text-text">{plugin.name}</span>
-                  <span className="font-mono text-[11px] text-text-secondary">
-                    {plugin.id}@{plugin.version}
-                  </span>
-                  {plugin.installed_version && !plugin.update_available && (
-                    <span className="px-1.5 py-0.5 rounded border border-success/40 bg-success/10 text-[11px] text-success">
-                      {t('plugins.marketInstalledAt', { version: plugin.installed_version })}
-                    </span>
-                  )}
-                  {plugin.update_available && (
-                    <span className="px-1.5 py-0.5 rounded border border-warning/40 bg-warning/10 text-[11px] text-warning">
-                      {t('plugins.marketUpdate', { version: plugin.version })}
-                    </span>
-                  )}
-                  <span className="ml-auto">
-                    <button
-                      type="button"
-                      onClick={() => installFromMarket(plugin)}
-                      disabled={
-                        marketBusy !== null ||
-                        (Boolean(plugin.installed_version) && !plugin.update_available)
-                      }
-                      className="px-3 py-1 rounded bg-primary text-white text-xs hover:bg-secondary disabled:bg-border disabled:cursor-not-allowed"
-                    >
-                      {marketBusy === `market:${plugin.id}`
-                        ? t('plugins.marketInstalling')
-                        : plugin.update_available
-                          ? t('plugins.marketUpdate', { version: plugin.version })
-                          : plugin.installed_version
-                            ? t('plugins.marketUpToDate')
-                            : t('plugins.marketInstall')}
-                    </button>
-                  </span>
-                </div>
-
-                {plugin.description && (
-                  <p className="text-sm text-text-secondary">{plugin.description}</p>
-                )}
-
-                <div className="flex flex-wrap items-center gap-1 text-[11px]">
-                  {plugin.author && (
-                    <span className="text-text-secondary">{plugin.author}</span>
-                  )}
-                  {plugin.dependencies.length > 0 && (
-                    <>
-                      <span className="text-text-secondary">{t('plugins.marketDeps')}:</span>
-                      {plugin.dependencies.map((dependency) => (
-                        <span
-                          key={dependency.id}
-                          className="px-1.5 rounded bg-background border border-border font-mono text-text-secondary"
+            <ul className="overflow-hidden rounded-panel border border-line">
+              {visibleMarketPlugins.map((plugin) => {
+                const installedHere = Boolean(plugin.installed_version) && !plugin.update_available
+                return (
+                  <li key={plugin.id} className="space-y-1.5 border-b border-line px-3 py-2.5 last:border-b-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-body font-medium text-ink">{plugin.name}</span>
+                      <span className="font-mono text-micro text-ink-3">
+                        {plugin.id}@{plugin.version}
+                      </span>
+                      {installedHere && (
+                        <Badge tone="success">
+                          {t('plugins.marketInstalledAt', { version: plugin.installed_version ?? '' })}
+                        </Badge>
+                      )}
+                      {plugin.update_available && (
+                        <Badge tone="warning">{t('plugins.marketUpdate', { version: plugin.version })}</Badge>
+                      )}
+                      <span className="ml-auto">
+                        <Button
+                          variant={installedHere ? 'ghost' : 'primary'}
+                          size="sm"
+                          onClick={() => installFromMarket(plugin)}
+                          disabled={marketBusy !== null || installedHere}
+                          loading={marketBusy === `market:${plugin.id}`}
                         >
-                          {dependency.id}
-                          {dependency.version ? ` ${dependency.version}` : ''}
-                        </span>
-                      ))}
-                    </>
-                  )}
-                </div>
-              </div>
-            ))
+                          {plugin.update_available
+                            ? t('plugins.marketUpdate', { version: plugin.version })
+                            : plugin.installed_version
+                              ? t('plugins.marketUpToDate', 'Up to date')
+                              : t('plugins.marketInstall', 'Install')}
+                        </Button>
+                      </span>
+                    </div>
+
+                    {plugin.description && <p className="text-small text-ink-2">{plugin.description}</p>}
+
+                    <div className="flex flex-wrap items-center gap-1 text-micro text-ink-3">
+                      {plugin.author && <span>{plugin.author}</span>}
+                      {plugin.dependencies.length > 0 && (
+                        <>
+                          <span>{t('plugins.marketDeps', 'Depends on')}:</span>
+                          <Chips
+                            values={plugin.dependencies.map(
+                              (dependency) => `${dependency.id}${dependency.version ? ` ${dependency.version}` : ''}`
+                            )}
+                          />
+                        </>
+                      )}
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
           )}
 
-          <p className="text-[11px] text-text-secondary">{t('plugins.marketRestartHint')}</p>
-        </section>
+          <p className="text-micro text-ink-3">{t('plugins.marketRestartHint', 'Restart the daemon to load new packages.')}</p>
+        </div>
+      )}
+
+      {pendingUninstall && (
+        <Dialog
+          open
+          onClose={() => setPendingUninstall(null)}
+          title={t('plugins.uninstall', 'Uninstall')}
+          width="sm"
+          closeLabel={t('common.close', 'Close')}
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setPendingUninstall(null)}>
+                {t('common.cancel', 'Cancel')}
+              </Button>
+              <Button variant="danger" size="sm" onClick={() => void uninstall(pendingUninstall)}>
+                {t('common.confirm', 'Confirm')}
+              </Button>
+            </div>
+          }
+        >
+          <p className="text-small text-ink-2">
+            {t('plugins.uninstallConfirm', { name: pendingUninstall.name })}
+          </p>
+        </Dialog>
       )}
     </div>
-  );
-};
-
-export default Plugins;
+  )
+}

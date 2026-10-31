@@ -137,7 +137,7 @@ export const MainAgentSection: React.FC<SectionProps> = ({ draft, setDraft, t })
           <option key={id} value={id} />
         ))}
       </datalist>
-      <p className="-mt-2 text-xs text-text-secondary">
+      <p className="-mt-2 text-xs text-ink-2">
         {t('config.sections.mainAgent.modelHint')}
       </p>
       <NumberField
@@ -204,14 +204,14 @@ export const MainAgentSection: React.FC<SectionProps> = ({ draft, setDraft, t })
       />
 
       <Subheading>{t('config.sections.mainAgent.agents')}</Subheading>
-      <p className="text-sm text-text-secondary -mt-2 mb-2">{t('config.sections.mainAgent.agentsHint')}</p>
+      <p className="text-sm text-ink-2 -mt-2 mb-2">{t('config.sections.mainAgent.agentsHint')}</p>
       {agents.map((row, idx) => (
         <div
           key={idx}
-          className="border border-border rounded-lg p-4 space-y-3 bg-background/50"
+          className="border border-line rounded-lg p-4 space-y-3 bg-surface-2/50"
         >
           <div className="flex justify-between items-center">
-            <span className="text-sm font-medium text-text">
+            <span className="text-sm font-medium text-ink">
               {t('config.sections.mainAgent.agentCard')} #{idx + 1}
             </span>
             <button
@@ -324,7 +324,7 @@ export const MainAgentSection: React.FC<SectionProps> = ({ draft, setDraft, t })
       ))}
       <button
         type="button"
-        className="px-4 py-2 rounded-lg bg-surface border border-border text-text hover:bg-background text-sm"
+        className="px-4 py-2 rounded-lg bg-surface border border-line text-ink hover:bg-surface-2 text-sm"
         onClick={() => setAgents([...agents, rowFromAgent({})])}
       >
         {t('config.sections.mainAgent.addAgent')}
@@ -333,9 +333,9 @@ export const MainAgentSection: React.FC<SectionProps> = ({ draft, setDraft, t })
   )
 }
 
-const labelClass = 'block text-sm font-medium text-text mb-1'
+const labelClass = 'block text-sm font-medium text-ink mb-1'
 const inputClass =
-  'w-full px-3 py-2 rounded-lg bg-surface border border-border text-text text-sm focus:outline-none focus:ring-2 focus:ring-primary/30'
+  'w-full px-3 py-2 rounded-lg bg-surface border border-line text-ink text-sm focus:outline-none focus:ring-2 focus:ring-accent/30'
 
 const Field: React.FC<{
   label: string

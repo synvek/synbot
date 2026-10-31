@@ -30,9 +30,9 @@ export const GeneralSection: React.FC<SectionProps> = ({ draft, setDraft, t }) =
         onChange={(v) => setDraft((d) => ({ ...d, mainChannel: v }))}
       />
       <div>
-        <p className="text-sm font-medium text-text mb-1">{t('config.sections.general.configVersion')}</p>
-        <p className="text-sm text-text-secondary font-mono">{configVersion}</p>
-        <p className="text-xs text-text-secondary mt-1">{t('config.sections.general.configVersionHint')}</p>
+        <p className="text-sm font-medium text-ink mb-1">{t('config.sections.general.configVersion')}</p>
+        <p className="text-sm text-ink-2 font-mono">{configVersion}</p>
+        <p className="text-xs text-ink-2 mt-1">{t('config.sections.general.configVersionHint')}</p>
       </div>
     </FieldGroup>
   )

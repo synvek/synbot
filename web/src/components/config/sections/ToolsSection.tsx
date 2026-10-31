@@ -92,7 +92,7 @@ export const ToolsSection: React.FC<SectionProps> = ({ draft, setDraft, t }) => 
           { value: 'trusted', label: 'Trusted' },
         ]}
       />
-      <p className="text-xs text-text-secondary -mt-2 mb-2">
+      <p className="text-xs text-ink-2 -mt-2 mb-2">
         {t('config.sections.tools.securityProfileHint')}
       </p>
       <Subheading>{t('config.sections.tools.exec')}</Subheading>
@@ -110,12 +110,12 @@ export const ToolsSection: React.FC<SectionProps> = ({ draft, setDraft, t }) => 
         onChange={(v) => patchTools({ exec: { ...exec, restrictToWorkspace: v } })}
       />
       <div>
-        <label className="block text-sm font-medium text-text mb-1" htmlFor="denyPat">
+        <label className="block text-sm font-medium text-ink mb-1" htmlFor="denyPat">
           {t('config.sections.tools.denyPatterns')}
         </label>
         <textarea
           id="denyPat"
-          className="w-full min-h-[100px] font-mono text-sm px-3 py-2 rounded-lg bg-surface border border-border text-text"
+          className="w-full min-h-[100px] font-mono text-sm px-3 py-2 rounded-lg bg-surface border border-line text-ink"
           value={asArray<string>(exec.denyPatterns).join('\n')}
           onChange={(e) =>
             patchTools({
@@ -128,12 +128,12 @@ export const ToolsSection: React.FC<SectionProps> = ({ draft, setDraft, t }) => 
         />
       </div>
       <div>
-        <label className="block text-sm font-medium text-text mb-1" htmlFor="allowPat">
+        <label className="block text-sm font-medium text-ink mb-1" htmlFor="allowPat">
           {t('config.sections.tools.allowPatterns')}
         </label>
         <textarea
           id="allowPat"
-          className="w-full min-h-[80px] font-mono text-sm px-3 py-2 rounded-lg bg-surface border border-border text-text"
+          className="w-full min-h-[80px] font-mono text-sm px-3 py-2 rounded-lg bg-surface border border-line text-ink"
           value={
             exec.allowPatterns == null
               ? ''
@@ -200,7 +200,7 @@ export const ToolsSection: React.FC<SectionProps> = ({ draft, setDraft, t }) => 
       {rules.map((r, idx) => {
         const row = asRecord(r)
         return (
-          <div key={idx} className="border border-border rounded p-3 space-y-2">
+          <div key={idx} className="border border-line rounded p-3 space-y-2">
             <div className="flex justify-between">
               <span className="text-sm font-medium">{t('config.sections.tools.rule')} {idx + 1}</span>
               <button
@@ -277,7 +277,7 @@ export const ToolsSection: React.FC<SectionProps> = ({ draft, setDraft, t }) => 
       })}
       <button
         type="button"
-        className="px-3 py-1.5 rounded-lg bg-surface border border-border text-sm"
+        className="px-3 py-1.5 rounded-lg bg-surface border border-line text-sm"
         onClick={() =>
           patchTools({
             exec: {
@@ -511,7 +511,7 @@ export const ToolsSection: React.FC<SectionProps> = ({ draft, setDraft, t }) => 
         servers.map((s, idx) => {
           const srv = asRecord(s)
           return (
-            <div key={idx} className="border border-border rounded p-3 space-y-2">
+            <div key={idx} className="border border-line rounded p-3 space-y-2">
               <div className="flex justify-between">
                 <span className="text-sm font-medium">
                   {t('config.sections.tools.mcpServer')} {idx + 1}
@@ -562,9 +562,9 @@ export const ToolsSection: React.FC<SectionProps> = ({ draft, setDraft, t }) => 
                 }}
               />
               <div>
-                <label className="block text-sm font-medium text-text mb-1">{t('config.sections.tools.mcpArgs')}</label>
+                <label className="block text-sm font-medium text-ink mb-1">{t('config.sections.tools.mcpArgs')}</label>
                 <textarea
-                  className="w-full font-mono text-sm px-3 py-2 rounded-lg bg-surface border border-border"
+                  className="w-full font-mono text-sm px-3 py-2 rounded-lg bg-surface border border-line"
                   value={asArray<string>(srv.args).join('\n')}
                   onChange={(e) => {
                     const next = [...servers]
@@ -587,13 +587,13 @@ export const ToolsSection: React.FC<SectionProps> = ({ draft, setDraft, t }) => 
                 }}
               />
               <div>
-                <label className="block text-sm font-medium text-text mb-1" htmlFor={`mcp-env-${idx}`}>
+                <label className="block text-sm font-medium text-ink mb-1" htmlFor={`mcp-env-${idx}`}>
                   {t('config.sections.tools.mcpEnv')}
                 </label>
-                <p className="text-xs text-text-muted mb-1">{t('config.sections.tools.mcpEnvHint')}</p>
+                <p className="text-xs text-ink-muted mb-1">{t('config.sections.tools.mcpEnvHint')}</p>
                 <textarea
                   id={`mcp-env-${idx}`}
-                  className="w-full min-h-[72px] font-mono text-sm px-3 py-2 rounded-lg bg-surface border border-border"
+                  className="w-full min-h-[72px] font-mono text-sm px-3 py-2 rounded-lg bg-surface border border-line"
                   value={recordToEnvLines(srv.env)}
                   onChange={(e) => {
                     const next = [...servers]
@@ -606,13 +606,13 @@ export const ToolsSection: React.FC<SectionProps> = ({ draft, setDraft, t }) => 
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-text mb-1" htmlFor={`mcp-hdr-${idx}`}>
+                <label className="block text-sm font-medium text-ink mb-1" htmlFor={`mcp-hdr-${idx}`}>
                   {t('config.sections.tools.mcpHeaders')}
                 </label>
-                <p className="text-xs text-text-muted mb-1">{t('config.sections.tools.mcpHeadersHint')}</p>
+                <p className="text-xs text-ink-muted mb-1">{t('config.sections.tools.mcpHeadersHint')}</p>
                 <textarea
                   id={`mcp-hdr-${idx}`}
-                  className="w-full min-h-[72px] font-mono text-sm px-3 py-2 rounded-lg bg-surface border border-border"
+                  className="w-full min-h-[72px] font-mono text-sm px-3 py-2 rounded-lg bg-surface border border-line"
                   value={recordToHeaderLines(srv.headers)}
                   onChange={(e) => {
                     const next = [...servers]
@@ -664,7 +664,7 @@ export const ToolsSection: React.FC<SectionProps> = ({ draft, setDraft, t }) => 
       {mcp && (
         <button
           type="button"
-          className="px-3 py-1.5 rounded-lg bg-surface border border-border text-sm"
+          className="px-3 py-1.5 rounded-lg bg-surface border border-line text-sm"
           onClick={() =>
             patchTools({
               mcp: {

@@ -45,11 +45,40 @@
     "stopped": "Stopped",
     "yes": "Yes",
     "no": "No",
-    "ok": "OK"
+    "ok": "OK",
+    "language": "Language",
+    "copy": "Copy"
   },
   "app": {
     "title": "Synbot",
     "description": "Administration dashboard for managing system components"
+  },
+  "nav": {
+    "workspace": "Workspace",
+    "automation": "Automation",
+    "extensions": "Extensions",
+    "system": "System"
+  },
+  "shell": {
+    "search": "Search",
+    "searchPlaceholder": "Search pages, themes, actions…",
+    "noResults": "Nothing matches",
+    "toggleSidebar": "Toggle sidebar",
+    "focusMode": "Focus mode",
+    "theme": "Theme",
+    "appearance": "Appearance",
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System",
+    "accent": "Accent",
+    "account": "Account",
+    "signedInAs": "Signed in as {{name}}",
+    "daemonOnline": "Daemon running",
+    "daemonOffline": "Daemon unreachable",
+    "daemonUptime": "Up {{uptime}}",
+    "groups": "Pages",
+    "appearanceGroup": "Appearance",
+    "actions": "Actions"
   },
   "sidebar": {
     "overview": "Overview",
@@ -95,6 +124,7 @@
     "info": "Info"
   },
   "chat": {
+    "workspacePanel": "Workspace panel",
     "title": "Web Chat",
     "noMessages": "No messages yet. Start a conversation!",
     "typeMessage": "Type your message...",
@@ -131,9 +161,23 @@
       "max_tool_errors": "Tools kept failing for several rounds, so the turn stopped. Check tool configuration or workspace permissions.",
       "error": "The model call failed; see the error message above.",
       "cancelled": "Ended because you asked to stop."
-    }
+    },
+    "tokens": "{{total}} tokens",
+    "jumpToLatest": "Jump to latest",
+    "composerHint": "Enter to send · Shift+Enter for a new line · / for commands",
+    "emptyOffline": "Not connected",
+    "emptyOfflineHint": "Waiting for the Synbot daemon on this host.",
+    "emptyNoProject": "No workspace selected",
+    "emptyNoProjectHint": "Pick a folder in the workspace panel to scope the agent.",
+    "emptyTitle": "Nothing here yet",
+    "emptyHint": "Ask about the workspace, or type / for the available commands.",
+    "offline": "Connection lost — reconnecting to the daemon",
+    "views": "Views",
+    "showInspector": "Show workspace panel",
+    "hideInspector": "Hide workspace panel"
   },
   "project": {
+    "workspaceSelect": "Workspace",
     "title": "Workspace",
     "refresh": "Refresh",
     "globalWorkspace": "Default workspace (~/.synbot/workspace)",
@@ -207,7 +251,7 @@
     "counts": "{{running}} running / {{total}} total",
     "elapsed": "{{seconds}}s"
   },
-  "terminal":   {
+  "terminal": {
     "restart": "Restart terminal",
     "close": "Close terminal",
     "status": {
@@ -228,7 +272,8 @@
     "reject": "Reject",
     "approved": "Approved",
     "rejected": "Rejected",
-    "resolvedElsewhere": "{{outcome}} by {{responder}}"
+    "resolvedElsewhere": "{{outcome}} by {{responder}}",
+    "pending": "Waiting for the daemon…"
   },
   "config": {
     "title": "Configuration",
@@ -250,6 +295,7 @@
     "jsonEditor": "Configuration JSON",
     "advancedJson": "Advanced JSON",
     "backToForm": "Back to form editor",
+    "formView": "Form",
     "sectionNav": "Configuration sections",
     "secretLeaveUnchanged": "Leave as-is to keep the current secret on the server.",
     "sections": {
@@ -547,12 +593,37 @@
     "roles": "Roles",
     "lastUpdated": "Last updated",
     "autoRefresh": "Auto-refresh",
-    "failedToFetch": "Failed to fetch system status"
+    "failedToFetch": "Failed to fetch system status",
+    "daemon": "Daemon",
+    "model": "Model",
+    "modelUnset": "Not set",
+    "modelHintUnset": "Pick a provider and model",
+    "sandbox": "Sandbox",
+    "sandboxOff": "Off",
+    "sandboxApp": "app + tool",
+    "sandboxHintOff": "Runs on the host",
+    "failedChannels": "{{count}} failing",
+    "recentSessions": "Recent sessions",
+    "recentSessionsEmpty": "No sessions yet — start one in Chat.",
+    "viewAll": "View all",
+    "setup": "First-run checklist",
+    "setupHint": "Four settings make this console useful.",
+    "setupModel": "Set a provider and model",
+    "setupChannels": "Enable a channel",
+    "setupWorkspace": "Open a workspace folder",
+    "setupSandbox": "Turn on a sandbox",
+    "setupDone": "Done",
+    "setupTodo": "To do",
+    "configure": "Configure",
+    "openChat": "Open chat",
+    "refreshFailed": "Could not refresh the daemon status",
+    "setupAllDone": "Everything is configured."
   },
   "login": {
-    "title": "Admin Dashboard",
+    "title": "Sign in",
     "invalidCredentials": "Invalid username or password",
-    "loggingIn": "Logging in..."
+    "loggingIn": "Logging in...",
+    "subtitle": "Sign in to manage this daemon."
   },
   "colorSchemes": {
     "blueOcean": "Blue Ocean",
@@ -580,7 +651,12 @@
     "created": "Created",
     "messageHistory": "Message History",
     "selectSessionToView": "Select a session to view details",
-    "failedToFetch": "Failed to fetch sessions"
+    "failedToFetch": "Failed to fetch sessions",
+    "emptyHint": "Sessions appear here once someone talks to Synbot on any channel.",
+    "noMessages": "No messages recorded for this session.",
+    "clearFilters": "Clear filters",
+    "filters": "Filters",
+    "detail": "Session detail"
   },
   "channels": {
     "title": "Channels",
@@ -593,7 +669,24 @@
     "connected": "Connected",
     "disconnected": "Disconnected",
     "error": "Error",
-    "status": "Status"
+    "status": "Status",
+    "failedChannels": "{{count}} channels failed to connect",
+    "emptyHint": "Add a channel in Configuration to let Synbot answer where you already talk.",
+    "started": "Started",
+    "lastConnected": "Last connected",
+    "lastReceived": "Last received",
+    "lastSent": "Last sent",
+    "supportsSend": "Send",
+    "supportsReceive": "Receive",
+    "latency": "Latency",
+    "reconnects": "Reconnects",
+    "lastActivity": "Last activity",
+    "stConnected": "Connected",
+    "stStarting": "Starting",
+    "stReconnecting": "Reconnecting",
+    "stFailed": "Failed",
+    "stDisabled": "Disabled",
+    "stStopped": "Stopped"
   },
   "workflows": {
     "title": "Workflows",
@@ -632,7 +725,13 @@
       "completed": "Completed",
       "current": "Current",
       "pending": "Pending"
-    }
+    },
+    "confirm": "Continue",
+    "deleted": "Workflow record deleted",
+    "restarted": "Workflow restarted from step 1",
+    "resumed": "Workflow resumed",
+    "cancelledRun": "Workflow cancelled",
+    "actionFailed": "The action was rejected"
   },
   "cron": {
     "title": "Cron Jobs",
@@ -650,7 +749,13 @@
     "enabled": "Enabled",
     "disabled": "Disabled",
     "status": "Status",
-    "na": "N/A"
+    "na": "N/A",
+    "emptyHint": "Jobs are declared in the configuration file; nothing is scheduled yet.",
+    "updateFailed": "Could not update the job",
+    "updated": "{{name}} updated",
+    "runSuccess": "Succeeded",
+    "runRunning": "Running",
+    "runFailed": "Failed"
   },
   "roles": {
     "title": "Roles",
@@ -820,7 +925,11 @@
     "kindPluginPermission": "Plugin permission",
     "outcomeBlocked": "blocked",
     "outcomeNeedsUser": "needs approval",
-    "outcomeAllowed": "allowed"
+    "outcomeAllowed": "allowed",
+    "kind": "Kind",
+    "outcome": "Outcome",
+    "subject": "Subject",
+    "command": "Command"
   },
   "logs": {
     "title": "Logs",
@@ -841,7 +950,9 @@
     "wsError": "WebSocket connection error",
     "timestamp": "Timestamp",
     "target": "Target",
-    "message": "Message"
+    "message": "Message",
+    "following": "Following",
+    "paused": "Paused"
   },
   "desktop": {
     "turnFinishedTitle": "Synbot finished a turn",

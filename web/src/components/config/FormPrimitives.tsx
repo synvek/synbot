@@ -1,9 +1,6 @@
 import React, { useEffect, useState } from 'react'
+import { Field, Input, Select, Switch } from '../../ui'
 import { CONFIG_SECRET_MASK } from './immutable'
-
-const inputClass =
-  'w-full px-3 py-2 rounded-lg bg-surface border border-border text-text text-sm focus:outline-none focus:ring-2 focus:ring-primary/30'
-const labelClass = 'block text-sm font-medium text-text mb-1'
 
 type FieldProps = {
   id?: string
@@ -19,23 +16,20 @@ export const TextField: React.FC<
     disabled?: boolean
     /** Id of a `<datalist>` with suggestions; the field still accepts free text. */
     list?: string
+    hint?: React.ReactNode
   }
-> = ({ id, label, value, onChange, placeholder, disabled, list, className = '' }) => (
-  <div className={className}>
-    <label htmlFor={id} className={labelClass}>
-      {label}
-    </label>
-    <input
+> = ({ id, label, value, onChange, placeholder, disabled, list, hint, className = '' }) => (
+  <Field label={label} htmlFor={id} hint={hint} className={className}>
+    <Input
       id={id}
       type="text"
-      className={inputClass}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       list={list}
       disabled={disabled}
     />
-  </div>
+  </Field>
 )
 
 export const NumberField: React.FC<
@@ -48,14 +42,11 @@ export const NumberField: React.FC<
     disabled?: boolean
   }
 > = ({ id, label, value, onChange, min, max, step, disabled, className = '' }) => (
-  <div className={className}>
-    <label htmlFor={id} className={labelClass}>
-      {label}
-    </label>
-    <input
+  <Field label={label} htmlFor={id} className={className}>
+    <Input
       id={id}
       type="number"
-      className={inputClass}
+      className="tabular font-mono"
       value={Number.isFinite(value) ? value : 0}
       onChange={(e) => onChange(Number(e.target.value))}
       min={min}
@@ -63,7 +54,7 @@ export const NumberField: React.FC<
       step={step}
       disabled={disabled}
     />
-  </div>
+  </Field>
 )
 
 export const Toggle: React.FC<
@@ -73,18 +64,9 @@ export const Toggle: React.FC<
     disabled?: boolean
   }
 > = ({ id, label, checked, onChange, disabled, className = '' }) => (
-  <div className={`flex items-center gap-2 ${className}`}>
-    <input
-      id={id}
-      type="checkbox"
-      className="rounded border-border text-primary focus:ring-primary/30"
-      checked={checked}
-      onChange={(e) => onChange(e.target.checked)}
-      disabled={disabled}
-    />
-    <label htmlFor={id} className="text-sm text-text cursor-pointer">
-      {label}
-    </label>
+  <div className={`flex min-h-8 items-center gap-2 ${className}`}>
+    <Switch id={id} label={label} checked={checked} onChange={onChange} disabled={disabled} />
+    <span className="text-small text-ink-2">{label}</span>
   </div>
 )
 
@@ -96,24 +78,15 @@ export const SelectField: React.FC<
     disabled?: boolean
   }
 > = ({ id, label, value, onChange, options, disabled, className = '' }) => (
-  <div className={className}>
-    <label htmlFor={id} className={labelClass}>
-      {label}
-    </label>
-    <select
-      id={id}
-      className={inputClass}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      disabled={disabled}
-    >
+  <Field label={label} htmlFor={id} className={className}>
+    <Select id={id} value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled}>
       {options.map((o) => (
         <option key={o.value} value={o.value}>
           {o.label}
         </option>
       ))}
-    </select>
-  </div>
+    </Select>
+  </Field>
 )
 
 /**
@@ -137,15 +110,17 @@ export const SecretField: React.FC<
   const display = editing ? local : value === CONFIG_SECRET_MASK ? CONFIG_SECRET_MASK : value
 
   return (
-    <div className={className}>
-      <label htmlFor={id} className={labelClass}>
-        {label}
-      </label>
-      <input
+    <Field
+      label={label}
+      htmlFor={id}
+      hint={leaveUnchangedHint && value === CONFIG_SECRET_MASK && !editing ? leaveUnchangedHint : undefined}
+      className={className}
+    >
+      <Input
         id={id}
         type="password"
         autoComplete="new-password"
-        className={inputClass}
+        className="font-mono"
         value={display}
         onChange={(e) => {
           const v = e.target.value
@@ -166,19 +141,22 @@ export const SecretField: React.FC<
         }}
         placeholder={placeholder}
       />
-      {leaveUnchangedHint && value === CONFIG_SECRET_MASK && !editing && (
-        <p className="mt-1 text-xs text-text-secondary">{leaveUnchangedHint}</p>
-      )}
-    </div>
+    </Field>
   )
 }
 
 export const Subheading: React.FC<{ children: React.ReactNode; className?: string }> = ({
   children,
   className = '',
-}) => <h3 className={`text-lg font-semibold text-text mt-6 mb-3 ${className}`}>{children}</h3>
+}) => (
+  <h3
+    className={`mb-2 mt-5 text-micro font-medium uppercase tracking-wide text-ink-3 ${className}`}
+  >
+    {children}
+  </h3>
+)
 
 export const FieldGroup: React.FC<{ children: React.ReactNode; className?: string }> = ({
   children,
   className = '',
-}) => <div className={`space-y-4 ${className}`}>{children}</div>
+}) => <div className={`space-y-3 ${className}`}>{children}</div>

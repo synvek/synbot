@@ -12,6 +12,7 @@ import type {
   XlsxPreview,
 } from '../types/api';
 import { useI18n } from '../i18n/I18nContext';
+import { formatDateTime } from '../utils/datetime';
 
 interface DeliverablePanelProps {
   project: Project;
@@ -39,10 +40,7 @@ function formatBytes(size: number) {
 function formatWhen(ms: number) {
   if (!ms) return '';
   const date = new Date(ms);
-  return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-  })}`;
+  return formatDateTime(date);
 }
 
 /**
@@ -141,7 +139,7 @@ export default function DeliverablePanel({ project }: DeliverablePanelProps) {
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border text-[11px] text-text-secondary">
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-line text-[11px] text-ink-2">
         <span>
           {t('project.deliverableCount', { count: entries.length })}
         </span>
@@ -151,7 +149,7 @@ export default function DeliverablePanel({ project }: DeliverablePanelProps) {
         <button
           type="button"
           onClick={() => setReloadToken((value) => value + 1)}
-          className="ml-auto p-1 rounded hover:text-text"
+          className="ml-auto p-1 rounded hover:text-ink"
           title={t('project.refresh', '刷新')}
         >
           <RefreshCw size={11} />
@@ -162,10 +160,10 @@ export default function DeliverablePanel({ project }: DeliverablePanelProps) {
 
       <ul className="flex-1 overflow-y-auto text-xs">
         {loading && entries.length === 0 && (
-          <li className="px-3 py-2 text-text-secondary">{t('common.loading')}</li>
+          <li className="px-3 py-2 text-ink-2">{t('common.loading')}</li>
         )}
         {!loading && entries.length === 0 && (
-          <li className="px-3 py-2 text-text-secondary">
+          <li className="px-3 py-2 text-ink-2">
             {t(
               'project.deliverableEmpty',
               '还没有生成文档。agent 写出 docx/xlsx/pptx/pdf 后会出现在这里。'
@@ -178,14 +176,14 @@ export default function DeliverablePanel({ project }: DeliverablePanelProps) {
               type="button"
               onClick={() => void openPreview(entry)}
               disabled={openingPath === entry.path}
-              className="flex-1 min-w-0 flex items-center gap-2 px-3 py-1 text-left hover:bg-background disabled:opacity-50"
+              className="flex-1 min-w-0 flex items-center gap-2 px-3 py-1 text-left hover:bg-surface-2 disabled:opacity-50"
               title={`${entry.path} — ${formatWhen(entry.modified_ms)}`}
             >
-              <span className="shrink-0 w-9 text-[9px] font-semibold text-text-secondary">
+              <span className="shrink-0 w-9 text-[9px] font-semibold text-ink-2">
                 {KIND_BADGE[entry.kind] ?? entry.kind.toUpperCase()}
               </span>
-              <span className="truncate font-mono text-text">{entry.name}</span>
-              <span className="ml-auto shrink-0 text-[10px] text-text-secondary">
+              <span className="truncate font-mono text-ink">{entry.name}</span>
+              <span className="ml-auto shrink-0 text-[10px] text-ink-2">
                 {formatBytes(entry.size)}
               </span>
             </button>
@@ -193,7 +191,7 @@ export default function DeliverablePanel({ project }: DeliverablePanelProps) {
               type="button"
               onClick={() => void download(entry)}
               disabled={busyPath === entry.path}
-              className="shrink-0 p-1 mr-1 rounded text-text-secondary opacity-0 group-hover:opacity-100 hover:text-text disabled:opacity-50"
+              className="shrink-0 p-1 mr-1 rounded text-ink-2 opacity-0 group-hover:opacity-100 hover:text-ink disabled:opacity-50"
               title={t('project.deliverableDownload', '导出')}
             >
               <Download size={12} />
@@ -204,12 +202,12 @@ export default function DeliverablePanel({ project }: DeliverablePanelProps) {
 
       {showPreview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6">
-          <div className="flex flex-col w-full max-w-4xl max-h-[85vh] rounded-lg bg-surface border border-border overflow-hidden">
-            <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
-              <span className="text-[9px] font-semibold text-text-secondary w-9 shrink-0">
+          <div className="flex flex-col w-full max-w-4xl max-h-[85vh] rounded-lg bg-surface border border-line overflow-hidden">
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-line">
+              <span className="text-[9px] font-semibold text-ink-2 w-9 shrink-0">
                 {opened ? KIND_BADGE[opened.preview.kind] ?? opened.preview.kind : ''}
               </span>
-              <span className="text-sm font-mono text-text truncate">
+              <span className="text-sm font-mono text-ink truncate">
                 {opened?.path ?? openingPath ?? ''}
               </span>
               {opened?.preview.truncated && (
@@ -222,7 +220,7 @@ export default function DeliverablePanel({ project }: DeliverablePanelProps) {
                   type="button"
                   onClick={() => void download({ path: opened.path, name: opened.name })}
                   disabled={busyPath === opened.path}
-                  className="ml-auto flex items-center gap-1 px-1.5 py-0.5 rounded border border-border text-[11px] text-text-secondary hover:text-text disabled:opacity-50"
+                  className="ml-auto flex items-center gap-1 px-1.5 py-0.5 rounded border border-line text-[11px] text-ink-2 hover:text-ink disabled:opacity-50"
                 >
                   <Download size={11} />
                   {busyPath === opened.path
@@ -233,7 +231,7 @@ export default function DeliverablePanel({ project }: DeliverablePanelProps) {
               <button
                 type="button"
                 onClick={closePreview}
-                className={`${opened ? '' : 'ml-auto '}p-1 rounded text-text-secondary hover:text-text`}
+                className={`${opened ? '' : 'ml-auto '}p-1 rounded text-ink-2 hover:text-ink`}
               >
                 <X size={16} />
               </button>
@@ -242,10 +240,10 @@ export default function DeliverablePanel({ project }: DeliverablePanelProps) {
             {previewError ? (
               <div className="p-4 text-sm text-error">
                 <div className="mb-1">{t('project.deliverablePreviewFailed', '无法预览该文件')}</div>
-                <div className="text-xs text-text-secondary break-all">{previewError}</div>
+                <div className="text-xs text-ink-2 break-all">{previewError}</div>
               </div>
             ) : openingPath !== null ? (
-              <div className="p-4 text-sm text-text-secondary">
+              <div className="p-4 text-sm text-ink-2">
                 {t('project.deliverableRendering', '正在渲染…')}
               </div>
             ) : opened ? (
@@ -277,17 +275,17 @@ function PreviewBody({ opened, objectUrl, sheetIndex, onSheetChange }: PreviewBo
   if (preview.passthrough) {
     if (!objectUrl) {
       return (
-        <div className="p-4 text-sm text-text-secondary">
+        <div className="p-4 text-sm text-ink-2">
           {t('project.deliverableRendering', '正在渲染…')}
         </div>
       );
     }
     return preview.kind === 'image' ? (
-      <div className="flex-1 overflow-auto bg-background flex items-center justify-center p-3">
+      <div className="flex-1 overflow-auto bg-surface-2 flex items-center justify-center p-3">
         <img src={objectUrl} alt={opened.name} className="max-w-full max-h-[70vh] object-contain" />
       </div>
     ) : (
-      <iframe src={objectUrl} title={opened.name} className="flex-1 w-full bg-background min-h-[70vh]" />
+      <iframe src={objectUrl} title={opened.name} className="flex-1 w-full bg-surface-2 min-h-[70vh]" />
     );
   }
 
@@ -297,7 +295,7 @@ function PreviewBody({ opened, objectUrl, sheetIndex, onSheetChange }: PreviewBo
   }
   if (preview.pptx) return <PptxBody pptx={preview.pptx} />;
   return (
-    <pre className="flex-1 overflow-auto p-3 text-xs font-mono text-text bg-background whitespace-pre-wrap break-words">
+    <pre className="flex-1 overflow-auto p-3 text-xs font-mono text-ink bg-surface-2 whitespace-pre-wrap break-words">
       {preview.text ?? ''}
     </pre>
   );
@@ -306,9 +304,9 @@ function PreviewBody({ opened, objectUrl, sheetIndex, onSheetChange }: PreviewBo
 function DocxBody({ docx }: { docx: DocxPreview }) {
   const { t } = useI18n();
   return (
-    <div className="flex-1 overflow-auto bg-background">
-      <div className="flex items-center gap-3 px-4 py-2 border-b border-border text-[11px] text-text-secondary">
-        {docx.title && <span className="text-text truncate">{docx.title}</span>}
+    <div className="flex-1 overflow-auto bg-surface-2">
+      <div className="flex items-center gap-3 px-4 py-2 border-b border-line text-[11px] text-ink-2">
+        {docx.title && <span className="text-ink truncate">{docx.title}</span>}
         {docx.author && <span>{docx.author}</span>}
         <span className="ml-auto shrink-0">
           {t('project.deliverableWords', { count: docx.words })}
@@ -317,14 +315,14 @@ function DocxBody({ docx }: { docx: DocxPreview }) {
           {t('project.deliverableParagraphs', { count: docx.paragraphs_total })}
         </span>
       </div>
-      <div className="p-4 space-y-2 text-sm text-text leading-relaxed">
+      <div className="p-4 space-y-2 text-sm text-ink leading-relaxed">
         {docx.paragraphs.map((paragraph, index) => (
           <p key={index} className="whitespace-pre-wrap break-words">
             {paragraph}
           </p>
         ))}
         {docx.paragraphs.length === 0 && (
-          <p className="text-text-secondary">{t('project.deliverableNoText', '文档里没有文字')}</p>
+          <p className="text-ink-2">{t('project.deliverableNoText', '文档里没有文字')}</p>
         )}
       </div>
     </div>
@@ -344,14 +342,14 @@ function XlsxBody({
   const sheet = xlsx.sheets[Math.min(index, xlsx.sheets.length - 1)];
   if (!sheet) {
     return (
-      <div className="p-4 text-sm text-text-secondary">
+      <div className="p-4 text-sm text-ink-2">
         {t('project.deliverableNoText', '文档里没有文字')}
       </div>
     );
   }
   return (
-    <div className="flex flex-col flex-1 min-h-0 bg-background">
-      <div className="flex items-center gap-1 px-2 py-1 border-b border-border text-[11px] overflow-x-auto">
+    <div className="flex flex-col flex-1 min-h-0 bg-surface-2">
+      <div className="flex items-center gap-1 px-2 py-1 border-b border-line text-[11px] overflow-x-auto">
         {xlsx.sheets.map((item, sheetIndex) => (
           <button
             key={`${item.name}-${sheetIndex}`}
@@ -359,14 +357,14 @@ function XlsxBody({
             onClick={() => onIndex(sheetIndex)}
             className={`px-2 py-0.5 rounded shrink-0 ${
               sheetIndex === Math.min(index, xlsx.sheets.length - 1)
-                ? 'bg-surface text-text border border-border'
-                : 'text-text-secondary hover:text-text'
+                ? 'bg-surface text-ink border border-line'
+                : 'text-ink-2 hover:text-ink'
             }`}
           >
             {item.name}
           </button>
         ))}
-        <span className="ml-auto shrink-0 text-text-secondary">
+        <span className="ml-auto shrink-0 text-ink-2">
           {t('project.deliverableRows', { count: sheet.rows_total })}
         </span>
       </div>
@@ -375,13 +373,13 @@ function XlsxBody({
           <tbody>
             {sheet.rows.map((row, rowIndex) => (
               <tr key={rowIndex} className="even:bg-surface/40">
-                <td className="px-1.5 py-0.5 text-right text-[10px] text-text-secondary select-none border-r border-b border-border/60">
+                <td className="px-1.5 py-0.5 text-right text-[10px] text-ink-2 select-none border-r border-b border-line/60">
                   {rowIndex + 1}
                 </td>
                 {row.map((cell, cellIndex) => (
                   <td
                     key={cellIndex}
-                    className="px-2 py-0.5 text-text border-r border-b border-border/60 whitespace-pre-wrap max-w-[24rem] truncate"
+                    className="px-2 py-0.5 text-ink border-r border-b border-line/60 whitespace-pre-wrap max-w-[24rem] truncate"
                   >
                     {cell}
                   </td>
@@ -391,7 +389,7 @@ function XlsxBody({
           </tbody>
         </table>
         {sheet.rows.length === 0 && (
-          <div className="p-3 text-xs text-text-secondary">
+          <div className="p-3 text-xs text-ink-2">
             {t('project.deliverableNoText', '文档里没有文字')}
           </div>
         )}
@@ -403,22 +401,22 @@ function XlsxBody({
 function PptxBody({ pptx }: { pptx: PptxPreview }) {
   const { t } = useI18n();
   return (
-    <div className="flex-1 overflow-auto bg-background p-3 space-y-3">
-      <div className="text-[11px] text-text-secondary">
+    <div className="flex-1 overflow-auto bg-surface-2 p-3 space-y-3">
+      <div className="text-[11px] text-ink-2">
         {t('project.deliverableSlides', { count: pptx.slides_total })}
       </div>
       {pptx.slides.map((slide) => (
-        <section key={slide.index} className="rounded border border-border bg-surface p-3">
+        <section key={slide.index} className="rounded border border-line bg-surface p-3">
           <div className="flex items-baseline gap-2">
-            <span className="text-[10px] text-text-secondary shrink-0">
+            <span className="text-[10px] text-ink-2 shrink-0">
               {t('project.deliverableSlide', { index: slide.index })}
             </span>
-            <span className="text-sm font-semibold text-text truncate">
+            <span className="text-sm font-semibold text-ink truncate">
               {slide.title ?? ''}
             </span>
           </div>
           {slide.lines.length > 0 && (
-            <ul className="mt-1.5 space-y-0.5 text-xs text-text-secondary">
+            <ul className="mt-1.5 space-y-0.5 text-xs text-ink-2">
               {slide.lines.map((line, index) => (
                 <li key={index} className="whitespace-pre-wrap break-words">
                   {line}
@@ -429,7 +427,7 @@ function PptxBody({ pptx }: { pptx: PptxPreview }) {
         </section>
       ))}
       {pptx.slides.length === 0 && (
-        <div className="text-xs text-text-secondary">
+        <div className="text-xs text-ink-2">
           {t('project.deliverableNoText', '文档里没有文字')}
         </div>
       )}

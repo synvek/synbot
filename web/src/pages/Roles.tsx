@@ -1,158 +1,209 @@
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
+import { Bot, RefreshCw } from 'lucide-react'
 import { apiClient } from '../api/client'
 import type { AgentInfo } from '../types/api'
 import { useI18n } from '../i18n/I18nContext'
+import {
+  Badge,
+  Button,
+  CodeBlock,
+  DataTable,
+  EmptyState,
+  PageHeader,
+  ScrollArea,
+  type Column,
+} from '../ui'
 
-const Roles: React.FC = () => {
+/** A read-only inspector: every field here is authored in the config file, never in this page. */
+export default function Roles() {
   const [agents, setAgents] = useState<AgentInfo[]>([])
+  const [selectedName, setSelectedName] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [selectedAgent, setSelectedAgent] = useState<AgentInfo | null>(null)
   const { t } = useI18n()
 
-  useEffect(() => {
-    const fetchAgents = async () => {
-      try {
-        setLoading(true)
-        const data = await apiClient.getAgents()
+  const load = () => {
+    setLoading(true)
+    apiClient
+      .getAgents()
+      .then((data) => {
         setAgents(data)
         setError(null)
-      } catch (err) {
-        setError(t('roles.failedToFetch'))
+        setSelectedName((current) => current ?? data[0]?.name ?? null)
+      })
+      .catch((err) => {
         console.error(err)
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    fetchAgents()
-  }, [t])
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-text-secondary">{t('common.loading')}</div>
-      </div>
-    )
+        setError(t('roles.failedToFetch', 'Failed to fetch roles'))
+      })
+      .finally(() => setLoading(false))
   }
 
-  if (error) {
-    return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-        <p className="text-red-800">{error}</p>
-      </div>
-    )
-  }
+  useEffect(load, [t])
+
+  const selected = agents.find((agent) => agent.name === selectedName) ?? null
+
+  const columns: Array<Column<AgentInfo>> = [
+    {
+      key: 'name',
+      header: t('roles.title', 'Roles'),
+      sortValue: (row) => row.name,
+      render: (row) => (
+        <div className="min-w-0">
+          <div className="truncate font-medium text-ink">{row.name}</div>
+          <div className="truncate font-mono text-micro text-ink-3">{row.role}</div>
+        </div>
+      ),
+    },
+    {
+      key: 'model',
+      header: t('roles.model', 'Model'),
+      sortValue: (row) => `${row.provider}/${row.model}`,
+      render: (row) => (
+        <span className="truncate font-mono text-micro text-ink-3">
+          {row.provider}/{row.model}
+        </span>
+      ),
+    },
+    {
+      key: 'skills',
+      header: t('roles.skills', 'Skills'),
+      align: 'right',
+      width: '80px',
+      sortValue: (row) => row.skills.length,
+      render: (row) => <span className="tabular font-mono text-micro text-ink-2">{row.skills.length}</span>,
+    },
+    {
+      key: 'tools',
+      header: t('roles.tools', 'Tools'),
+      align: 'right',
+      width: '80px',
+      sortValue: (row) => row.tools.length,
+      render: (row) => <span className="tabular font-mono text-micro text-ink-2">{row.tools.length}</span>,
+    },
+  ]
 
   return (
     <div>
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold text-text">{t('roles.title')}</h2>
-        <p className="text-text-secondary mt-1">{t('roles.description')}</p>
-      </div>
+      <PageHeader
+        title={t('roles.title', 'Roles')}
+        count={agents.length}
+        description={t('roles.description', 'Agent definitions loaded from the configuration file')}
+        actions={
+          <Button variant="ghost" size="sm" icon={<RefreshCw className="h-3.5 w-3.5" />} onClick={load}>
+            {t('common.refresh', 'Refresh')}
+          </Button>
+        }
+      />
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="space-y-4">
-          {agents.map((agent) => (
-            <div
-              key={agent.name}
-              onClick={() => setSelectedAgent(agent)}
-              className={`bg-surface rounded-lg shadow p-4 cursor-pointer transition-all hover:shadow-lg ${
-                selectedAgent?.name === agent.name ? 'ring-2 ring-primary' : ''
-              }`}
-            >
-              <h3 className="text-lg font-semibold text-text">{agent.name}</h3>
-              <div className="mt-2 space-y-1 text-sm text-text-secondary">
-                <p>{t('roles.role')}: {agent.role}</p>
-                <p>{t('roles.model')}: {agent.provider}/{agent.model}</p>
-                <p>{t('roles.skills')}: {agent.skills.length}</p>
-                <p>{t('roles.tools')}: {agent.tools.length}</p>
-              </div>
-            </div>
-          ))}
-        </div>
+      {error && <div className="mb-3 rounded-panel border px-3 py-2 text-small tone-danger">{error}</div>}
 
-        {selectedAgent && (
-          <div className="bg-surface rounded-lg shadow p-6">
-            <h3 className="text-xl font-bold text-text mb-4">
-              {selectedAgent.name}
-            </h3>
-
-            <div className="space-y-4">
-              <div>
-                <h4 className="text-sm font-medium text-text-secondary mb-2">{t('roles.role')}</h4>
-                <p className="text-text">{selectedAgent.role}</p>
-              </div>
-
-              <div>
-                <h4 className="text-sm font-medium text-text-secondary mb-2">{t('roles.systemPrompt')}</h4>
-                <div className="bg-background border border-border rounded p-3 text-sm text-text whitespace-pre-wrap max-h-48 overflow-y-auto">
-                  {selectedAgent.system_prompt}
-                </div>
-              </div>
-
-              <div>
-                <h4 className="text-sm font-medium text-text-secondary mb-2">{t('roles.modelConfiguration')}</h4>
-                <div className="bg-background border border-border rounded p-3 space-y-1 text-sm text-text">
-                  <p><span className="font-medium">{t('roles.provider')}:</span> {selectedAgent.provider}</p>
-                  <p><span className="font-medium">{t('roles.model')}:</span> {selectedAgent.model}</p>
-                  <p><span className="font-medium">{t('roles.maxTokens')}:</span> {selectedAgent.max_tokens}</p>
-                  <p><span className="font-medium">{t('roles.temperature')}:</span> {selectedAgent.temperature}</p>
-                </div>
-              </div>
-
-              <div>
-                <h4 className="text-sm font-medium text-text-secondary mb-2">{t('roles.skills')}</h4>
-                <div className="flex flex-wrap gap-2">
-                  {selectedAgent.skills.map((skill) => (
-                    <span
-                      key={skill}
-                      className="px-3 py-1 bg-primary-muted text-primary rounded-full text-sm"
-                    >
-                      {skill}
-                    </span>
-                  ))}
-                  {selectedAgent.skills.length === 0 && (
-                    <span className="text-text-secondary text-sm">{t('roles.noSkills')}</span>
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <h4 className="text-sm font-medium text-text-secondary mb-2">{t('roles.tools')}</h4>
-                <div className="flex flex-wrap gap-2">
-                  {selectedAgent.tools.map((tool) => (
-                    <span
-                      key={tool}
-                      className="px-3 py-1 bg-background border border-border text-text rounded-full text-sm"
-                    >
-                      {tool}
-                    </span>
-                  ))}
-                  {selectedAgent.tools.length === 0 && (
-                    <span className="text-text-secondary text-sm">{t('roles.noTools')}</span>
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <h4 className="text-sm font-medium text-text-secondary mb-2">{t('roles.workspace')}</h4>
-                <code className="block bg-background border border-border rounded p-3 text-sm text-text font-mono">
-                  {selectedAgent.workspace_dir}
-                </code>
-              </div>
-            </div>
+      {loading ? (
+        <p className="py-10 text-center text-small text-ink-2">{t('common.loading', 'Loading…')}</p>
+      ) : agents.length === 0 ? (
+        <EmptyState
+          icon={<Bot className="h-6 w-6" />}
+          title={t('roles.noRoles', 'No roles defined')}
+          body={t('roles.description', 'Agent definitions loaded from the configuration file')}
+        />
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,30rem)_minmax(0,1fr)]">
+          <div className="min-w-0">
+            <DataTable
+              rows={agents}
+              columns={columns}
+              rowKey={(row) => row.name}
+              density="compact"
+              selectedKey={selectedName}
+              onRowClick={(row) => setSelectedName(row.name)}
+              className="[&>table]:min-w-0"
+            />
           </div>
-        )}
-      </div>
 
-      {agents.length === 0 && (
-        <div className="text-center py-12 text-text-secondary">
-          {t('roles.noRoles')}
+          <div className="min-w-0">
+            {selected && (
+              <div className="rounded-panel border border-line">
+                <div className="border-b border-line px-4 py-3">
+                  <h2 className="truncate text-section font-semibold text-ink">{selected.name}</h2>
+                  <p className="mt-0.5 text-small text-ink-2">{selected.role}</p>
+                </div>
+
+                <ScrollArea className="max-h-[520px] px-4 py-3">
+                  <div className="space-y-4">
+                    <section>
+                      <h3 className="mb-1 text-micro font-medium uppercase tracking-wide text-ink-3">
+                        {t('roles.modelConfiguration', 'Model configuration')}
+                      </h3>
+                      <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-micro">
+                        {[
+                          [t('roles.provider', 'Provider'), selected.provider],
+                          [t('roles.model', 'Model'), selected.model],
+                          [t('roles.maxTokens', 'Max tokens'), String(selected.max_tokens)],
+                          [t('roles.temperature', 'Temperature'), String(selected.temperature)],
+                        ].map(([label, value]) => (
+                          <div key={label} className="flex min-w-0 flex-col gap-0.5">
+                            <dt className="text-ink-3">{label}</dt>
+                            <dd className="truncate font-mono text-ink">{value}</dd>
+                          </div>
+                        ))}
+                      </dl>
+                    </section>
+
+                    <section>
+                      <h3 className="mb-1 text-micro font-medium uppercase tracking-wide text-ink-3">
+                        {t('roles.systemPrompt', 'System prompt')}
+                      </h3>
+                      <p className="max-h-48 overflow-y-auto whitespace-pre-wrap rounded-control bg-surface-2 px-2.5 py-2 text-small text-ink">
+                        {selected.system_prompt}
+                      </p>
+                    </section>
+
+                    <section>
+                      <h3 className="mb-1 text-micro font-medium uppercase tracking-wide text-ink-3">
+                        {t('roles.skills', 'Skills')}
+                      </h3>
+                      {selected.skills.length === 0 ? (
+                        <p className="text-small text-ink-3">{t('roles.noSkills', 'No skills assigned')}</p>
+                      ) : (
+                        <div className="flex flex-wrap gap-1">
+                          {selected.skills.map((skill) => (
+                            <Badge key={skill} tone="neutral">
+                              {skill}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+
+                    <section>
+                      <h3 className="mb-1 text-micro font-medium uppercase tracking-wide text-ink-3">
+                        {t('roles.tools', 'Tools')}
+                      </h3>
+                      {selected.tools.length === 0 ? (
+                        <p className="text-small text-ink-3">{t('roles.noTools', 'No tools enabled')}</p>
+                      ) : (
+                        <div className="flex flex-wrap gap-1">
+                          {selected.tools.map((tool) => (
+                            <Badge key={tool} tone="neutral">
+                              {tool}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+
+                    <section>
+                      <h3 className="mb-1 text-micro font-medium uppercase tracking-wide text-ink-3">
+                        {t('roles.workspace', 'Workspace')}
+                      </h3>
+                      <CodeBlock maxHeight={100}>{selected.workspace_dir}</CodeBlock>
+                    </section>
+                  </div>
+                </ScrollArea>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
   )
 }
-
-export default Roles

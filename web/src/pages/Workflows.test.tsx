@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import Workflows from './Workflows';
 import { I18nProvider } from '../i18n/I18nContext';
+import { ToastProvider } from '../ui';
 import { apiClient } from '../api/client';
 import type { WorkflowDetail, WorkflowStepView, WorkflowSummary } from '../types/api';
 
@@ -58,7 +59,9 @@ const detail = (over: Partial<WorkflowDetail> = {}): WorkflowDetail => ({
 const renderPage = () =>
   render(
     <I18nProvider>
-      <Workflows />
+      <ToastProvider>
+        <Workflows />
+      </ToastProvider>
     </I18nProvider>
   );
 
@@ -67,6 +70,8 @@ const RESUME = /^Resume$|^继续运行$/;
 const RESTART = /^Restart from step 1$|^从头重跑$/;
 const DELETE = /^Delete record$|^删除记录$/;
 const CANCEL = /^Cancel$|^取消$/;
+const CONFIRM = /^Continue$|^继续$/;
+const CLOSE = /^Close$|^关闭$/;
 
 describe('Workflows', () => {
   beforeEach(() => {
@@ -88,8 +93,8 @@ describe('Workflows', () => {
     expect(await screen.findByText(RUN_ROW)).toBeInTheDocument();
     expect(screen.getByText(SESSION)).toBeInTheDocument();
     expect(await screen.findByText(/Waiting for input|等待用户输入/)).toBeInTheDocument();
-    // `stepsCompleted/stepsTotal` is the progress text the row shows next to the bar.
-    expect(screen.getByText(/Progress: 2\/5|进度: 2\/5/)).toBeInTheDocument();
+    // `stepsCompleted/stepsTotal` is the progress the row shows next to the status.
+    expect(screen.getByText('2/5')).toBeInTheDocument();
   });
 
   it('shows the empty hint when no run was persisted', async () => {
@@ -114,8 +119,8 @@ describe('Workflows', () => {
     await waitFor(() => expect(mocked.getWorkflow).toHaveBeenCalledWith(SESSION));
     // The row renders `<index>. <id>` as separate nodes, so match on the containing element.
     expect(await screen.findByText(/approve/)).toBeInTheDocument();
-    // Completed steps expose their output, pending ones say there is none yet.
-    expect(screen.getByText(/Show output|查看输出/)).toBeInTheDocument();
+    // Completed steps keep their output collapsed until the reader asks for it.
+    fireEvent.click(screen.getByRole('button', { name: /Show output|查看输出/ }));
     expect(screen.getByText('requirements gathered')).toBeInTheDocument();
     expect(screen.getAllByText(/This step has not produced output yet|该步骤尚未产生输出/)).toHaveLength(2);
     // Inputs come from the persisted state, not from the chat history.
@@ -138,7 +143,6 @@ describe('Workflows', () => {
     mocked.getWorkflow.mockResolvedValue(
       detail({ status: 'completed', canResume: false, currentStepIndex: 3 })
     );
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
     renderPage();
 
     fireEvent.click(await screen.findByText(RUN_ROW));
@@ -149,8 +153,9 @@ describe('Workflows', () => {
     expect(screen.queryByRole('button', { name: CANCEL })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: RESTART }));
+    // Destructive actions go through a confirmation dialog, never a native confirm().
+    fireEvent.click(await screen.findByRole('button', { name: CONFIRM }));
 
-    expect(confirm).toHaveBeenCalled();
     await waitFor(() => expect(mocked.runWorkflow).toHaveBeenCalledWith(SESSION, true));
   });
 
@@ -169,16 +174,18 @@ describe('Workflows', () => {
   });
 
   it('only deletes after the confirmation is accepted', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
     renderPage();
 
     fireEvent.click(await screen.findByText(RUN_ROW));
     fireEvent.click(await screen.findByRole('button', { name: DELETE }));
-    expect(confirm).toHaveBeenCalled();
     expect(mocked.deleteWorkflow).not.toHaveBeenCalled();
 
-    confirm.mockReturnValue(true);
+    // Dismissing the dialog leaves the record alone.
+    fireEvent.click(screen.getByRole('button', { name: CLOSE }));
+    expect(mocked.deleteWorkflow).not.toHaveBeenCalled();
+
     fireEvent.click(screen.getByRole('button', { name: DELETE }));
+    fireEvent.click(await screen.findByRole('button', { name: CONFIRM }));
 
     await waitFor(() => expect(mocked.deleteWorkflow).toHaveBeenCalledWith(SESSION));
   });

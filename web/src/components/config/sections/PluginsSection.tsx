@@ -18,9 +18,9 @@ export const PluginsSection: React.FC<SectionProps> = ({ draft, setDraft, t }) =
 
   return (
     <FieldGroup>
-      <p className="text-sm text-text-secondary mb-4">{t('config.sections.plugins.hint')}</p>
+      <p className="text-sm text-ink-2 mb-4">{t('config.sections.plugins.hint')}</p>
       {keys.map((name) => (
-        <div key={name} className="border border-border rounded-lg p-4 mb-4">
+        <div key={name} className="border border-line rounded-lg p-4 mb-4">
           <div className="flex justify-between items-center mb-2">
             <span className="font-mono text-sm font-medium">{name}</span>
             <button
@@ -44,7 +44,7 @@ export const PluginsSection: React.FC<SectionProps> = ({ draft, setDraft, t }) =
       ))}
       <button
         type="button"
-        className="px-4 py-2 rounded-lg bg-surface border border-border text-sm"
+        className="px-4 py-2 rounded-lg bg-surface border border-line text-sm"
         onClick={() => {
           const n = window.prompt(t('config.sections.plugins.promptName'))
           if (!n?.trim()) return

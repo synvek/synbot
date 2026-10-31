@@ -62,7 +62,7 @@ export const ProvidersSection: React.FC<SectionProps> = ({ draft, setDraft, t })
         const labelKey = `config.sections.providers.builtin.${key}`
         const meta = catalog?.providers.find((p) => p.key === key)
         return (
-          <div key={key} className="border border-border rounded-lg p-4 space-y-3">
+          <div key={key} className="border border-line rounded-lg p-4 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <Subheading className="!mt-0 !mb-0">{t(labelKey)}</Subheading>
               {meta && <ProviderBadges meta={meta} t={t} />}
@@ -82,7 +82,7 @@ export const ProvidersSection: React.FC<SectionProps> = ({ draft, setDraft, t })
               onChange={(v) => patchBuiltin(setDraft, key, { apiBase: v.trim() ? v : null })}
             />
             {meta && (
-              <p className="text-xs text-text-secondary -mt-1">
+              <p className="text-xs text-ink-2 -mt-1">
                 <span>
                   {e.apiBase
                     ? t('config.sections.providers.baseOverride')
@@ -101,7 +101,7 @@ export const ProvidersSection: React.FC<SectionProps> = ({ draft, setDraft, t })
                   href={meta.docsUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-primary hover:underline"
+                  className="text-accent hover:underline"
                 >
                   {t('config.sections.providers.modelsLink')}
                 </a>
@@ -110,7 +110,7 @@ export const ProvidersSection: React.FC<SectionProps> = ({ draft, setDraft, t })
             {meta ? (
               // `apiStyle` is ignored for built-ins (the client is chosen by name), so showing an
               // editable select here would invite the user to change a value nothing reads.
-              <p className="text-xs text-text-secondary -mt-1">
+              <p className="text-xs text-ink-2 -mt-1">
                 {t('config.sections.providers.styleFixed')}{' '}
                 <span className="font-mono">{meta.apiStyle}</span>
               </p>
@@ -141,11 +141,11 @@ export const ProvidersSection: React.FC<SectionProps> = ({ draft, setDraft, t })
       })}
 
       <Subheading>{t('config.sections.providers.extra')}</Subheading>
-      <p className="text-sm text-text-secondary -mt-2 mb-2">{t('config.sections.providers.extraHint')}</p>
+      <p className="text-sm text-ink-2 -mt-2 mb-2">{t('config.sections.providers.extraHint')}</p>
       {extraNames.map((name) => {
         const extraMeta = catalog?.extra.find((e) => e.name === name)
         return (
-          <div key={name} className="border border-border rounded-lg p-4 space-y-3">
+          <div key={name} className="border border-line rounded-lg p-4 space-y-3">
             <div className="flex flex-wrap justify-between items-center gap-2">
               <span className="font-mono text-sm font-medium">{name}</span>
               <div className="flex flex-wrap items-center gap-2">
@@ -197,7 +197,7 @@ export const ProvidersSection: React.FC<SectionProps> = ({ draft, setDraft, t })
       })}
       <button
         type="button"
-        className="px-4 py-2 rounded-lg bg-surface border border-border text-text hover:bg-background text-sm"
+        className="px-4 py-2 rounded-lg bg-surface border border-line text-ink hover:bg-surface-2 text-sm"
         onClick={() => {
           const n = window.prompt(t('config.sections.providers.extraPrompt'))
           if (!n?.trim()) return
@@ -271,7 +271,7 @@ const Badge: React.FC<{ tone?: 'ok' | 'warn' | 'info'; children: React.ReactNode
       ? 'bg-success/10 text-success border-success/20'
       : tone === 'warn'
         ? 'bg-warning/10 text-warning border-warning/20'
-        : 'bg-primary/10 text-primary border-primary/20'
+        : 'bg-accent/10 text-accent border-primary/20'
   return <span className={`px-2 py-0.5 rounded-full border text-xs ${cls}`}>{children}</span>
 }
 

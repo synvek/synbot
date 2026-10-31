@@ -1,24 +1,48 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { ChevronRight, Workflow as WorkflowIcon } from 'lucide-react'
 import { apiClient } from '../api/client'
 import type { WorkflowDetail, WorkflowStatus, WorkflowSummary } from '../types/api'
 import { useI18n } from '../i18n/I18nContext'
+import { formatShortDateTime } from '../utils/datetime'
+import {
+  Badge,
+  Button,
+  CodeBlock,
+  DataTable,
+  Dialog,
+  EmptyState,
+  PageHeader,
+  StatusDot,
+  useToast,
+  type BadgeTone,
+  type Column,
+  type StatusTone,
+} from '../ui'
 
-// Fixed colours (not theme tokens) so status stays readable in both colour schemes; the rest of
-// the page uses the theme tokens the other panels use.
-const STATUS_TONE: Record<WorkflowStatus, string> = {
-  running: 'bg-blue-100 text-blue-800',
-  waiting_user_input: 'bg-amber-100 text-amber-800',
-  paused: 'bg-slate-200 text-slate-700',
-  completed: 'bg-green-100 text-green-800',
-  failed: 'bg-red-100 text-red-800',
-  cancelled: 'bg-gray-100 text-gray-600',
-  waiting_timeout: 'bg-amber-100 text-amber-800',
+const STATUS_TONE: Record<WorkflowStatus, StatusTone> = {
+  running: 'running',
+  waiting_user_input: 'warning',
+  paused: 'idle',
+  completed: 'success',
+  failed: 'error',
+  cancelled: 'idle',
+  waiting_timeout: 'warning',
 }
 
-const STEP_DOT: Record<string, string> = {
-  completed: 'bg-green-500',
-  current: 'bg-blue-500',
-  pending: 'bg-gray-300',
+const STATUS_BADGE: Record<WorkflowStatus, BadgeTone> = {
+  running: 'info',
+  waiting_user_input: 'warning',
+  paused: 'neutral',
+  completed: 'success',
+  failed: 'danger',
+  cancelled: 'neutral',
+  waiting_timeout: 'warning',
+}
+
+const STEP_DOT: Record<string, StatusTone> = {
+  completed: 'success',
+  current: 'running',
+  pending: 'idle',
 }
 
 /** Backend errors are `{ error: "Bad request: …" }`; axios' own message is just the status code. */
@@ -27,19 +51,19 @@ function errorText(err: unknown): string {
   return withResponse.response?.data?.error ?? (err instanceof Error ? err.message : String(err))
 }
 
-function formatTime(value: string): string {
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
-}
+const formatTime = (value: string) => formatShortDateTime(value, value)
 
-const Workflows: React.FC = () => {
+export default function Workflows() {
   const { t } = useI18n()
+  const { toast } = useToast()
   const [runs, setRuns] = useState<WorkflowSummary[]>([])
   const [selected, setSelected] = useState<string | null>(null)
   const [detail, setDetail] = useState<WorkflowDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [confirm, setConfirm] = useState<{ action: 'restart' | 'delete'; sessionKey: string } | null>(null)
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
 
   const load = useCallback(
     async (silent = false) => {
@@ -95,19 +119,21 @@ const Workflows: React.FC = () => {
   }
 
   const act = async (sessionKey: string, action: 'resume' | 'restart' | 'cancel' | 'delete') => {
-    if (action === 'delete' && !window.confirm(t('workflows.confirmDelete'))) return
-    if (action === 'restart' && !window.confirm(t('workflows.confirmRestart'))) return
     setBusy(sessionKey)
     setError(null)
     try {
       if (action === 'resume') {
         await apiClient.runWorkflow(sessionKey, false)
+        toast(t('workflows.resumed', 'Workflow resumed'))
       } else if (action === 'restart') {
         await apiClient.runWorkflow(sessionKey, true)
+        toast(t('workflows.restarted', 'Workflow restarted from step 1'))
       } else if (action === 'cancel') {
         await apiClient.cancelWorkflow(sessionKey)
+        toast(t('workflows.cancelledRun', 'Workflow cancelled'))
       } else {
         await apiClient.deleteWorkflow(sessionKey)
+        toast(t('workflows.deleted', 'Workflow record deleted'))
         if (selected === sessionKey) {
           setSelected(null)
           setDetail(null)
@@ -115,234 +141,292 @@ const Workflows: React.FC = () => {
       }
       await load(true)
     } catch (err) {
+      // The banner next to the list is the durable record; a toast would only duplicate it.
       setError(errorText(err))
     } finally {
       setBusy(null)
     }
   }
 
-  const statusLabel = (status: WorkflowStatus) =>
-    t(`workflows.status.${status}`, status)
+  const statusLabel = (status: WorkflowStatus) => t(`workflows.status.${status}`, status)
+
+  const columns: Array<Column<WorkflowSummary>> = [
+    {
+      key: 'name',
+      header: t('workflows.title', 'Workflows'),
+      sortValue: (row) => row.name || row.workflowId,
+      render: (row) => (
+        <div className="min-w-0">
+          <div className="truncate font-medium text-ink">{row.name || row.workflowId}</div>
+          <div className="truncate font-mono text-micro text-ink-3">{row.sessionKey}</div>
+        </div>
+      ),
+    },
+    {
+      key: 'status',
+      header: t('common.status', 'Status'),
+      width: '118px',
+      sortValue: (row) => row.status,
+      render: (row) => (
+        <span className="flex items-center gap-1.5 whitespace-nowrap text-small text-ink-2">
+          <StatusDot tone={STATUS_TONE[row.status]} />
+          {statusLabel(row.status)}
+        </span>
+      ),
+    },
+    {
+      key: 'progress',
+      header: t('workflows.progress', 'Progress'),
+      align: 'right',
+      width: '72px',
+      sortValue: (row) => row.stepsCompleted,
+      render: (row) => (
+        <span className="tabular font-mono text-micro text-ink-2">
+          {row.stepsCompleted}/{row.stepsTotal}
+        </span>
+      ),
+    },
+    {
+      key: 'updated',
+      header: t('sessions.updated', 'Updated'),
+      align: 'right',
+      width: '130px',
+      sortValue: (row) => row.updatedAt,
+      render: (row) => (
+        <span className="whitespace-nowrap tabular text-micro text-ink-2">
+          {formatTime(row.updatedAt)}
+        </span>
+      ),
+    },
+  ]
+
+  const confirmTitle =
+    confirm?.action === 'delete'
+      ? t('workflows.delete', 'Delete record')
+      : t('workflows.restart', 'Restart from step 1')
+  const confirmBody =
+    confirm?.action === 'delete'
+      ? t('workflows.confirmDelete', 'Delete this workflow record? Chat history is untouched.')
+      : t('workflows.confirmRestart', 'Restarting clears the recorded step outputs. Continue?')
 
   return (
     <div>
-      <div className="flex flex-wrap items-start justify-between gap-3 mb-6">
-        <div>
-          <h2 className="text-2xl font-bold text-text">{t('workflows.title')}</h2>
-          <p className="text-text-secondary mt-1">{t('workflows.description')}</p>
-        </div>
-        <button
-          type="button"
-          onClick={() => void load()}
-          className="px-4 py-2 rounded-lg bg-surface border border-border text-text hover:bg-background text-sm"
-        >
-          {t('workflows.refresh')}
-        </button>
-      </div>
+      <PageHeader
+        title={t('workflows.title', 'Workflows')}
+        count={runs.length}
+        description={t('workflows.description', 'Persisted TurboWorkflow runs, created with /workflow in any chat. One run per session; an interrupted run resumes from its last finished step.')}
+        actions={
+          <Button variant="ghost" size="sm" onClick={() => void load()}>
+            {t('workflows.refresh', 'Refresh')}
+          </Button>
+        }
+      />
 
-      {error && (
-        <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3">
-          <p className="text-red-800 text-sm">{error}</p>
-        </div>
-      )}
+      {error && <div className="mb-3 rounded-panel border px-3 py-2 text-small tone-danger">{error}</div>}
 
       {loading ? (
-        <div className="flex items-center justify-center h-40 text-text-secondary">
-          {t('common.loading')}
-        </div>
+        <p className="py-10 text-center text-small text-ink-2">{t('common.loading', 'Loading…')}</p>
       ) : runs.length === 0 ? (
-        <div className="text-center py-12">
-          <p className="text-text-secondary">{t('workflows.empty')}</p>
-          <p className="text-text-secondary text-sm mt-2">{t('workflows.emptyHint')}</p>
-        </div>
+        <EmptyState
+          icon={<WorkflowIcon className="h-6 w-6" />}
+          title={t('workflows.empty', 'No workflows yet')}
+          body={t('workflows.emptyHint', 'Send /workflow <task> in any chat to create one; its progress shows up here.')}
+        />
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-          <ul className="lg:col-span-2 space-y-3">
-            {runs.map((run) => {
-              const active = run.sessionKey === selected
-              return (
-                <li key={run.sessionKey}>
-                  <button
-                    type="button"
-                    onClick={() => void openDetail(run.sessionKey)}
-                    className={`w-full text-left bg-surface rounded-lg shadow p-4 border transition-colors ${
-                      active ? 'border-primary' : 'border-transparent hover:border-border'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="font-medium text-text truncate">
-                        {run.name || run.workflowId}
-                      </span>
-                      <span
-                        className={`shrink-0 px-2 py-0.5 rounded text-xs font-medium ${STATUS_TONE[run.status]}`}
-                      >
-                        {statusLabel(run.status)}
-                      </span>
-                    </div>
-                    <p className="font-mono text-xs text-text-secondary mt-1 truncate">
-                      {run.sessionKey}
-                    </p>
-                    <div className="flex items-center justify-between mt-3 text-xs text-text-secondary">
-                      <span>
-                        {t('workflows.progress')}: {run.stepsCompleted}/{run.stepsTotal}
-                      </span>
-                      <span>{formatTime(run.updatedAt)}</span>
-                    </div>
-                    <div className="mt-2 h-1.5 bg-background rounded overflow-hidden">
-                      <div
-                        className="h-full bg-primary"
-                        style={{
-                          width: `${
-                            run.stepsTotal > 0
-                              ? Math.round((run.stepsCompleted / run.stepsTotal) * 100)
-                              : 0
-                          }%`,
-                        }}
-                      />
-                    </div>
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,30rem)_minmax(0,1fr)]">
+          <div className="min-w-0">
+            <DataTable
+              rows={runs}
+              columns={columns}
+              rowKey={(row) => row.sessionKey}
+              density="compact"
+              selectedKey={selected}
+              onRowClick={(row) => void openDetail(row.sessionKey)}
+              className="[&>table]:min-w-0"
+            />
+          </div>
 
-          <div className="lg:col-span-3">
+          <div className="min-w-0">
             {!detail ? (
-              <div className="bg-surface rounded-lg shadow p-6 text-sm text-text-secondary">
-                {selected ? t('workflows.loading') : t('workflows.selectHint')}
-              </div>
+              <p className="rounded-panel border border-line px-4 py-10 text-center text-small text-ink-2">
+                {selected ? t('workflows.loading', 'Loading…') : t('workflows.selectHint', 'Pick a run on the left to see its steps and outputs.')}
+              </p>
             ) : (
-              <div className="bg-surface rounded-lg shadow p-6 space-y-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h3 className="text-lg font-semibold text-text">
-                      {detail.name || detail.workflowId}
-                    </h3>
-                    <p className="font-mono text-xs text-text-secondary mt-1">
-                      {detail.sessionKey}
-                    </p>
-                    {detail.description && (
-                      <p className="text-sm text-text-secondary mt-2">{detail.description}</p>
-                    )}
+              <div className="rounded-panel border border-line">
+                <div className="border-b border-line px-4 py-3">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <h2 className="truncate text-section font-semibold text-ink">
+                        {detail.name || detail.workflowId}
+                      </h2>
+                      <p className="mt-0.5 truncate font-mono text-micro text-ink-3">{detail.sessionKey}</p>
+                    </div>
+                    <Badge tone={STATUS_BADGE[detail.status]}>{statusLabel(detail.status)}</Badge>
                   </div>
-                  <span
-                    className={`px-2 py-0.5 rounded text-xs font-medium ${STATUS_TONE[detail.status]}`}
-                  >
-                    {statusLabel(detail.status)}
-                  </span>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  {detail.canResume ? (
-                    <button
-                      type="button"
-                      disabled={busy === detail.sessionKey}
-                      onClick={() => void act(detail.sessionKey, 'resume')}
-                      className="px-3 py-1.5 rounded-lg bg-primary text-white text-sm disabled:opacity-50"
-                    >
-                      {t('workflows.resume')}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      disabled={busy === detail.sessionKey}
-                      onClick={() => void act(detail.sessionKey, 'restart')}
-                      className="px-3 py-1.5 rounded-lg bg-primary text-white text-sm disabled:opacity-50"
-                    >
-                      {t('workflows.restart')}
-                    </button>
+                  {detail.description && (
+                    <p className="mt-2 text-small text-ink-2">{detail.description}</p>
                   )}
-                  {detail.canResume && (
-                    <button
-                      type="button"
-                      disabled={busy === detail.sessionKey}
-                      onClick={() => void act(detail.sessionKey, 'cancel')}
-                      className="px-3 py-1.5 rounded-lg bg-surface border border-border text-text text-sm disabled:opacity-50"
-                    >
-                      {t('workflows.cancel')}
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    disabled={busy === detail.sessionKey}
-                    onClick={() => void act(detail.sessionKey, 'delete')}
-                    className="px-3 py-1.5 rounded-lg text-error border border-border text-sm disabled:opacity-50"
-                  >
-                    {t('workflows.delete')}
-                  </button>
-                </div>
-
-                <p className="text-xs text-text-secondary">
-                  {t('workflows.meta', {
-                    updated: formatTime(detail.updatedAt),
-                    timeout: Math.round(detail.userInputTimeoutSecs / 60),
-                  })}
-                </p>
-
-                {Object.keys(detail.inputs).length > 0 && (
-                  <div>
-                    <h4 className="text-sm font-medium text-text mb-1">{t('workflows.inputs')}</h4>
-                    <dl className="text-xs grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-                      {Object.entries(detail.inputs).map(([key, value]) => (
-                        <React.Fragment key={key}>
-                          <dt className="font-mono text-text-secondary">{key}</dt>
-                          <dd className="text-text break-words whitespace-pre-wrap">{value}</dd>
-                        </React.Fragment>
-                      ))}
-                    </dl>
-                  </div>
-                )}
-
-                <div>
-                  <h4 className="text-sm font-medium text-text mb-2">{t('workflows.steps')}</h4>
-                  <ul className="space-y-2">
-                    {detail.steps.map((step, index) => (
-                      <li
-                        key={`${step.id}-${index}`}
-                        className="border border-border rounded-lg p-3"
+                  <p className="mt-2 text-micro text-ink-3">
+                    {t('workflows.meta', {
+                      updated: formatTime(detail.updatedAt),
+                      timeout: Math.round(detail.userInputTimeoutSecs / 60),
+                    })}
+                  </p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {detail.canResume ? (
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        disabled={busy === detail.sessionKey}
+                        onClick={() => void act(detail.sessionKey, 'resume')}
                       >
-                        <div className="flex items-center gap-2">
-                          <span
-                            className={`w-2 h-2 rounded-full ${STEP_DOT[step.status] ?? STEP_DOT.pending}`}
-                          />
-                          <span className="font-mono text-xs text-text-secondary">
-                            {index + 1}. {step.id}
-                          </span>
-                          <span className="text-xs px-2 py-0.5 rounded bg-background border border-border text-text-secondary">
-                            {t(`workflows.stepType.${step.type}`, step.type)}
-                          </span>
-                          <span className="ml-auto text-xs text-text-secondary">
-                            {t(`workflows.stepStatus.${step.status}`, step.status)}
-                          </span>
-                        </div>
-                        {step.description && (
-                          <p className="text-sm text-text mt-1 whitespace-pre-wrap">
-                            {step.description}
-                          </p>
-                        )}
-                        {step.output ? (
-                          <details className="mt-2">
-                            <summary className="text-xs text-text-secondary cursor-pointer">
-                              {t('workflows.output')}
-                            </summary>
-                            <pre className="mt-1 text-xs whitespace-pre-wrap break-words bg-background rounded p-2 max-h-64 overflow-auto">
-                              {step.output}
-                            </pre>
-                          </details>
-                        ) : (
-                          <p className="text-xs text-text-secondary mt-2">{t('workflows.noOutput')}</p>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
+                        {t('workflows.resume', 'Resume')}
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        disabled={busy === detail.sessionKey}
+                        onClick={() => setConfirm({ action: 'restart', sessionKey: detail.sessionKey })}
+                      >
+                        {t('workflows.restart', 'Restart from step 1')}
+                      </Button>
+                    )}
+                    {detail.canResume && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={busy === detail.sessionKey}
+                        onClick={() => void act(detail.sessionKey, 'cancel')}
+                      >
+                        {t('workflows.cancel', 'Cancel')}
+                      </Button>
+                    )}
+                    <Button
+                      variant="danger"
+                      size="sm"
+                      disabled={busy === detail.sessionKey}
+                      onClick={() => setConfirm({ action: 'delete', sessionKey: detail.sessionKey })}
+                    >
+                      {t('workflows.delete', 'Delete record')}
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="space-y-4 px-4 py-3">
+                  {Object.keys(detail.inputs).length > 0 && (
+                    <div>
+                      <h3 className="mb-1 text-micro font-medium uppercase tracking-wide text-ink-3">
+                        {t('workflows.inputs', 'Inputs')}
+                      </h3>
+                      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-micro">
+                        {Object.entries(detail.inputs).map(([key, value]) => (
+                          <div key={key} className="col-span-2 grid grid-cols-subgrid">
+                            <dt className="font-mono text-ink-3">{key}</dt>
+                            <dd className="whitespace-pre-wrap break-words text-ink">{value}</dd>
+                          </div>
+                        ))}
+                      </dl>
+                    </div>
+                  )}
+
+                  <div>
+                    <h3 className="mb-2 text-micro font-medium uppercase tracking-wide text-ink-3">
+                      {t('workflows.steps', 'Steps')}
+                    </h3>
+                    <ul className="flex flex-col gap-2">
+                      {detail.steps.map((step, index) => {
+                        const stepKey = `${step.id}-${index}`
+                        const open = Boolean(expanded[stepKey])
+                        return (
+                          <li key={stepKey} className="rounded-panel border border-line">
+                            <div className="flex flex-wrap items-center gap-2 px-3 py-2">
+                              <StatusDot tone={STEP_DOT[step.status] ?? 'idle'} />
+                              <span className="font-mono text-micro text-ink-3">
+                                {index + 1}. {step.id}
+                              </span>
+                              <span className="rounded-control bg-surface-2 px-1.5 py-0.5 font-mono text-micro text-ink-2">
+                                {t(`workflows.stepType.${step.type}`, step.type)}
+                              </span>
+                              <span className="ml-auto text-micro text-ink-3">
+                                {t(`workflows.stepStatus.${step.status}`, step.status)}
+                              </span>
+                            </div>
+                            {step.description && (
+                              <p className="px-3 pb-2 text-small whitespace-pre-wrap text-ink">
+                                {step.description}
+                              </p>
+                            )}
+                            <div className="px-3 pb-2">
+                              {step.output ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    aria-expanded={open}
+                                    onClick={() =>
+                                      setExpanded((current) => ({ ...current, [stepKey]: !open }))
+                                    }
+                                    className="inline-flex items-center gap-1 text-micro text-ink-2 transition-colors duration-fast hover:text-ink"
+                                  >
+                                    <ChevronRight
+                                      className={`h-3 w-3 transition-transform duration-fast ${open ? 'rotate-90' : ''}`}
+                                      aria-hidden="true"
+                                    />
+                                    {t('workflows.output', 'Show output')}
+                                  </button>
+                                  {open && (
+                                    <CodeBlock className="mt-1" maxHeight={280}>
+                                      {step.output}
+                                    </CodeBlock>
+                                  )}
+                                </>
+                              ) : (
+                                <p className="text-micro text-ink-3">
+                                  {t('workflows.noOutput', 'This step has not produced output yet.')}
+                                </p>
+                              )}
+                            </div>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  </div>
                 </div>
               </div>
             )}
           </div>
         </div>
       )}
+
+      {confirm && (
+        <Dialog
+          open
+          onClose={() => setConfirm(null)}
+          title={confirmTitle}
+          width="sm"
+          closeLabel={t('common.close', 'Close')}
+          footer={
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setConfirm(null)}>
+                {t('common.cancel', 'Cancel')}
+              </Button>
+              <Button
+                variant={confirm.action === 'delete' ? 'danger' : 'primary'}
+                size="sm"
+                onClick={() => {
+                  const { action, sessionKey } = confirm
+                  setConfirm(null)
+                  void act(sessionKey, action)
+                }}
+              >
+                {t('workflows.confirm', 'Continue')}
+              </Button>
+            </div>
+          }
+        >
+          <p className="text-small text-ink-2">{confirmBody}</p>
+        </Dialog>
+      )}
     </div>
   )
 }
-
-export default Workflows

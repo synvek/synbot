@@ -1,0 +1,29 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "web/src/features/chat/ApprovalCard.tsx"
+        ],
+        "createdAt": "2026-10-31T14:47:25.172Z",
+        "reason": "Approval cards carry a 2px warning rule that encodes pending consent, not decoration"
+      },
+      {
+        "rule": "overused-font",
+        "value": "geist",
+        "createdAt": "2026-10-31T14:47:25.185Z",
+        "reason": "Geist Sans is the console's documented UI face, self-hosted from web/public/fonts under its OFL licence"
+      },
+      {
+        "rule": "overused-font",
+        "value": "geist mono",
+        "createdAt": "2026-10-31T14:47:25.199Z",
+        "reason": "Geist Mono is the documented face for tabular numerals and code and ships beside the UI face"
+      }
+    ]
+  }
+}

@@ -45,11 +45,40 @@
     "stopped": "已停止",
     "yes": "是",
     "no": "否",
-    "ok": "确定"
+    "ok": "确定",
+    "language": "语言",
+    "copy": "复制"
   },
   "app": {
     "title": "Synbot",
     "description": "用于管理系统组件的管理面板"
+  },
+  "nav": {
+    "workspace": "工作区",
+    "automation": "自动化",
+    "extensions": "扩展",
+    "system": "系统"
+  },
+  "shell": {
+    "search": "搜索",
+    "searchPlaceholder": "搜索页面、主题、操作…",
+    "noResults": "没有匹配项",
+    "toggleSidebar": "折叠侧栏",
+    "focusMode": "专注模式",
+    "theme": "主题",
+    "appearance": "外观",
+    "light": "浅色",
+    "dark": "深色",
+    "system": "跟随系统",
+    "accent": "强调色",
+    "account": "账户",
+    "signedInAs": "当前账户 {{name}}",
+    "daemonOnline": "守护进程运行中",
+    "daemonOffline": "守护进程不可达",
+    "daemonUptime": "已运行 {{uptime}}",
+    "groups": "页面",
+    "appearanceGroup": "外观",
+    "actions": "操作"
   },
   "sidebar": {
     "overview": "概览",
@@ -95,6 +124,7 @@
     "info": "信息"
   },
   "chat": {
+    "workspacePanel": "工作区面板",
     "title": "Web 聊天",
     "noMessages": "还没有消息。开始对话吧！",
     "typeMessage": "输入消息...",
@@ -131,9 +161,23 @@
       "max_tool_errors": "连续多轮工具执行失败，已停止；可检查工具配置或工作区权限。",
       "error": "模型调用出错，详见上方错误信息。",
       "cancelled": "已按你的停止指令结束。"
-    }
+    },
+    "tokens": "{{total}} tokens",
+    "jumpToLatest": "跳到最新",
+    "composerHint": "Enter 发送 · Shift+Enter 换行 · / 查看命令",
+    "emptyOffline": "尚未连接",
+    "emptyOfflineHint": "正在等待本机的 Synbot 后端。",
+    "emptyNoProject": "未选择工作区",
+    "emptyNoProjectHint": "在工作区面板里选择目录，agent 才知道在哪里工作。",
+    "emptyTitle": "还没有消息",
+    "emptyHint": "直接提问工作区，或输入 / 查看可用命令。",
+    "offline": "连接已断开，正在重连后端",
+    "views": "视图",
+    "showInspector": "显示工作区面板",
+    "hideInspector": "隐藏工作区面板"
   },
   "project": {
+    "workspaceSelect": "工作区",
     "title": "工作区",
     "refresh": "刷新",
     "globalWorkspace": "默认工作区（~/.synbot/workspace）",
@@ -207,7 +251,7 @@
     "counts": "运行中 {{running}} / 共 {{total}}",
     "elapsed": "{{seconds}}s"
   },
-  "terminal":   {
+  "terminal": {
     "restart": "重启终端",
     "close": "关闭终端",
     "status": {
@@ -228,7 +272,8 @@
     "reject": "拒绝",
     "approved": "已批准",
     "rejected": "已拒绝",
-    "resolvedElsewhere": "已由 {{responder}} {{outcome}}"
+    "resolvedElsewhere": "已由 {{responder}} {{outcome}}",
+    "pending": "等待后端确认…"
   },
   "config": {
     "title": "配置",
@@ -250,6 +295,7 @@
     "jsonEditor": "配置 JSON",
     "advancedJson": "高级 JSON",
     "backToForm": "返回表单编辑",
+    "formView": "表单",
     "sectionNav": "配置分组",
     "secretLeaveUnchanged": "保持不变以沿用服务器上的密钥。",
     "sections": {
@@ -547,12 +593,37 @@
     "roles": "角色",
     "lastUpdated": "最后更新",
     "autoRefresh": "自动刷新",
-    "failedToFetch": "获取系统状态失败"
+    "failedToFetch": "获取系统状态失败",
+    "daemon": "后端进程",
+    "model": "模型",
+    "modelUnset": "未配置",
+    "modelHintUnset": "选择 provider 与模型",
+    "sandbox": "沙箱",
+    "sandboxOff": "未启用",
+    "sandboxApp": "应用 + 工具",
+    "sandboxHintOff": "直接在宿主机运行",
+    "failedChannels": "{{count}} 个异常",
+    "recentSessions": "最近会话",
+    "recentSessionsEmpty": "还没有会话 —— 去对话页开始一次。",
+    "viewAll": "查看全部",
+    "setup": "首次配置清单",
+    "setupHint": "四项配置到位后，控制台才算可用。",
+    "setupModel": "设置 provider 与模型",
+    "setupChannels": "启用一个渠道",
+    "setupWorkspace": "添加工作区目录",
+    "setupSandbox": "启用沙箱",
+    "setupDone": "已完成",
+    "setupTodo": "待处理",
+    "configure": "去配置",
+    "openChat": "打开对话",
+    "refreshFailed": "无法刷新后端状态",
+    "setupAllDone": "所有配置均已就绪。"
   },
   "login": {
-    "title": "管理面板",
+    "title": "登录",
     "invalidCredentials": "用户名或密码无效",
-    "loggingIn": "登录中..."
+    "loggingIn": "登录中...",
+    "subtitle": "登录后管理本机的 Synbot 服务。"
   },
   "colorSchemes": {
     "blueOcean": "蓝色海洋",
@@ -580,7 +651,12 @@
     "created": "创建于",
     "messageHistory": "消息历史",
     "selectSessionToView": "选择会话以查看详情",
-    "failedToFetch": "获取会话失败"
+    "failedToFetch": "获取会话失败",
+    "emptyHint": "有人通过任一渠道与 Synbot 对话后，会话会出现在这里。",
+    "noMessages": "该会话没有记录任何消息。",
+    "clearFilters": "清除筛选",
+    "filters": "筛选",
+    "detail": "会话详情"
   },
   "channels": {
     "title": "频道",
@@ -593,7 +669,24 @@
     "connected": "已连接",
     "disconnected": "未连接",
     "error": "错误",
-    "status": "状态"
+    "status": "状态",
+    "failedChannels": "{{count}} 个渠道连接失败",
+    "emptyHint": "在「配置」中新增渠道，Synbot 就能在你日常使用的地方回复。",
+    "started": "启动时间",
+    "lastConnected": "最近连接",
+    "lastReceived": "最近接收",
+    "lastSent": "最近发送",
+    "supportsSend": "发送",
+    "supportsReceive": "接收",
+    "latency": "延迟",
+    "reconnects": "重连次数",
+    "lastActivity": "最近活动",
+    "stConnected": "已连接",
+    "stStarting": "启动中",
+    "stReconnecting": "重连中",
+    "stFailed": "连接失败",
+    "stDisabled": "已禁用",
+    "stStopped": "已停止"
   },
   "workflows": {
     "title": "工作流",
@@ -632,7 +725,13 @@
       "completed": "已完成",
       "current": "进行中",
       "pending": "待执行"
-    }
+    },
+    "confirm": "继续",
+    "deleted": "已删除工作流记录",
+    "restarted": "工作流已从第 1 步重跑",
+    "resumed": "工作流已继续运行",
+    "cancelledRun": "工作流已取消",
+    "actionFailed": "该操作被拒绝"
   },
   "cron": {
     "title": "定时任务",
@@ -650,7 +749,13 @@
     "enabled": "已启用",
     "disabled": "已禁用",
     "status": "状态",
-    "na": "不适用"
+    "na": "不适用",
+    "emptyHint": "任务在配置文件中声明，目前还没有任何排程。",
+    "updateFailed": "无法更新该任务",
+    "updated": "{{name}} 已更新",
+    "runSuccess": "成功",
+    "runRunning": "运行中",
+    "runFailed": "失败"
   },
   "roles": {
     "title": "角色",
@@ -820,7 +925,11 @@
     "kindPluginPermission": "插件权限",
     "outcomeBlocked": "已拦截",
     "outcomeNeedsUser": "待确认",
-    "outcomeAllowed": "已放行"
+    "outcomeAllowed": "已放行",
+    "kind": "类型",
+    "outcome": "结果",
+    "subject": "对象",
+    "command": "命令"
   },
   "logs": {
     "title": "日志",
@@ -841,7 +950,9 @@
     "wsError": "WebSocket连接错误",
     "timestamp": "时间戳",
     "target": "目标",
-    "message": "消息"
+    "message": "消息",
+    "following": "跟随中",
+    "paused": "已暂停"
   },
   "desktop": {
     "turnFinishedTitle": "Synbot 已完成",

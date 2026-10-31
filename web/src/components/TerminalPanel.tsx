@@ -238,7 +238,7 @@ export default function TerminalPanel({ projectId, active, onClose }: TerminalPa
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-surface">
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border text-xs text-text-secondary shrink-0">
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-line text-xs text-ink-2 shrink-0">
         <span
           className={`w-2 h-2 rounded-full ${
             status === 'ready' ? 'bg-success' : status === 'error' ? 'bg-error' : 'bg-text-secondary'
@@ -249,7 +249,7 @@ export default function TerminalPanel({ projectId, active, onClose }: TerminalPa
         <button
           type="button"
           onClick={() => setReopenToken((value) => value + 1)}
-          className="ml-auto p-1 rounded hover:text-text"
+          className="ml-auto p-1 rounded hover:text-ink"
           title={t('terminal.restart', '重启终端')}
         >
           <RotateCcw size={12} />
@@ -257,7 +257,7 @@ export default function TerminalPanel({ projectId, active, onClose }: TerminalPa
         <button
           type="button"
           onClick={onClose}
-          className="p-1 rounded hover:text-text"
+          className="p-1 rounded hover:text-ink"
           title={t('terminal.close', '关闭终端')}
         >
           <X size={12} />

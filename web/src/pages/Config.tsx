@@ -1,8 +1,10 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AxiosError } from 'axios'
+import { Braces, Check, Copy, ListFilter, RotateCcw, Save, TriangleAlert } from 'lucide-react'
 import { apiClient } from '../api/client'
 import type { ConfigApiPayload, ValidationErrorItem } from '../types/api'
 import { useI18n } from '../i18n/I18nContext'
+import { Button, PageHeader, SegmentedControl, cn } from '../ui'
 import {
   ConfigSectionBody,
   SECTION_ORDER,
@@ -10,10 +12,9 @@ import {
 } from '../components/config/sectionRegistry'
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
-
 type ViewMode = 'form' | 'json'
 
-const Config: React.FC = () => {
+export default function Config() {
   const [loadState, setLoadState] = useState<LoadState>('idle')
   const [error, setError] = useState<string | null>(null)
   const [payload, setPayload] = useState<ConfigApiPayload | null>(null)
@@ -23,6 +24,7 @@ const Config: React.FC = () => {
   const [activeSection, setActiveSection] = useState<ConfigSectionId>('general')
   const [saveMessage, setSaveMessage] = useState<string | null>(null)
   const [validationErrors, setValidationErrors] = useState<ValidationErrorItem[]>([])
+  const [copied, setCopied] = useState(false)
   const { t } = useI18n()
   const hasLoadedOnce = useRef(false)
 
@@ -40,14 +42,14 @@ const Config: React.FC = () => {
       hasLoadedOnce.current = true
       setLoadState('ready')
     } catch (err) {
-      setError(t('config.failedToFetch'))
+      setError(t('config.failedToFetch', 'Failed to load the configuration'))
       console.error(err)
       setLoadState(hasLoadedOnce.current ? 'ready' : 'error')
     }
   }, [t])
 
   useEffect(() => {
-    load()
+    void load()
   }, [load])
 
   const switchToJson = () => {
@@ -59,14 +61,34 @@ const Config: React.FC = () => {
     try {
       const parsed = JSON.parse(jsonText) as unknown
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        setError(t('config.invalidJson'))
+        setError(t('config.invalidJson', 'The JSON is not a configuration object'))
         return
       }
       setDraftConfig(parsed as Record<string, unknown>)
       setError(null)
       setViewMode('form')
     } catch {
-      setError(t('config.invalidJson'))
+      setError(t('config.invalidJson', 'The JSON is not a configuration object'))
+    }
+  }
+
+  const formatJson = () => {
+    try {
+      setJsonText(JSON.stringify(JSON.parse(jsonText), null, 2))
+      setValidationErrors([])
+      setError(null)
+    } catch {
+      setError(t('config.invalidJson', 'The JSON is not a configuration object'))
+    }
+  }
+
+  const copyJson = async () => {
+    try {
+      await navigator.clipboard.writeText(jsonText)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1500)
+    } catch {
+      /* Clipboard denied: the text stays selectable, which is the fallback. */
     }
   }
 
@@ -90,7 +112,7 @@ const Config: React.FC = () => {
       try {
         toSave = JSON.parse(jsonText)
       } catch {
-        setError(t('config.invalidJson'))
+        setError(t('config.invalidJson', 'The JSON is not a configuration object'))
         return
       }
     } else {
@@ -99,14 +121,9 @@ const Config: React.FC = () => {
 
     try {
       const res = await apiClient.updateConfig(toSave)
-      setSaveMessage(t('config.saveSuccess'))
+      setSaveMessage(t('config.saveSuccess', 'Configuration saved'))
       const cfg = toSave as Record<string, unknown>
-      const next: ConfigApiPayload = {
-        config: cfg,
-        configPath: res.configPath,
-        restartNotice: res.restartNotice,
-      }
-      setPayload(next)
+      setPayload({ config: cfg, configPath: res.configPath, restartNotice: res.restartNotice })
       setDraftConfig(cfg)
       setJsonText(JSON.stringify(cfg, null, 2))
     } catch (err) {
@@ -118,173 +135,161 @@ const Config: React.FC = () => {
         const list = body.data?.validationErrors ?? []
         if (list.length > 0) {
           setValidationErrors(list)
-          setError(body.error ?? t('config.validationFailed'))
+          setError(body.error ?? t('config.validationFailed', 'The configuration was rejected'))
         } else {
-          setError(body.error ?? t('config.saveFailed'))
+          setError(body.error ?? t('config.saveFailed', 'Could not save the configuration'))
         }
       } else {
-        setError(t('config.saveFailed'))
+        setError(t('config.saveFailed', 'Could not save the configuration'))
         console.error(err)
       }
     }
   }
 
   if (loadState === 'loading' || loadState === 'idle') {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-text-secondary">{t('common.loading')}</div>
-      </div>
-    )
+    return <p className="py-10 text-center text-small text-ink-2">{t('common.loading', 'Loading…')}</p>
   }
 
   if (loadState === 'error' && !payload) {
     return (
-      <div className="bg-error/10 border border-error/20 rounded-lg p-4">
-        <p className="text-error">{error}</p>
+      <div>
+        <PageHeader title={t('config.title', 'Configuration')} />
+        <div className="rounded-panel border px-3 py-2 text-small tone-danger">{error}</div>
       </div>
     )
   }
 
   return (
-    <div>
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold text-text">{t('config.title')}</h2>
-        <p className="text-text-secondary mt-1">{t('config.description')}</p>
-        {payload?.configPath && (
-          <p className="text-sm text-text-secondary mt-2 font-mono break-all">
-            {t('config.filePath')}: {payload.configPath}
-          </p>
-        )}
-      </div>
+    <div className="flex min-h-full flex-col">
+      <PageHeader
+        title={t('config.title', 'Configuration')}
+        description={t('config.description', 'Everything the daemon reads at start-up')}
+        actions={
+          <SegmentedControl
+            ariaLabel={t('config.sections.title', 'View')}
+            value={viewMode}
+            onChange={(next) => (next === 'json' ? switchToJson() : switchToForm())}
+            options={[
+              { value: 'form', label: t('config.formView', 'Form'), icon: <ListFilter className="h-3 w-3" /> },
+              { value: 'json', label: t('config.jsonEditor', 'JSON'), icon: <Braces className="h-3 w-3" /> },
+            ]}
+          />
+        }
+      />
 
-      <div className="flex flex-wrap gap-2 mb-4">
-        {viewMode === 'json' && (
-          <button
-            type="button"
-            onClick={() => {
-              try {
-                const parsed = JSON.parse(jsonText) as unknown
-                setJsonText(JSON.stringify(parsed, null, 2))
-                setValidationErrors([])
-                setError(null)
-              } catch {
-                setError(t('config.invalidJson'))
-              }
-            }}
-            className="px-4 py-2 rounded-lg bg-surface border border-border text-text hover:bg-background text-sm"
-          >
-            {t('config.formatJson')}
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={resetToLoaded}
-          className="px-4 py-2 rounded-lg bg-surface border border-border text-text hover:bg-background text-sm"
-        >
-          {t('config.reset')}
-        </button>
-        <button
-          type="button"
-          onClick={save}
-          className="px-4 py-2 rounded-lg bg-primary text-white hover:opacity-90 text-sm font-medium"
-        >
-          {t('config.save')}
-        </button>
-        <button
-          type="button"
-          onClick={load}
-          className="px-4 py-2 rounded-lg bg-surface border border-border text-text hover:bg-background text-sm"
-        >
-          {t('config.reload')}
-        </button>
-        {viewMode === 'form' ? (
-          <button
-            type="button"
-            onClick={switchToJson}
-            className="px-4 py-2 rounded-lg bg-surface border border-border text-text hover:bg-background text-sm"
-          >
-            {t('config.advancedJson')}
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={switchToForm}
-            className="px-4 py-2 rounded-lg bg-surface border border-border text-text hover:bg-background text-sm"
-          >
-            {t('config.backToForm')}
-          </button>
-        )}
-      </div>
-
-      {error && (
-        <div className="mb-4 bg-error/10 border border-error/20 rounded-lg p-3 text-error text-sm">{error}</div>
+      {payload?.configPath && (
+        <p className="-mt-1 mb-3 truncate font-mono text-micro text-ink-3">
+          {t('config.filePath', 'File')}: {payload.configPath}
+        </p>
       )}
 
-      {saveMessage && (
-        <div className="mb-4 bg-success/10 border border-success/20 rounded-lg p-3 text-sm">
-          <p className="text-success font-medium">{saveMessage}</p>
-          {payload?.restartNotice && (
-            <p className="mt-2 text-text-secondary">{payload.restartNotice}</p>
-          )}
-        </div>
-      )}
+      {error && <div className="mb-3 rounded-panel border px-3 py-2 text-small tone-danger">{error}</div>}
 
       {validationErrors.length > 0 && (
-        <div className="mb-4 bg-error/10 border border-error/20 rounded-lg p-4">
-          <p className="font-medium text-error mb-2">{t('config.validationErrorsTitle')}</p>
-          <ul className="list-disc list-inside space-y-1 text-sm text-text">
-            {validationErrors.map((e, i) => (
-              <li key={`${e.field}-${i}`}>
-                <span className="font-mono">{e.field}</span>: {e.constraint}
+        <div className="mb-3 rounded-panel border px-3 py-2">
+          <p className="mb-1 flex items-center gap-1.5 text-small font-medium text-error">
+            <TriangleAlert className="h-3.5 w-3.5" aria-hidden="true" />
+            {t('config.validationErrorsTitle', 'The configuration was rejected')}
+          </p>
+          <ul className="space-y-0.5">
+            {validationErrors.map((item, index) => (
+              <li key={`${item.field}-${index}`} className="text-micro text-ink-2">
+                <span className="font-mono text-ink">{item.field}</span>: {item.constraint}
               </li>
             ))}
           </ul>
         </div>
       )}
 
-      {viewMode === 'form' ? (
-        <div className="flex flex-col lg:flex-row gap-6">
-          <nav
-            className="lg:w-56 shrink-0 border border-border rounded-lg p-2 bg-surface/80 max-h-[70vh] overflow-y-auto"
-            aria-label={t('config.sectionNav')}
-          >
-            <ul className="space-y-1">
-              {SECTION_ORDER.map((id) => (
-                <li key={id}>
-                  <button
-                    type="button"
-                    onClick={() => setActiveSection(id)}
-                    className={`w-full text-left px-3 py-2 rounded-md text-sm ${
-                      activeSection === id
-                        ? 'bg-primary text-white'
-                        : 'text-text-secondary hover:bg-background'
-                    }`}
-                  >
-                    {t(`config.sections.nav.${id}`)}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </nav>
-          <div className="flex-1 min-w-0 border border-border rounded-lg p-6 bg-surface/40">
-            <ConfigSectionBody id={activeSection} draft={draftConfig} setDraft={setDraftConfig} t={t} />
+      <div className="min-h-0 flex-1">
+        {viewMode === 'form' ? (
+          <div className="flex flex-col gap-4 lg:flex-row">
+            <nav
+              aria-label={t('config.sectionNav', 'Sections')}
+              className="shrink-0 overflow-y-auto lg:w-52 lg:max-h-[calc(100vh-220px)]"
+            >
+              <ul className="flex flex-row gap-1 overflow-x-auto lg:flex-col lg:overflow-visible">
+                {SECTION_ORDER.map((id) => (
+                  <li key={id}>
+                    <button
+                      type="button"
+                      onClick={() => setActiveSection(id)}
+                      aria-current={activeSection === id ? 'true' : undefined}
+                      className={cn(
+                        'flex h-7 w-full items-center whitespace-nowrap rounded-control px-2 text-left text-small transition-colors duration-fast',
+                        activeSection === id
+                          ? 'bg-surface-2 font-medium text-ink'
+                          : 'text-ink-2 hover:bg-surface-2 hover:text-ink'
+                      )}
+                    >
+                      {t(`config.sections.nav.${id}`)}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </nav>
+            <div className="min-w-0 flex-1 rounded-panel border border-line px-4 py-3">
+              <ConfigSectionBody id={activeSection} draft={draftConfig} setDraft={setDraftConfig} t={t} />
+            </div>
           </div>
-        </div>
-      ) : (
-        <textarea
-          value={jsonText}
-          onChange={(e) => setJsonText(e.target.value)}
-          spellCheck={false}
-          className="w-full min-h-[480px] font-mono text-sm p-4 rounded-lg bg-surface border border-border text-text focus:outline-none focus:ring-2 focus:ring-primary/30"
-          aria-label={t('config.jsonEditor')}
-        />
-      )}
+        ) : (
+          <div className="overflow-hidden rounded-panel border border-line">
+            <div className="flex items-center justify-between gap-2 border-b border-line px-2.5 py-1">
+              <span className="truncate font-mono text-micro text-ink-3">
+                {payload?.configPath ?? 'config'}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={formatJson}
+                  className="text-micro text-ink-3 transition-colors duration-fast hover:text-ink"
+                >
+                  {t('config.formatJson', 'Format')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void copyJson()}
+                  aria-label={t('common.copy', 'Copy')}
+                  className="text-ink-3 transition-colors duration-fast hover:text-ink"
+                >
+                  {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                </button>
+              </div>
+            </div>
+            <textarea
+              value={jsonText}
+              onChange={(event) => setJsonText(event.target.value)}
+              spellCheck={false}
+              aria-label={t('config.jsonEditor', 'JSON editor')}
+              className="block max-h-[calc(100vh-300px)] min-h-[420px] w-full resize-y bg-surface-2 px-2.5 py-2 font-mono text-micro leading-relaxed text-ink outline-none"
+            />
+          </div>
+        )}
+      </div>
 
-      <div className="mt-6 bg-warning/10 border border-warning/20 rounded-lg p-4">
-        <p className="text-sm text-warning">{t('config.note')}</p>
+      {/* Sticky action bar: sits at the bottom of the viewport on short forms, follows the scroll on long ones. */}
+      <div className="sticky bottom-0 -mx-6 mt-4 flex shrink-0 flex-wrap items-center gap-2 border-t border-line bg-background px-6 py-2">
+        <p className="mr-auto min-w-0 text-micro text-ink-2">
+          {saveMessage ? <span className="text-success">{saveMessage}</span> : null}
+          {saveMessage && payload?.restartNotice ? ' · ' : null}
+          {saveMessage ? payload?.restartNotice : null}
+          {!saveMessage && t('config.note', 'Changes take effect after the daemon restarts.')}
+        </p>
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={<RotateCcw className="h-3.5 w-3.5" />}
+          onClick={resetToLoaded}
+        >
+          {t('config.reset', 'Reset')}
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => void load()}>
+          {t('config.reload', 'Reload')}
+        </Button>
+        <Button variant="primary" size="sm" icon={<Save className="h-3.5 w-3.5" />} onClick={() => void save()}>
+          {t('config.save', 'Save')}
+        </Button>
       </div>
     </div>
   )
 }
-
-export default Config

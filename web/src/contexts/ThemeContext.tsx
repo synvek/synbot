@@ -1,9 +1,32 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react'
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react'
 
-// 定义6套配色方案
+/**
+ * The console keeps one neutral scale in `styles/tokens.css`; a colour scheme is an accent ramp
+ * applied over it through the `data-accent` attribute on <html>. Nothing else changes with the
+ * scheme — that is what keeps twelve pages coherent in six colours and two modes.
+ */
+export type ThemeMode = 'light' | 'dark' | 'system'
+export type ResolvedMode = 'light' | 'dark'
+
 export type ColorScheme = {
   id: string
+  /** zh label, kept for callers that do not go through i18n. */
   name: string
+  /** i18n key for the visible label. */
+  labelKey: string
+  accent: { light: string; dark: string }
+  /**
+   * Concrete colours resolved for the current mode. xterm and a few inline styles need real
+   * values rather than CSS variables; everything else reads the variables.
+   */
   colors: {
     primary: string
     secondary: string
@@ -20,233 +43,104 @@ export type ColorScheme = {
   }
 }
 
-export const colorSchemes: ColorScheme[] = [
+const LIGHT_NEUTRALS = {
+  background: '#ffffff',
+  surface: '#ffffff',
+  text: '#17181b',
+  textSecondary: '#5c5f66',
+  border: '#e7e7ea',
+  success: '#10875b',
+  warning: '#b4690e',
+  error: '#cf3b32',
+  info: '#2f6fed',
+}
+
+const DARK_NEUTRALS = {
+  background: '#0b0c0e',
+  surface: '#131417',
+  text: '#e9eaec',
+  textSecondary: '#a2a6ae',
+  border: '#242629',
+  success: '#35a97c',
+  warning: '#d18a2b',
+  error: '#e5645b',
+  info: '#5b8dff',
+}
+
+type SchemeDefinition = Pick<ColorScheme, 'id' | 'name' | 'labelKey' | 'accent'>
+
+/** The six shipped schemes. Ids are part of the product (stored in `theme-scheme`). */
+export const accentSchemes: SchemeDefinition[] = [
   {
     id: 'blue-ocean',
     name: '蓝色海洋',
-    colors: {
-      primary: '#3b82f6',
-      secondary: '#1e40af',
-      accent: '#60a5fa',
-      background: '#f8fafc',
-      surface: '#ffffff',
-      text: '#1e293b',
-      textSecondary: '#64748b',
-      border: '#e2e8f0',
-      success: '#10b981',
-      warning: '#f59e0b',
-      error: '#ef4444',
-      info: '#3b82f6'
-    }
+    labelKey: 'colorSchemes.blueOcean',
+    accent: { light: '#2f6fed', dark: '#5b8dff' },
   },
   {
     id: 'green-forest',
     name: '绿色森林',
-    colors: {
-      primary: '#10b981',
-      secondary: '#047857',
-      accent: '#34d399',
-      background: '#f0fdf4',
-      surface: '#ffffff',
-      text: '#1e293b',
-      textSecondary: '#64748b',
-      border: '#d1fae5',
-      success: '#10b981',
-      warning: '#f59e0b',
-      error: '#ef4444',
-      info: '#3b82f6'
-    }
+    labelKey: 'colorSchemes.greenForest',
+    accent: { light: '#12805c', dark: '#2aa37b' },
   },
   {
     id: 'purple-mystic',
     name: '紫色神秘',
-    colors: {
-      primary: '#8b5cf6',
-      secondary: '#7c3aed',
-      accent: '#a78bfa',
-      background: '#faf5ff',
-      surface: '#ffffff',
-      text: '#1e293b',
-      textSecondary: '#64748b',
-      border: '#e9d5ff',
-      success: '#10b981',
-      warning: '#f59e0b',
-      error: '#ef4444',
-      info: '#3b82f6'
-    }
+    labelKey: 'colorSchemes.purpleMystic',
+    accent: { light: '#7c5cfc', dark: '#9b7fff' },
   },
   {
     id: 'orange-sunset',
     name: '橙色日落',
-    colors: {
-      primary: '#f97316',
-      secondary: '#ea580c',
-      accent: '#fb923c',
-      background: '#fff7ed',
-      surface: '#ffffff',
-      text: '#1e293b',
-      textSecondary: '#64748b',
-      border: '#fed7aa',
-      success: '#10b981',
-      warning: '#f59e0b',
-      error: '#ef4444',
-      info: '#3b82f6'
-    }
+    labelKey: 'colorSchemes.orangeSunset',
+    accent: { light: '#d2591a', dark: '#e8733a' },
   },
   {
     id: 'pink-blossom',
     name: '粉色花语',
-    colors: {
-      primary: '#ec4899',
-      secondary: '#db2777',
-      accent: '#f472b6',
-      background: '#fdf2f8',
-      surface: '#ffffff',
-      text: '#1e293b',
-      textSecondary: '#64748b',
-      border: '#fbcfe8',
-      success: '#10b981',
-      warning: '#f59e0b',
-      error: '#ef4444',
-      info: '#3b82f6'
-    }
+    labelKey: 'colorSchemes.pinkBlossom',
+    accent: { light: '#db2777', dark: '#ee5c97' },
   },
   {
     id: 'gray-modern',
     name: '灰色现代',
-    colors: {
-      primary: '#6b7280',
-      secondary: '#4b5563',
-      accent: '#9ca3af',
-      background: '#f9fafb',
-      surface: '#ffffff',
-      text: '#1f2937',
-      textSecondary: '#6b7280',
-      border: '#e5e7eb',
-      success: '#10b981',
-      warning: '#f59e0b',
-      error: '#ef4444',
-      info: '#3b82f6'
-    }
-  }
+    labelKey: 'colorSchemes.grayModern',
+    accent: { light: '#3f4147', dark: '#a7abb4' },
+  },
 ]
 
-// 暗黑模式配色方案 - 为每个方案定制更深邃且有特色的暗黑配色
-export const darkColorSchemes: ColorScheme[] = [
-  {
-    id: 'blue-ocean',
-    name: '蓝色海洋',
-    colors: {
-      primary: '#60a5fa',
-      secondary: '#3b82f6',
-      accent: '#93c5fd',
-      background: '#020617',
-      surface: '#0f172a',
-      text: '#f1f5f9',
-      textSecondary: '#94a3b8',
-      border: '#1e293b',
-      success: '#22c55e',
-      warning: '#fbbf24',
-      error: '#f87171',
-      info: '#60a5fa'
-    }
-  },
-  {
-    id: 'green-forest',
-    name: '绿色森林',
-    colors: {
-      primary: '#34d399',
-      secondary: '#10b981',
-      accent: '#6ee7b7',
-      background: '#021208',
-      surface: '#052e16',
-      text: '#f0fdf4',
-      textSecondary: '#86efac',
-      border: '#14532d',
-      success: '#22c55e',
-      warning: '#fbbf24',
-      error: '#f87171',
-      info: '#60a5fa'
-    }
-  },
-  {
-    id: 'purple-mystic',
-    name: '紫色神秘',
-    colors: {
-      primary: '#a78bfa',
-      secondary: '#8b5cf6',
-      accent: '#c4b5fd',
-      background: '#0c0314',
-      surface: '#1e1b4b',
-      text: '#faf5ff',
-      textSecondary: '#c4b5fd',
-      border: '#312e81',
-      success: '#22c55e',
-      warning: '#fbbf24',
-      error: '#f87171',
-      info: '#60a5fa'
-    }
-  },
-  {
-    id: 'orange-sunset',
-    name: '橙色日落',
-    colors: {
-      primary: '#fb923c',
-      secondary: '#f97316',
-      accent: '#fdba74',
-      background: '#120802',
-      surface: '#431407',
-      text: '#fff7ed',
-      textSecondary: '#fed7aa',
-      border: '#7c2d12',
-      success: '#22c55e',
-      warning: '#fbbf24',
-      error: '#f87171',
-      info: '#60a5fa'
-    }
-  },
-  {
-    id: 'pink-blossom',
-    name: '粉色花语',
-    colors: {
-      primary: '#f472b6',
-      secondary: '#ec4899',
-      accent: '#f9a8d4',
-      background: '#0f0314',
-      surface: '#500724',
-      text: '#fdf2f8',
-      textSecondary: '#fbcfe8',
-      border: '#831843',
-      success: '#22c55e',
-      warning: '#fbbf24',
-      error: '#f87171',
-      info: '#60a5fa'
-    }
-  },
-  {
-    id: 'gray-modern',
-    name: '灰色现代',
-    colors: {
-      primary: '#9ca3af',
-      secondary: '#6b7280',
-      accent: '#d1d5db',
-      background: '#030712',
-      surface: '#111827',
-      text: '#f9fafb',
-      textSecondary: '#9ca3af',
-      border: '#374151',
-      success: '#22c55e',
-      warning: '#fbbf24',
-      error: '#f87171',
-      info: '#60a5fa'
-    }
+function schemeColors(scheme: SchemeDefinition, mode: ResolvedMode): ColorScheme['colors'] {
+  const accent = scheme.accent[mode]
+  return {
+    ...(mode === 'dark' ? DARK_NEUTRALS : LIGHT_NEUTRALS),
+    primary: accent,
+    secondary: accent,
+    accent,
   }
-]
+}
 
-type ThemeMode = 'light' | 'dark'
+function readStoredMode(): ThemeMode {
+  const saved = localStorage.getItem('theme-mode')
+  return saved === 'dark' || saved === 'system' ? saved : 'light'
+}
+
+function readStoredScheme(): string {
+  const saved = localStorage.getItem('theme-scheme')
+  return accentSchemes.some((scheme) => scheme.id === saved) ? (saved as string) : 'blue-ocean'
+}
+
+function systemPrefersDark(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-color-scheme: dark)').matches
+  )
+}
 
 interface ThemeContextType {
   mode: ThemeMode
+  /** `mode` with `system` resolved against the OS. */
+  resolvedMode: ResolvedMode
   colorScheme: ColorScheme
   setMode: (mode: ThemeMode) => void
   setColorScheme: (schemeId: string) => void
@@ -269,63 +163,76 @@ interface ThemeProviderProps {
 }
 
 export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
-  const [mode, setMode] = useState<ThemeMode>(() => {
-    const saved = localStorage.getItem('theme-mode')
-    return (saved as ThemeMode) || 'light'
-  })
+  const [mode, setModeState] = useState<ThemeMode>(readStoredMode)
+  const [colorSchemeId, setColorSchemeId] = useState<string>(readStoredScheme)
+  const [systemDark, setSystemDark] = useState<boolean>(systemPrefersDark)
 
-  const [colorSchemeId, setColorSchemeId] = useState<string>(() => {
-    const saved = localStorage.getItem('theme-scheme')
-    return saved || 'blue-ocean'
-  })
+  // Follow the OS while `system` is selected, so a scheduled dark switch needs no reload.
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return
+    const query = window.matchMedia('(prefers-color-scheme: dark)')
+    const listener = (event: MediaQueryListEvent) => setSystemDark(event.matches)
+    query.addEventListener('change', listener)
+    return () => query.removeEventListener('change', listener)
+  }, [])
 
-  const availableSchemes = mode === 'light' ? colorSchemes : darkColorSchemes
-  const colorScheme = availableSchemes.find(s => s.id === colorSchemeId) || availableSchemes[0]
+  const resolvedMode: ResolvedMode = mode === 'system' ? (systemDark ? 'dark' : 'light') : mode
 
-  const toggleMode = () => {
-    setMode(prev => {
-      const newMode = prev === 'light' ? 'dark' : 'light'
-      localStorage.setItem('theme-mode', newMode)
-      return newMode
-    })
-  }
+  const definition = useMemo(
+    () => accentSchemes.find((scheme) => scheme.id === colorSchemeId) ?? accentSchemes[0],
+    [colorSchemeId]
+  )
 
-  const handleSetMode = (newMode: ThemeMode) => {
-    setMode(newMode)
-    localStorage.setItem('theme-mode', newMode)
-  }
+  const colorScheme = useMemo<ColorScheme>(
+    () => ({ ...definition, colors: schemeColors(definition, resolvedMode) }),
+    [definition, resolvedMode]
+  )
 
-  const handleSetColorScheme = (schemeId: string) => {
+  const availableSchemes = useMemo<ColorScheme[]>(
+    () =>
+      accentSchemes.map((scheme) => ({
+        ...scheme,
+        colors: schemeColors(scheme, resolvedMode),
+      })),
+    [resolvedMode]
+  )
+
+  const setMode = useCallback((next: ThemeMode) => {
+    setModeState(next)
+    localStorage.setItem('theme-mode', next)
+  }, [])
+
+  const setColorScheme = useCallback((schemeId: string) => {
     setColorSchemeId(schemeId)
     localStorage.setItem('theme-scheme', schemeId)
-  }
+  }, [])
 
-  // 应用主题到CSS变量
+  const toggleMode = useCallback(() => {
+    setModeState((previous) => {
+      const current = previous === 'system' ? (systemPrefersDark() ? 'dark' : 'light') : previous
+      const next: ResolvedMode = current === 'light' ? 'dark' : 'light'
+      localStorage.setItem('theme-mode', next)
+      return next
+    })
+  }, [])
+
+  // The accent is a single attribute; the dark class is what tokens.css keys its scale off.
   useEffect(() => {
     const root = document.documentElement
-    
-    // 设置CSS变量
-    Object.entries(colorScheme.colors).forEach(([key, value]) => {
-      root.style.setProperty(`--color-${key}`, value)
-    })
-
-    // 设置主题类
-    if (mode === 'dark') {
-      root.classList.add('dark')
-    } else {
-      root.classList.remove('dark')
-    }
-  }, [mode, colorScheme])
+    root.setAttribute('data-accent', colorScheme.id)
+    root.classList.toggle('dark', resolvedMode === 'dark')
+  }, [colorScheme.id, resolvedMode])
 
   return (
     <ThemeContext.Provider
       value={{
         mode,
+        resolvedMode,
         colorScheme,
-        setMode: handleSetMode,
-        setColorScheme: handleSetColorScheme,
+        setMode,
+        setColorScheme,
         toggleMode,
-        availableSchemes
+        availableSchemes,
       }}
     >
       {children}

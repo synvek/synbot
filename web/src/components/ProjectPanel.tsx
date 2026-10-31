@@ -4,7 +4,6 @@ import {
   FolderPlus,
   File as FileIcon,
   GitBranch,
-  ListChecks,
   RefreshCw,
   RotateCcw,
   Search,
@@ -401,27 +400,28 @@ export default function ProjectPanel({
   }, [preview, previewLine]);
 
   return (
-    <aside className="hidden lg:flex w-72 xl:w-80 shrink-0 flex-col rounded-lg border border-border bg-surface overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
-        <span className="text-sm font-semibold text-text">{t('project.title', '工作区')}</span>
+    <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-surface">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-line">
+        <span className="text-sm font-semibold text-ink">{t('project.title', '工作区')}</span>
         <button
           type="button"
           onClick={() => {
             setReloadToken((value) => value + 1);
             void refreshProjects();
           }}
-          className="ml-auto p-1 rounded text-text-secondary hover:text-text hover:bg-background"
+          className="ml-auto p-1 rounded text-ink-2 hover:text-ink hover:bg-surface-2"
           title={t('project.refresh', '刷新')}
         >
           <RefreshCw size={14} />
         </button>
       </div>
 
-      <div className="px-3 py-2 space-y-2 border-b border-border">
+      <div className="px-3 py-2 space-y-2 border-b border-line">
         <select
+          aria-label={t('project.workspaceSelect', '工作区')}
           value={project?.id ?? ''}
           onChange={(e) => onSelect(e.target.value || null)}
-          className="w-full text-sm px-2 py-1.5 rounded border border-border bg-background text-text"
+          className="w-full text-sm px-2 py-1.5 rounded border border-line bg-surface-2 text-ink"
         >
           <option value="">{t('project.globalWorkspace', '默认工作区（~/.synbot/workspace）')}</option>
           {projects.map((item) => (
@@ -432,7 +432,7 @@ export default function ProjectPanel({
         </select>
 
         {project && (
-          <div className="text-xs text-text-secondary space-y-0.5">
+          <div className="text-xs text-ink-2 space-y-0.5">
             <div className="truncate font-mono" title={project.path}>
               {project.path}
             </div>
@@ -456,7 +456,7 @@ export default function ProjectPanel({
               </button>
             </div>
             {running && (
-              <div className="text-[11px] text-text-secondary">
+              <div className="text-[11px] text-ink-2">
                 {t('project.switchNextTurn', '切换将在下一轮生效')}
               </div>
             )}
@@ -465,7 +465,7 @@ export default function ProjectPanel({
                 type="button"
                 onClick={() => setGitPanel(true)}
                 title={git.files.map((f) => `${f.status} ${f.path}`).join('\n')}
-                className="flex items-center gap-1 text-[11px] text-text-secondary hover:text-text"
+                className="flex items-center gap-1 text-[11px] text-ink-2 hover:text-ink"
               >
                 <GitBranch size={11} />
                 <span className="truncate">{git.branch ?? 'HEAD'}</span>
@@ -486,14 +486,14 @@ export default function ProjectPanel({
             value={openPath}
             onChange={(e) => setOpenPath(e.target.value)}
             placeholder={t('project.openPathPlaceholder', '输入文件夹路径…')}
-            className="flex-1 min-w-0 text-xs px-2 py-1 rounded border border-border bg-background text-text focus:outline-none focus:ring-1 focus:ring-primary"
+            className="flex-1 min-w-0 text-xs px-2 py-1 rounded border border-line bg-surface-2 text-ink focus:outline-none focus:ring-1 focus:ring-accent"
           />
           {isDesktop() && (
             <button
               type="button"
               onClick={handleBrowse}
               disabled={opening}
-              className="p-1.5 rounded border border-border text-text-secondary hover:text-text disabled:opacity-50"
+              className="p-1.5 rounded border border-line text-ink-2 hover:text-ink disabled:opacity-50"
               title={t('project.browse', '选择文件夹…')}
             >
               <Folder size={13} />
@@ -502,7 +502,7 @@ export default function ProjectPanel({
           <button
             type="submit"
             disabled={opening || !openPath.trim()}
-            className="p-1.5 rounded border border-border text-text-secondary hover:text-text disabled:opacity-50"
+            className="p-1.5 rounded border border-line text-ink-2 hover:text-ink disabled:opacity-50"
             title={t('project.open', '打开文件夹')}
           >
             <FolderPlus size={13} />
@@ -512,12 +512,13 @@ export default function ProjectPanel({
         {error && <div className="text-xs text-error break-all">{error}</div>}
       </div>
 
-      <div className="flex text-xs border-b border-border">
+      {/* Content-width tabs in a scroll strip: the four English labels do not fit 320px at equal widths. */}
+      <div className="flex shrink-0 overflow-x-auto border-b border-line text-small">
         <button
           type="button"
           onClick={() => setTab('files')}
-          className={`flex-1 py-1.5 ${
-            tab === 'files' ? 'text-text border-b-2 border-primary' : 'text-text-secondary'
+          className={`shrink-0 whitespace-nowrap px-2.5 py-1.5 ${
+            tab === 'files' ? 'border-b-2 border-primary text-ink' : 'text-ink-2'
           }`}
         >
           {t('project.files', '文件')}
@@ -525,8 +526,8 @@ export default function ProjectPanel({
         <button
           type="button"
           onClick={() => setTab('changes')}
-          className={`flex-1 py-1.5 ${
-            tab === 'changes' ? 'text-text border-b-2 border-primary' : 'text-text-secondary'
+          className={`shrink-0 whitespace-nowrap px-2.5 py-1.5 ${
+            tab === 'changes' ? 'border-b-2 border-primary text-ink' : 'text-ink-2'
           }`}
         >
           {t('project.changes', '本轮改动')}
@@ -535,22 +536,20 @@ export default function ProjectPanel({
         <button
           type="button"
           onClick={() => setTab('tasks')}
-          className={`flex-1 py-1.5 flex items-center justify-center gap-1 ${
-            tab === 'tasks' ? 'text-text border-b-2 border-primary' : 'text-text-secondary'
+          className={`shrink-0 whitespace-nowrap px-2.5 py-1.5 ${
+            tab === 'tasks' ? 'border-b-2 border-primary text-ink' : 'text-ink-2'
           }`}
         >
-          <ListChecks size={12} />
           {t('project.tasks', '任务')}
           {tasks.length > 0 && ` ${doneTasks}/${tasks.length}`}
         </button>
         <button
           type="button"
           onClick={() => setTab('delivery')}
-          className={`flex-1 py-1.5 flex items-center justify-center gap-1 ${
-            tab === 'delivery' ? 'text-text border-b-2 border-primary' : 'text-text-secondary'
+          className={`shrink-0 whitespace-nowrap px-2.5 py-1.5 ${
+            tab === 'delivery' ? 'border-b-2 border-primary text-ink' : 'text-ink-2'
           }`}
         >
-          <FileIcon size={12} />
           {t('project.deliverables', '交付物')}
         </button>
       </div>
@@ -562,13 +561,13 @@ export default function ProjectPanel({
               <div className="relative flex-1 min-w-0">
                 <Search
                   size={12}
-                  className="absolute left-1.5 top-1.5 text-text-secondary pointer-events-none"
+                  className="absolute left-1.5 top-1.5 text-ink-2 pointer-events-none"
                 />
                 <input
                   value={symbolQuery}
                   onChange={(e) => setSymbolQuery(e.target.value)}
                   placeholder={t('project.symbolSearch', '搜索符号（函数/类型/类）')}
-                  className="w-full text-xs pl-6 pr-2 py-1 rounded border border-border bg-background text-text focus:outline-none focus:ring-1 focus:ring-primary"
+                  className="w-full text-xs pl-6 pr-2 py-1 rounded border border-line bg-surface-2 text-ink focus:outline-none focus:ring-1 focus:ring-accent"
                 />
               </div>
               <button
@@ -576,17 +575,17 @@ export default function ProjectPanel({
                 onClick={() => void reindex()}
                 disabled={symbolBusy}
                 title={t('project.reindex', '重建索引')}
-                className="p-1.5 rounded border border-border text-text-secondary hover:text-text disabled:opacity-50"
+                className="p-1.5 rounded border border-line text-ink-2 hover:text-ink disabled:opacity-50"
               >
                 <RefreshCw size={12} />
               </button>
             </div>
             {notice && <div className="px-3 py-1 text-[11px] text-success">{notice}</div>}
-            <div className="flex items-center gap-1 px-2 py-1 text-xs text-text-secondary overflow-x-auto">
+            <div className="flex items-center gap-1 px-2 py-1 text-xs text-ink-2 overflow-x-auto">
               <button
                 type="button"
                 onClick={() => setDirPath('')}
-                className="hover:text-text"
+                className="hover:text-ink"
               >
                 {project.name}
               </button>
@@ -596,7 +595,7 @@ export default function ProjectPanel({
                   <button
                     type="button"
                     onClick={() => setDirPath(segments.slice(0, index + 1).join('/'))}
-                    className="hover:text-text"
+                    className="hover:text-ink"
                   >
                     {segment}
                   </button>
@@ -607,10 +606,10 @@ export default function ProjectPanel({
               {symbolHits !== null ? (
                 <>{/* symbol search results replace the tree while the box has a query */}
                   {symbolBusy && (
-                    <li className="px-3 py-2 text-xs text-text-secondary">{t('common.loading')}</li>
+                    <li className="px-3 py-2 text-xs text-ink-2">{t('common.loading')}</li>
                   )}
                   {!symbolBusy && symbolHits.length === 0 && (
-                    <li className="px-3 py-2 text-xs text-text-secondary">
+                    <li className="px-3 py-2 text-xs text-ink-2">
                       {t('project.symbolsEmpty', '没有匹配的符号')}
                     </li>
                   )}
@@ -619,16 +618,16 @@ export default function ProjectPanel({
                       <button
                         type="button"
                         onClick={() => openSymbol(hit)}
-                        className="w-full flex items-start gap-2 px-3 py-1 text-left hover:bg-background"
+                        className="w-full flex items-start gap-2 px-3 py-1 text-left hover:bg-surface-2"
                       >
-                        <span className="uppercase text-[10px] text-text-secondary w-11 shrink-0 pt-0.5">
+                        <span className="uppercase text-[10px] text-ink-2 w-11 shrink-0 pt-0.5">
                           {hit.kind}
                         </span>
                         <span className="min-w-0">
-                          <span className="block truncate text-text text-xs">
+                          <span className="block truncate text-ink text-xs">
                             {hit.container ? `${hit.container}::${hit.name}` : hit.name}
                           </span>
-                          <span className="block truncate text-[10px] font-mono text-text-secondary">
+                          <span className="block truncate text-[10px] font-mono text-ink-2">
                             {hit.path}:{hit.line}
                           </span>
                         </span>
@@ -639,10 +638,10 @@ export default function ProjectPanel({
               ) : (
                 <>
               {loading && (
-                <li className="px-3 py-2 text-xs text-text-secondary">{t('common.loading')}</li>
+                <li className="px-3 py-2 text-xs text-ink-2">{t('common.loading')}</li>
               )}
               {!loading && entries.length === 0 && (
-                <li className="px-3 py-2 text-xs text-text-secondary">
+                <li className="px-3 py-2 text-xs text-ink-2">
                   {t('project.emptyFolder', '空文件夹')}
                 </li>
               )}
@@ -653,16 +652,16 @@ export default function ProjectPanel({
                     onClick={() =>
                       entry.is_dir ? setDirPath(entry.path) : void openFile(entry.path)
                     }
-                    className="w-full flex items-center gap-2 px-3 py-1 text-left hover:bg-background"
+                    className="w-full flex items-center gap-2 px-3 py-1 text-left hover:bg-surface-2"
                   >
                     {entry.is_dir ? (
-                      <Folder size={13} className="text-primary shrink-0" />
+                      <Folder size={13} className="text-accent shrink-0" />
                     ) : (
-                      <FileIcon size={13} className="text-text-secondary shrink-0" />
+                      <FileIcon size={13} className="text-ink-2 shrink-0" />
                     )}
-                    <span className="truncate text-text">{entry.name}</span>
+                    <span className="truncate text-ink">{entry.name}</span>
                     {!entry.is_dir && (
-                      <span className="ml-auto text-[10px] text-text-secondary shrink-0">
+                      <span className="ml-auto text-[10px] text-ink-2 shrink-0">
                         {formatBytes(entry.size)}
                       </span>
                     )}
@@ -674,12 +673,12 @@ export default function ProjectPanel({
             </ul>
           </>
         ) : (
-          <div className="p-3 text-xs text-text-secondary">{t('project.noProject', '未打开文件夹，本轮运行在默认工作区。')}</div>
+          <div className="p-3 text-xs text-ink-2">{t('project.noProject', '未打开文件夹，本轮运行在默认工作区。')}</div>
         )
       ) : tab === 'changes' ? (
         <div className="flex flex-col flex-1 min-h-0">
           {checkpoint && checkpoint.files.length > 0 && (
-            <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border text-[11px] text-text-secondary">
+            <div className="flex items-center gap-2 px-3 py-1.5 border-b border-line text-[11px] text-ink-2">
               <span className="text-success">+{checkpoint.additions}</span>
               <span className="text-error">-{checkpoint.deletions}</span>
               {checkpoint.undone_at ? (
@@ -690,7 +689,7 @@ export default function ProjectPanel({
                   onClick={() => void handleUndo()}
                   disabled={undoing || running}
                   title={t('project.undoHint', '把本轮写过的文件恢复到本轮开始前')}
-                  className="ml-auto flex items-center gap-1 px-1.5 py-0.5 rounded border border-border hover:text-text disabled:opacity-50"
+                  className="ml-auto flex items-center gap-1 px-1.5 py-0.5 rounded border border-line hover:text-ink disabled:opacity-50"
                 >
                   <RotateCcw size={11} />
                   {undoing ? t('project.undoing', '撤销中…') : t('project.undo', '撤销本轮')}
@@ -706,12 +705,12 @@ export default function ProjectPanel({
                   <button
                     type="button"
                     onClick={() => openChange(file)}
-                    className="w-full flex items-center gap-2 px-3 py-1 text-left hover:bg-background"
+                    className="w-full flex items-center gap-2 px-3 py-1 text-left hover:bg-surface-2"
                   >
-                    <span className="uppercase text-[10px] text-text-secondary w-10 shrink-0">
+                    <span className="uppercase text-[10px] text-ink-2 w-10 shrink-0">
                       {file.change.slice(0, 7)}
                     </span>
-                    <span className="truncate font-mono text-text">{file.display_path}</span>
+                    <span className="truncate font-mono text-ink">{file.display_path}</span>
                     <span className="ml-auto shrink-0 text-[10px]">
                       {file.additions > 0 && (
                         <span className="text-success">+{file.additions}</span>
@@ -724,7 +723,7 @@ export default function ProjectPanel({
                 </li>
               ))
             ) : changedFiles.length === 0 ? (
-              <li className="px-3 py-2 text-text-secondary">
+              <li className="px-3 py-2 text-ink-2">
                 {t('project.noChanges', '最近一轮没有改动文件')}
               </li>
             ) : (
@@ -734,12 +733,12 @@ export default function ProjectPanel({
                   <button
                     type="button"
                     onClick={() => project && void openFile(file.path)}
-                    className="w-full flex items-center gap-2 px-3 py-1 text-left hover:bg-background"
+                    className="w-full flex items-center gap-2 px-3 py-1 text-left hover:bg-surface-2"
                   >
-                    <span className="uppercase text-[10px] text-text-secondary w-10 shrink-0">
+                    <span className="uppercase text-[10px] text-ink-2 w-10 shrink-0">
                       {file.kind}
                     </span>
-                    <span className="truncate font-mono text-text">{file.path}</span>
+                    <span className="truncate font-mono text-ink">{file.path}</span>
                   </button>
                 </li>
               ))
@@ -748,7 +747,7 @@ export default function ProjectPanel({
         </div>
       ) : tab === 'tasks' ? (
         <div className="flex flex-col flex-1 min-h-0">
-          <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border text-[11px] text-text-secondary">
+          <div className="flex items-center gap-2 px-3 py-1.5 border-b border-line text-[11px] text-ink-2">
             <span>
               {t('project.taskProgress', { done: doneTasks, total: tasks.length })}
             </span>
@@ -758,7 +757,7 @@ export default function ProjectPanel({
           </div>
           <ul className="flex-1 overflow-y-auto text-xs">
             {tasks.length === 0 ? (
-              <li className="px-3 py-2 text-text-secondary">
+              <li className="px-3 py-2 text-ink-2">
                 {t('project.noTasks', '还没有任务计划。让 agent 先列出步骤（plan_write）再动手。')}
               </li>
             ) : (
@@ -769,29 +768,29 @@ export default function ProjectPanel({
                     onClick={() => void cycleTask(task)}
                     disabled={taskBusy === task.id}
                     title={task.notes ?? t('project.taskHint', '点击切换状态')}
-                    className="w-full flex items-start gap-2 px-3 py-1 text-left hover:bg-background disabled:opacity-50"
+                    className="w-full flex items-start gap-2 px-3 py-1 text-left hover:bg-surface-2 disabled:opacity-50"
                   >
                     <span
                       className={`mt-0.5 w-3 h-3 shrink-0 rounded-sm border ${
                         task.status === 'completed'
                           ? 'bg-success border-success'
                           : task.status === 'in_progress'
-                            ? 'bg-primary/40 border-primary'
+                            ? 'bg-accent/40 border-primary'
                             : task.status === 'cancelled'
-                              ? 'bg-border border-border'
-                              : 'border-border'
+                              ? 'bg-border border-line'
+                              : 'border-line'
                       }`}
                     />
                     <span
                       className={`truncate ${
                         task.status === 'completed' || task.status === 'cancelled'
-                          ? 'text-text-secondary line-through'
-                          : 'text-text'
+                          ? 'text-ink-2 line-through'
+                          : 'text-ink'
                       }`}
                     >
                       {task.title}
                     </span>
-                    <span className="ml-auto shrink-0 text-[10px] text-text-secondary">
+                    <span className="ml-auto shrink-0 text-[10px] text-ink-2">
                       {t(`project.taskStatus.${task.status}`, task.status)}
                     </span>
                   </button>
@@ -803,17 +802,17 @@ export default function ProjectPanel({
       ) : project ? (
         <DeliverablePanel project={project} />
       ) : (
-        <div className="p-3 text-xs text-text-secondary">
+        <div className="p-3 text-xs text-ink-2">
           {t('project.noProject', '未打开文件夹，本轮运行在默认工作区。')}
         </div>
       )}
 
       {diffFile && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-6">
-          <div className="flex flex-col w-full max-w-5xl max-h-[85vh] rounded-lg bg-surface border border-border overflow-hidden">
-            <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
-              <span className="text-xs uppercase text-text-secondary">{diffFile.change}</span>
-              <span className="text-sm font-mono text-text truncate">
+          <div className="flex flex-col w-full max-w-5xl max-h-[85vh] rounded-lg bg-surface border border-line overflow-hidden">
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-line">
+              <span className="text-xs uppercase text-ink-2">{diffFile.change}</span>
+              <span className="text-sm font-mono text-ink truncate">
                 {diffFile.display_path}
                 {diffFile.renamed_to && ` → ${diffFile.renamed_to}`}
               </span>
@@ -824,20 +823,20 @@ export default function ProjectPanel({
               <button
                 type="button"
                 onClick={() => setDiffPath(null)}
-                className="ml-auto p-1 rounded text-text-secondary hover:text-text"
+                className="ml-auto p-1 rounded text-ink-2 hover:text-ink"
               >
                 <X size={16} />
               </button>
             </div>
             {diffFile.skipped ? (
-              <div className="p-4 text-sm text-text-secondary">
+              <div className="p-4 text-sm text-ink-2">
                 {t('project.notSnapshotted', '未快照')}：{diffFile.skipped}
               </div>
             ) : (
-              <div className="flex-1 overflow-auto bg-background font-mono text-[11px] leading-5">
+              <div className="flex-1 overflow-auto bg-surface-2 font-mono text-[11px] leading-5">
                 {diffFile.hunks.map((hunk, hunkIndex) => (
                   <div key={`${hunk.old_start}-${hunkIndex}`}>
-                    <div className="px-3 py-0.5 text-primary bg-surface">
+                    <div className="px-3 py-0.5 text-accent bg-surface">
                       @@ -{hunk.old_start} +{hunk.new_start} @@
                     </div>
                     {hunk.lines.map((line, lineIndex) => (
@@ -845,10 +844,10 @@ export default function ProjectPanel({
                         key={lineIndex}
                         className={
                           line.kind === 'add'
-                            ? 'bg-success/10 text-text'
+                            ? 'bg-success/10 text-ink'
                             : line.kind === 'del'
-                              ? 'bg-error/10 text-text'
-                              : 'text-text-secondary'
+                              ? 'bg-error/10 text-ink'
+                              : 'text-ink-2'
                         }
                       >
                         <span className="inline-block w-8 text-right pr-1 opacity-50 select-none">
@@ -866,7 +865,7 @@ export default function ProjectPanel({
                   </div>
                 ))}
                 {diffFile.hunks.length === 0 && (
-                  <div className="p-3 text-text-secondary">
+                  <div className="p-3 text-ink-2">
                     {t('project.noDiff', '没有可显示的差异')}
                   </div>
                 )}
@@ -878,14 +877,14 @@ export default function ProjectPanel({
 
       {gitPanel && git?.is_repo && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-6">
-          <div className="flex flex-col w-full max-w-4xl max-h-[80vh] rounded-lg bg-surface border border-border overflow-hidden">
-            <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
-              <GitBranch size={14} className="text-text-secondary" />
-              <span className="text-sm font-mono text-text">
+          <div className="flex flex-col w-full max-w-4xl max-h-[80vh] rounded-lg bg-surface border border-line overflow-hidden">
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-line">
+              <GitBranch size={14} className="text-ink-2" />
+              <span className="text-sm font-mono text-ink">
                 {git.branch ?? 'HEAD'}
                 {git.head ? ` @ ${git.head}` : ''}
               </span>
-              <span className="text-[11px] text-text-secondary">
+              <span className="text-[11px] text-ink-2">
                 {t('project.gitChanged', `${git.files.length} 个未提交`)}
               </span>
               <button
@@ -894,15 +893,15 @@ export default function ProjectPanel({
                   setGitPanel(false);
                   setGitDiff(null);
                 }}
-                className="ml-auto p-1 rounded text-text-secondary hover:text-text"
+                className="ml-auto p-1 rounded text-ink-2 hover:text-ink"
               >
                 <X size={16} />
               </button>
             </div>
             <div className="flex flex-1 min-h-0">
-              <ul className="w-56 shrink-0 overflow-y-auto border-r border-border text-xs">
+              <ul className="w-56 shrink-0 overflow-y-auto border-r border-line text-xs">
                 {git.files.length === 0 && (
-                  <li className="px-3 py-2 text-text-secondary">
+                  <li className="px-3 py-2 text-ink-2">
                     {t('project.gitClean', '干净')}
                   </li>
                 )}
@@ -911,20 +910,20 @@ export default function ProjectPanel({
                     <button
                       type="button"
                       onClick={() => void openGitDiff(file.path)}
-                      className={`w-full flex items-center gap-2 px-3 py-1 text-left hover:bg-background ${
-                        gitDiff?.path === file.path ? 'bg-background' : ''
+                      className={`w-full flex items-center gap-2 px-3 py-1 text-left hover:bg-surface-2 ${
+                        gitDiff?.path === file.path ? 'bg-surface-2' : ''
                       }`}
                     >
-                      <span className="uppercase text-[10px] text-text-secondary w-5 shrink-0">
+                      <span className="uppercase text-[10px] text-ink-2 w-5 shrink-0">
                         {file.status}
                       </span>
-                      <span className="truncate font-mono text-text">{file.path}</span>
+                      <span className="truncate font-mono text-ink">{file.path}</span>
                       {file.staged && <span className="ml-auto text-[10px] text-success">staged</span>}
                     </button>
                   </li>
                 ))}
               </ul>
-              <pre className="flex-1 overflow-auto p-3 text-[11px] leading-5 font-mono bg-background text-text whitespace-pre">
+              <pre className="flex-1 overflow-auto p-3 text-[11px] leading-5 font-mono bg-surface-2 text-ink whitespace-pre">
                 {gitDiff
                   ? gitDiff.text
                   : t('project.gitPickFile', '选择左侧文件查看未暂存的改动')}
@@ -936,9 +935,9 @@ export default function ProjectPanel({
 
       {(preview || previewError) && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-6">
-          <div className="flex flex-col w-full max-w-4xl max-h-[80vh] rounded-lg bg-surface border border-border overflow-hidden">
-            <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
-              <span className="text-sm font-mono text-text truncate">
+          <div className="flex flex-col w-full max-w-4xl max-h-[80vh] rounded-lg bg-surface border border-line overflow-hidden">
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-line">
+              <span className="text-sm font-mono text-ink truncate">
                 {preview?.path ?? ''}
               </span>
               {preview?.truncated && (
@@ -952,7 +951,7 @@ export default function ProjectPanel({
                   setPreview(null);
                   setPreviewError(null);
                 }}
-                className="ml-auto p-1 rounded text-text-secondary hover:text-text"
+                className="ml-auto p-1 rounded text-ink-2 hover:text-ink"
               >
                 <X size={16} />
               </button>
@@ -960,8 +959,8 @@ export default function ProjectPanel({
             {previewError ? (
               <div className="p-4 text-sm text-error">{previewError}</div>
             ) : previewWindow ? (
-              <div className="flex-1 overflow-auto bg-background font-mono text-[11px] leading-5">
-                <div className="px-3 py-0.5 text-[10px] text-text-secondary bg-surface">
+              <div className="flex-1 overflow-auto bg-surface-2 font-mono text-[11px] leading-5">
+                <div className="px-3 py-0.5 text-[10px] text-ink-2 bg-surface">
                   {t('project.linePreview', {
                     line: previewWindow.focus,
                     total: previewWindow.total,
@@ -974,8 +973,8 @@ export default function ProjectPanel({
                       key={number}
                       className={
                         number === previewWindow.focus
-                          ? 'bg-primary/15 text-text'
-                          : 'text-text-secondary'
+                          ? 'bg-accent/15 text-ink'
+                          : 'text-ink-2'
                       }
                     >
                       <span className="inline-block w-10 text-right pr-2 opacity-50 select-none">
@@ -987,13 +986,13 @@ export default function ProjectPanel({
                 })}
               </div>
             ) : (
-              <pre className="flex-1 overflow-auto p-3 text-xs font-mono text-text bg-background">
+              <pre className="flex-1 overflow-auto p-3 text-xs font-mono text-ink bg-surface-2">
                 {preview?.content}
               </pre>
             )}
           </div>
         </div>
       )}
-    </aside>
+    </section>
   );
 }

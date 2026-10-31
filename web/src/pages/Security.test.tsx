@@ -226,16 +226,18 @@ describe('Security', () => {
   });
 
   it('clears the trail only after the confirmation', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
     renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: /^Clear trail$|^清空轨迹$/ }));
-    expect(confirm).toHaveBeenCalled();
     expect(mocked.clearSecurityEvents).not.toHaveBeenCalled();
 
-    confirm.mockReturnValue(true);
+    // Dismissing the dialog leaves the trail alone.
+    fireEvent.click(screen.getByRole('button', { name: /^Close$|^关闭$/ }));
+    expect(mocked.clearSecurityEvents).not.toHaveBeenCalled();
+
     mocked.listSecurityEvents.mockResolvedValue(trailFixture({ events: [], counts: [], retained: 0 }));
     fireEvent.click(screen.getByRole('button', { name: /^Clear trail$|^清空轨迹$/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Confirm$|^确认$/ }));
 
     await waitFor(() => expect(mocked.clearSecurityEvents).toHaveBeenCalled());
     expect(await screen.findByText(/Cleared 1 events/)).toBeInTheDocument();

@@ -75,27 +75,27 @@ export const MemorySection: React.FC<SectionProps> = ({ draft, setDraft, t }) =>
         onChange={(v) => patchMem({ embeddingDimensions: v })}
       />
       <div>
-        <label className="block text-sm font-medium text-text mb-1" htmlFor="vw">
+        <label className="block text-sm font-medium text-ink mb-1" htmlFor="vw">
           {t('config.sections.memory.vectorWeight')}
         </label>
         <input
           id="vw"
           type="number"
           step="0.01"
-          className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-text text-sm"
+          className="w-full px-3 py-2 rounded-lg bg-surface border border-line text-ink text-sm"
           value={vectorWeight}
           onChange={(e) => patchMem({ vectorWeight: Number(e.target.value) })}
         />
       </div>
       <div>
-        <label className="block text-sm font-medium text-text mb-1" htmlFor="tw">
+        <label className="block text-sm font-medium text-ink mb-1" htmlFor="tw">
           {t('config.sections.memory.textWeight')}
         </label>
         <input
           id="tw"
           type="number"
           step="0.01"
-          className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-text text-sm"
+          className="w-full px-3 py-2 rounded-lg bg-surface border border-line text-ink text-sm"
           value={textWeight}
           onChange={(e) => patchMem({ textWeight: Number(e.target.value) })}
         />

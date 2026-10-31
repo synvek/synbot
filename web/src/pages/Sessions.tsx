@@ -1,223 +1,250 @@
-import React, { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { MessagesSquare } from 'lucide-react'
 import { apiClient } from '../api/client'
-import type { SessionSummary, SessionDetail } from '../types/api'
+import type { SessionDetail, SessionSummary } from '../types/api'
 import { useI18n } from '../i18n/I18nContext'
+import { formatDateTime, formatShortDateTime } from '../utils/datetime'
+import {
+  Badge,
+  Button,
+  DataTable,
+  EmptyState,
+  Field,
+  Input,
+  PageHeader,
+  ScrollArea,
+  type Column,
+} from '../ui'
 
-const Sessions: React.FC = () => {
+const formatDate = (value: string) => formatDateTime(value, value)
+
+export default function Sessions() {
   const [sessions, setSessions] = useState<SessionSummary[]>([])
-  const [selectedSession, setSelectedSession] = useState<SessionDetail | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [detail, setDetail] = useState<SessionDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [detailLoading, setDetailLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [channelFilter, setChannelFilter] = useState<string>('')
-  const [scopeFilter, setScopeFilter] = useState<string>('')
+  const [channelFilter, setChannelFilter] = useState('')
+  const [scopeFilter, setScopeFilter] = useState('')
   const { t } = useI18n()
 
   useEffect(() => {
-    const fetchSessions = async () => {
-      try {
-        setLoading(true)
-        const data = await apiClient.getSessions(
-          undefined,
-          undefined,
-          channelFilter || undefined,
-          scopeFilter || undefined
-        )
-        setSessions(data.items)
+    let active = true
+    setLoading(true)
+    apiClient
+      .getSessions(undefined, undefined, channelFilter || undefined, scopeFilter || undefined)
+      .then((page) => {
+        if (!active) return
+        setSessions(page.items)
         setError(null)
-      } catch (err) {
-        setError(t('sessions.failedToFetch'))
+      })
+      .catch((err) => {
         console.error(err)
-      } finally {
-        setLoading(false)
-      }
+        if (active) setError(t('sessions.failedToFetch', 'Failed to fetch sessions'))
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
     }
+  }, [channelFilter, scopeFilter, t])
 
-    fetchSessions()
-  }, [channelFilter, scopeFilter])
-
-  const handleSessionClick = async (id: string) => {
+  const openSession = useCallback(async (id: string) => {
+    setSelectedId(id)
+    setDetail(null)
+    setDetailLoading(true)
     try {
-      setDetailLoading(true)
-      const detail = await apiClient.getSession(id)
-      setSelectedSession(detail)
+      setDetail(await apiClient.getSession(id))
     } catch (err) {
       console.error('Failed to fetch session detail:', err)
     } finally {
       setDetailLoading(false)
     }
-  }
+  }, [])
 
-  const formatDate = (dateStr: string) => {
-    return new Date(dateStr).toLocaleString()
-  }
+  const columns: Array<Column<SessionSummary>> = [
+    {
+      key: 'identifier',
+      header: t('sessions.sessionList', 'Sessions'),
+      sortValue: (row) => row.identifier || '',
+      render: (row) => (
+        <div className="min-w-0">
+          <div className="truncate font-medium text-ink">
+            {row.identifier || t('sessions.anonymous', 'Anonymous')}
+          </div>
+          <div className="truncate font-mono text-micro text-ink-3">{row.id}</div>
+        </div>
+      ),
+    },
+    {
+      key: 'channel',
+      header: t('sessions.channel', 'Channel'),
+      width: '130px',
+      sortValue: (row) => row.channel,
+      render: (row) => <Badge tone="neutral">{row.channel}</Badge>,
+    },
+    {
+      key: 'messages',
+      header: t('sessions.messages', 'Messages'),
+      align: 'right',
+      width: '90px',
+      sortValue: (row) => row.message_count,
+      render: (row) => <span className="tabular font-mono text-micro text-ink-2">{row.message_count}</span>,
+    },
+    {
+      key: 'updated',
+      header: t('sessions.updated', 'Updated'),
+      align: 'right',
+      width: '130px',
+      sortValue: (row) => row.updated_at,
+      render: (row) => (
+        <span className="whitespace-nowrap tabular text-micro text-ink-2">
+          {formatShortDateTime(row.updated_at)}
+        </span>
+      ),
+    },
+  ]
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-text-secondary">{t('common.loading')}</div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="bg-error/10 border border-error/20 rounded-lg p-4">
-        <p className="text-error">{error}</p>
-      </div>
-    )
-  }
+  const hasFilters = Boolean(channelFilter || scopeFilter)
 
   return (
     <div>
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold text-text">{t('sessions.title')}</h2>
-        <p className="text-text-secondary mt-1">{t('sessions.description')}</p>
-      </div>
+      <PageHeader
+        title={t('sessions.title', 'Sessions')}
+        count={sessions.length}
+        description={t('sessions.description', 'Conversation history per channel and scope')}
+        actions={
+          hasFilters && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setChannelFilter('')
+                setScopeFilter('')
+              }}
+            >
+              {t('sessions.clearFilters', 'Clear filters')}
+            </Button>
+          )
+        }
+      />
 
-      <div className="mb-6 flex gap-4">
-        <div>
-          <label className="block text-sm font-medium text-text-secondary mb-1">
-            {t('sessions.channel')}
-          </label>
-          <input
-            type="text"
+      <div className="mb-4 flex flex-wrap items-end gap-3">
+        <Field label={t('sessions.channel', 'Channel')} htmlFor="session-channel" className="w-48">
+          <Input
+            id="session-channel"
             value={channelFilter}
-            onChange={(e) => setChannelFilter(e.target.value)}
-            placeholder={t('sessions.filterByChannel')}
-            className="px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-surface text-text"
+            onChange={(event) => setChannelFilter(event.target.value)}
+            placeholder={t('sessions.filterByChannel', 'Filter by channel')}
           />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-text-secondary mb-1">
-            {t('sessions.scope')}
-          </label>
-          <input
-            type="text"
+        </Field>
+        <Field label={t('sessions.scope', 'Scope')} htmlFor="session-scope" className="w-48">
+          <Input
+            id="session-scope"
             value={scopeFilter}
-            onChange={(e) => setScopeFilter(e.target.value)}
-            placeholder={t('sessions.filterByScope')}
-            className="px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary bg-surface text-text"
+            onChange={(event) => setScopeFilter(event.target.value)}
+            placeholder={t('sessions.filterByScope', 'Filter by scope')}
           />
-        </div>
+        </Field>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div>
-          <h3 className="text-lg font-semibold text-text mb-4">
-            {t('sessions.sessionList')} ({sessions.length})
-          </h3>
-          <div className="space-y-3">
-            {sessions.map((session) => (
-              <div
-                key={session.id}
-                onClick={() => handleSessionClick(session.id)}
-                className={`bg-surface border border-border rounded-lg p-4 cursor-pointer hover:shadow-md transition-all hover:scale-[1.01] ${
-                  selectedSession?.meta.id === session.id
-                    ? 'ring-2 ring-primary'
-                    : ''
-                }`}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <p className="font-medium text-text truncate">
-                      {session.identifier || t('sessions.anonymous')}
-                    </p>
-                    <div className="flex items-center gap-2 mt-1 text-sm text-text-secondary">
-                      <span className="px-2 py-0.5 bg-primary/10 text-primary rounded">
-                        {session.channel}
-                      </span>
-                      <span>{session.scope || t('sessions.direct')}</span>
-                    </div>
-                  </div>
-                  <div className="text-right text-sm text-text-secondary">
-                    <div>{session.message_count} {t('sessions.messages')}</div>
-                  </div>
-                </div>
-                <div className="mt-2 text-xs text-text-secondary">
-                  {t('sessions.updated')}: {formatDate(session.updated_at)}
-                </div>
-              </div>
-            ))}
+      {error && <div className="mb-3 rounded-panel border px-3 py-2 text-small tone-danger">{error}</div>}
+
+      {loading ? (
+        <p className="py-10 text-center text-small text-ink-2">{t('common.loading', 'Loading…')}</p>
+      ) : sessions.length === 0 ? (
+        <EmptyState
+          icon={<MessagesSquare className="h-6 w-6" />}
+          title={t('sessions.noSessionsFound', 'No sessions found')}
+          body={t('sessions.emptyHint', 'Sessions appear here once someone talks to Synbot on any channel.')}
+        />
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,30rem)_minmax(0,1fr)]">
+          <div className="min-w-0">
+            <DataTable
+              rows={sessions}
+              columns={columns}
+              rowKey={(row) => row.id}
+              density="compact"
+              selectedKey={selectedId}
+              onRowClick={(row) => void openSession(row.id)}
+              className="[&>table]:min-w-0"
+            />
           </div>
-          {sessions.length === 0 && (
-            <div className="text-center py-12 text-text-secondary">
-              {t('sessions.noSessionsFound')}
-            </div>
-          )}
-        </div>
 
-        <div>
-          <h3 className="text-lg font-semibold text-text mb-4">
-            {t('sessions.sessionDetails')}
-          </h3>
-          {detailLoading ? (
-            <div className="bg-surface border border-border rounded-lg p-6 text-center text-text-secondary">
-              {t('common.loading')}
-            </div>
-          ) : selectedSession ? (
-            <div className="bg-surface border border-border rounded-lg p-6">
-              <div className="mb-4 pb-4 border-b border-border">
-                <h4 className="font-semibold text-text">
-                  {selectedSession.meta.identifier || t('sessions.anonymous')}
-                </h4>
-                <div className="mt-2 space-y-1 text-sm text-text-secondary">
-                  <p>
-                    <span className="font-medium">{t('sessions.id')}:</span>{' '}
-                    {selectedSession.meta.id}
-                  </p>
-                  <p>
-                    <span className="font-medium">{t('sessions.channel')}:</span>{' '}
-                    {selectedSession.meta.channel}
-                  </p>
-                  <p>
-                    <span className="font-medium">{t('sessions.scope')}:</span>{' '}
-                    {selectedSession.meta.scope || t('sessions.direct')}
-                  </p>
-                  <p>
-                    <span className="font-medium">{t('sessions.created')}:</span>{' '}
-                    {formatDate(selectedSession.meta.created_at)}
-                  </p>
-                </div>
-              </div>
-
-              <div>
-                <h5 className="font-medium text-text mb-3">
-                  {t('sessions.messageHistory')} ({selectedSession.messages.length})
-                </h5>
-                <div className="space-y-3 max-h-96 overflow-y-auto">
-                  {selectedSession.messages.map((msg, idx) => (
-                    <div
-                      key={idx}
-                      className="bg-background rounded p-3 text-sm border border-border"
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className={`font-medium ${
-                          msg.role === 'user' ? 'text-primary' : 'text-text'
-                        }`}>
-                          {msg.role === 'user' ? t('chat.user') : t('chat.assistant')}
-                        </span>
-                        <span className="text-xs text-text-secondary">
-                          {formatDate(msg.timestamp)}
-                        </span>
+          <div className="min-w-0">
+            {detailLoading ? (
+              <p className="rounded-panel border border-line px-4 py-10 text-center text-small text-ink-2">
+                {t('common.loading', 'Loading…')}
+              </p>
+            ) : !detail ? (
+              <p className="rounded-panel border border-line px-4 py-10 text-center text-small text-ink-2">
+                {selectedId ? t('common.loading', 'Loading…') : t('sessions.selectSessionToView', 'Select a session to view its messages.')}
+              </p>
+            ) : (
+              <div className="rounded-panel border border-line">
+                <div className="border-b border-line px-4 py-3">
+                  <h2 className="text-section font-semibold text-ink">
+                    {detail.meta.identifier || t('sessions.anonymous', 'Anonymous')}
+                  </h2>
+                  <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-micro">
+                    {[
+                      [t('sessions.id', 'ID'), detail.meta.id],
+                      [t('sessions.channel', 'Channel'), detail.meta.channel],
+                      [t('sessions.scope', 'Scope'), detail.meta.scope || t('sessions.direct', 'Direct')],
+                      [t('sessions.created', 'Created'), formatDate(detail.meta.created_at)],
+                    ].map(([label, value]) => (
+                      <div key={label} className="flex min-w-0 flex-col gap-0.5">
+                        <dt className="text-ink-3">{label}</dt>
+                        <dd className="truncate font-mono text-ink-2">{value}</dd>
                       </div>
-                      <p className="text-text whitespace-pre-wrap">
-                        {msg.content}
-                      </p>
-                    </div>
-                  ))}
+                    ))}
+                  </dl>
+                </div>
+
+                <div className="px-4 py-3">
+                  <h3 className="mb-2 text-micro font-medium uppercase tracking-wide text-ink-3">
+                    {t('sessions.messageHistory', 'Message history')} · {detail.messages.length}
+                  </h3>
+                  {detail.messages.length === 0 ? (
+                    <p className="py-6 text-center text-small text-ink-2">
+                      {t('sessions.noMessages', 'No messages recorded for this session.')}
+                    </p>
+                  ) : (
+                    <ScrollArea className="max-h-[420px] pr-1">
+                      <ul className="flex flex-col gap-3">
+                        {detail.messages.map((message, index) => (
+                          <li key={`${message.timestamp}-${index}`} className="border-l border-line pl-3">
+                            <div className="flex items-baseline gap-2">
+                              <span
+                                className={
+                                  message.role === 'user'
+                                    ? 'text-micro font-medium text-accent'
+                                    : 'text-micro font-medium text-ink'
+                                }
+                              >
+                                {message.role === 'user'
+                                  ? t('chat.user', 'You')
+                                  : t('chat.assistant', 'Assistant')}
+                              </span>
+                              <span className="tabular font-mono text-micro text-ink-3">
+                                {formatDate(message.timestamp)}
+                              </span>
+                            </div>
+                            <p className="mt-0.5 whitespace-pre-wrap text-small text-ink">{message.content}</p>
+                          </li>
+                        ))}
+                      </ul>
+                    </ScrollArea>
+                  )}
                 </div>
               </div>
-            </div>
-          ) : (
-            <div className="bg-surface border border-border rounded-lg p-6 text-center text-text-secondary">
-              {t('sessions.selectSessionToView')}
-            </div>
-          )}
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }
-
-export default Sessions

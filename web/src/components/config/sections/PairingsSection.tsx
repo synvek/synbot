@@ -15,7 +15,7 @@ export const PairingsSection: React.FC<SectionProps> = ({ draft, setDraft, t }) 
       {pairings.map((p, idx) => {
         const row = asRecord(p)
         return (
-          <div key={idx} className="border border-border rounded-lg p-4 space-y-2">
+          <div key={idx} className="border border-line rounded-lg p-4 space-y-2">
             <div className="flex justify-between">
               <span className="text-sm font-medium">
                 {t('config.sections.pairings.entry')} {idx + 1}
@@ -53,7 +53,7 @@ export const PairingsSection: React.FC<SectionProps> = ({ draft, setDraft, t }) 
       })}
       <button
         type="button"
-        className="px-4 py-2 rounded-lg bg-surface border border-border text-sm"
+        className="px-4 py-2 rounded-lg bg-surface border border-line text-sm"
         onClick={() => setPairings([...pairings, { channel: '', pairingCode: '' }])}
       >
         {t('config.sections.pairings.add')}

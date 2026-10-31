@@ -55,15 +55,15 @@ export const ChannelsSection: React.FC<SectionProps> = ({ draft, setDraft, t }) 
 
   return (
     <FieldGroup>
-      <div className="flex flex-wrap gap-1 mb-4 border-b border-border pb-2">
+      <div className="flex flex-wrap gap-1 mb-4 border-b border-line pb-2">
         {PROVIDERS.map((p) => (
           <button
             key={p}
             type="button"
             className={`px-3 py-1.5 rounded-md text-sm font-medium ${
               tab === p
-                ? 'bg-primary text-white'
-                : 'bg-surface text-text-secondary hover:bg-background'
+                ? 'bg-accent text-white'
+                : 'bg-surface text-ink-2 hover:bg-surface-2'
             }`}
             onClick={() => setTab(p)}
           >
@@ -115,7 +115,7 @@ const Allowlist: React.FC<{
       {rows.map((row, idx) => {
         const r = asRecord(row)
         return (
-          <div key={idx} className="grid grid-cols-1 md:grid-cols-3 gap-2 items-end border border-border/60 rounded p-2">
+          <div key={idx} className="grid grid-cols-1 md:grid-cols-3 gap-2 items-end border border-line/60 rounded p-2">
             <TextField
               id={`al-c-${idx}`}
               label="chatId"
@@ -162,7 +162,7 @@ const Allowlist: React.FC<{
       })}
       <button
         type="button"
-        className="text-sm text-primary"
+        className="text-sm text-accent"
         onClick={() => onChange([...rows, { chatId: '', chatAlias: '', myName: null }])}
       >
         + {t('config.sections.channels.addAllowlist')}
@@ -185,7 +185,7 @@ const SimpleTokenChannel: React.FC<{
         setList(next)
       }
       return (
-        <div key={idx} className="border border-border rounded-lg p-4 space-y-3">
+        <div key={idx} className="border border-line rounded-lg p-4 space-y-3">
           <div className="flex justify-between">
             <span className="font-medium text-sm">{t('config.sections.channels.instance')} {idx + 1}</span>
             <button type="button" className="text-sm text-error" onClick={() => setList(list.filter((_, i) => i !== idx))}>
@@ -209,7 +209,7 @@ const SimpleTokenChannel: React.FC<{
         </div>
       )
     })}
-    <button type="button" className="px-4 py-2 rounded-lg bg-surface border border-border text-sm" onClick={() => setList([...list, { name: list.length ? 'instance' : 'default', enabled: false, token: '', allowlist: [], enableAllowlist: true, showToolCalls: true, defaultAgent: 'main' }])}>
+    <button type="button" className="px-4 py-2 rounded-lg bg-surface border border-line text-sm" onClick={() => setList([...list, { name: list.length ? 'instance' : 'default', enabled: false, token: '', allowlist: [], enableAllowlist: true, showToolCalls: true, defaultAgent: 'main' }])}>
       {t('config.sections.channels.addInstance')}
     </button>
   </div>
@@ -229,7 +229,7 @@ const FeishuList: React.FC<{ list: unknown[]; setList: (l: unknown[]) => void; t
         setList(next)
       }
       return (
-        <div key={idx} className="border border-border rounded-lg p-4 space-y-3">
+        <div key={idx} className="border border-line rounded-lg p-4 space-y-3">
           <div className="flex justify-between">
             <span className="font-medium text-sm">{t('config.sections.channels.instance')} {idx + 1}</span>
             <button type="button" className="text-sm text-error" onClick={() => setList(list.filter((_, i) => i !== idx))}>
@@ -248,7 +248,7 @@ const FeishuList: React.FC<{ list: unknown[]; setList: (l: unknown[]) => void; t
         </div>
       )
     })}
-    <button type="button" className="px-4 py-2 rounded-lg bg-surface border border-border text-sm" onClick={() => setList([...list, { name: 'feishu', enabled: false, appId: '', appSecret: '', allowlist: [], enableAllowlist: true, showToolCalls: true, defaultAgent: 'main' }])}>
+    <button type="button" className="px-4 py-2 rounded-lg bg-surface border border-line text-sm" onClick={() => setList([...list, { name: 'feishu', enabled: false, appId: '', appSecret: '', allowlist: [], enableAllowlist: true, showToolCalls: true, defaultAgent: 'main' }])}>
       {t('config.sections.channels.addInstance')}
     </button>
   </div>
@@ -268,7 +268,7 @@ const SlackList: React.FC<{ list: unknown[]; setList: (l: unknown[]) => void; t:
         setList(next)
       }
       return (
-        <div key={idx} className="border border-border rounded-lg p-4 space-y-3">
+        <div key={idx} className="border border-line rounded-lg p-4 space-y-3">
           <div className="flex justify-between">
             <span className="font-medium text-sm">{t('config.sections.channels.instance')} {idx + 1}</span>
             <button type="button" className="text-sm text-error" onClick={() => setList(list.filter((_, i) => i !== idx))}>
@@ -287,7 +287,7 @@ const SlackList: React.FC<{ list: unknown[]; setList: (l: unknown[]) => void; t:
         </div>
       )
     })}
-    <button type="button" className="px-4 py-2 rounded-lg bg-surface border border-border text-sm" onClick={() => setList([...list, { name: 'slack', enabled: false, token: '', appToken: '', allowlist: [], enableAllowlist: true, showToolCalls: true, defaultAgent: 'main' }])}>
+    <button type="button" className="px-4 py-2 rounded-lg bg-surface border border-line text-sm" onClick={() => setList([...list, { name: 'slack', enabled: false, token: '', appToken: '', allowlist: [], enableAllowlist: true, showToolCalls: true, defaultAgent: 'main' }])}>
       {t('config.sections.channels.addInstance')}
     </button>
   </div>
@@ -311,7 +311,7 @@ const EmailList: React.FC<{ list: unknown[]; setList: (l: unknown[]) => void; t:
       const patchImap = (p: Record<string, unknown>) => patch({ imap: { ...imap, ...p } })
       const patchSmtp = (p: Record<string, unknown>) => patch({ smtp: { ...smtp, ...p } })
       return (
-        <div key={idx} className="border border-border rounded-lg p-4 space-y-3">
+        <div key={idx} className="border border-line rounded-lg p-4 space-y-3">
           <div className="flex justify-between">
             <span className="font-medium text-sm">{t('config.sections.channels.instance')} {idx + 1}</span>
             <button type="button" className="text-sm text-error" onClick={() => setList(list.filter((_, i) => i !== idx))}>
@@ -342,7 +342,7 @@ const EmailList: React.FC<{ list: unknown[]; setList: (l: unknown[]) => void; t:
     })}
     <button
       type="button"
-      className="px-4 py-2 rounded-lg bg-surface border border-border text-sm"
+      className="px-4 py-2 rounded-lg bg-surface border border-line text-sm"
       onClick={() =>
         setList([
           ...list,
@@ -379,7 +379,7 @@ const MatrixList: React.FC<{ list: unknown[]; setList: (l: unknown[]) => void; t
         setList(next)
       }
       return (
-        <div key={idx} className="border border-border rounded-lg p-4 space-y-3">
+        <div key={idx} className="border border-line rounded-lg p-4 space-y-3">
           <div className="flex justify-between">
             <span className="font-medium text-sm">{t('config.sections.channels.instance')} {idx + 1}</span>
             <button type="button" className="text-sm text-error" onClick={() => setList(list.filter((_, i) => i !== idx))}>
@@ -401,7 +401,7 @@ const MatrixList: React.FC<{ list: unknown[]; setList: (l: unknown[]) => void; t
         </div>
       )
     })}
-    <button type="button" className="px-4 py-2 rounded-lg bg-surface border border-border text-sm" onClick={() => setList([...list, { name: 'matrix', enabled: false, homeserverUrl: '', username: '', password: '', accessToken: null, storePath: '', allowlist: [], enableAllowlist: true, showToolCalls: true, defaultAgent: 'main' }])}>
+    <button type="button" className="px-4 py-2 rounded-lg bg-surface border border-line text-sm" onClick={() => setList([...list, { name: 'matrix', enabled: false, homeserverUrl: '', username: '', password: '', accessToken: null, storePath: '', allowlist: [], enableAllowlist: true, showToolCalls: true, defaultAgent: 'main' }])}>
       {t('config.sections.channels.addInstance')}
     </button>
   </div>
@@ -421,7 +421,7 @@ const DingTalkList: React.FC<{ list: unknown[]; setList: (l: unknown[]) => void;
         setList(next)
       }
       return (
-        <div key={idx} className="border border-border rounded-lg p-4 space-y-3">
+        <div key={idx} className="border border-line rounded-lg p-4 space-y-3">
           <div className="flex justify-between">
             <span className="font-medium text-sm">{t('config.sections.channels.instance')} {idx + 1}</span>
             <button type="button" className="text-sm text-error" onClick={() => setList(list.filter((_, i) => i !== idx))}>
@@ -442,7 +442,7 @@ const DingTalkList: React.FC<{ list: unknown[]; setList: (l: unknown[]) => void;
         </div>
       )
     })}
-    <button type="button" className="px-4 py-2 rounded-lg bg-surface border border-border text-sm" onClick={() => setList([...list, { name: 'dingtalk', enabled: false, clientId: '', clientSecret: '', allowlist: [], enableAllowlist: true, showToolCalls: true, defaultAgent: 'main', robotCode: '' }])}>
+    <button type="button" className="px-4 py-2 rounded-lg bg-surface border border-line text-sm" onClick={() => setList([...list, { name: 'dingtalk', enabled: false, clientId: '', clientSecret: '', allowlist: [], enableAllowlist: true, showToolCalls: true, defaultAgent: 'main', robotCode: '' }])}>
       {t('config.sections.channels.addInstance')}
     </button>
   </div>
@@ -462,7 +462,7 @@ const WhatsAppList: React.FC<{ list: unknown[]; setList: (l: unknown[]) => void;
         setList(next)
       }
       return (
-        <div key={idx} className="border border-border rounded-lg p-4 space-y-3">
+        <div key={idx} className="border border-line rounded-lg p-4 space-y-3">
           <div className="flex justify-between">
             <span className="font-medium text-sm">{t('config.sections.channels.instance')} {idx + 1}</span>
             <button type="button" className="text-sm text-error" onClick={() => setList(list.filter((_, i) => i !== idx))}>
@@ -477,7 +477,7 @@ const WhatsAppList: React.FC<{ list: unknown[]; setList: (l: unknown[]) => void;
         </div>
       )
     })}
-    <button type="button" className="px-4 py-2 rounded-lg bg-surface border border-border text-sm" onClick={() => setList([...list, { enabled: false, name: 'whatsapp', sessionDir: '', allowlist: [], agent: 'main' }])}>
+    <button type="button" className="px-4 py-2 rounded-lg bg-surface border border-line text-sm" onClick={() => setList([...list, { enabled: false, name: 'whatsapp', sessionDir: '', allowlist: [], agent: 'main' }])}>
       {t('config.sections.channels.addInstance')}
     </button>
   </div>
@@ -497,7 +497,7 @@ const IrcList: React.FC<{ list: unknown[]; setList: (l: unknown[]) => void; t: (
         setList(next)
       }
       return (
-        <div key={idx} className="border border-border rounded-lg p-4 space-y-3">
+        <div key={idx} className="border border-line rounded-lg p-4 space-y-3">
           <div className="flex justify-between">
             <span className="font-medium text-sm">{t('config.sections.channels.instance')} {idx + 1}</span>
             <button type="button" className="text-sm text-error" onClick={() => setList(list.filter((_, i) => i !== idx))}>
@@ -510,9 +510,9 @@ const IrcList: React.FC<{ list: unknown[]; setList: (l: unknown[]) => void; t: (
           <NumberField label={t('config.sections.channels.ircPort')} value={typeof o.port === 'number' ? o.port : 6697} onChange={(v) => patch({ port: v })} id={`ipt-${idx}`} />
           <TextField label={t('config.sections.channels.ircNickname')} value={o.nickname != null ? String(o.nickname) : ''} onChange={(v) => patch({ nickname: v.trim() ? v : null })} id={`inick-${idx}`} />
           <div>
-            <label className="block text-sm font-medium text-text mb-1">{t('config.sections.channels.ircChannels')}</label>
+            <label className="block text-sm font-medium text-ink mb-1">{t('config.sections.channels.ircChannels')}</label>
             <textarea
-              className="w-full font-mono text-sm px-3 py-2 rounded-lg bg-surface border border-border"
+              className="w-full font-mono text-sm px-3 py-2 rounded-lg bg-surface border border-line"
               value={asArray<string>(o.channels).join('\n')}
               onChange={(e) =>
                 patch({
@@ -523,14 +523,14 @@ const IrcList: React.FC<{ list: unknown[]; setList: (l: unknown[]) => void; t: (
           </div>
           <Toggle label={t('config.sections.channels.ircUseTls')} checked={Boolean(o.useTls ?? true)} onChange={(v) => patch({ useTls: v })} id={`itls2-${idx}`} />
           <div>
-            <label className="block text-sm font-medium text-text mb-1" htmlFor={`ipw2-${idx}`}>
+            <label className="block text-sm font-medium text-ink mb-1" htmlFor={`ipw2-${idx}`}>
               {t('config.sections.channels.password')}
             </label>
             <input
               id={`ipw2-${idx}`}
               type="password"
               autoComplete="new-password"
-              className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-text text-sm"
+              className="w-full px-3 py-2 rounded-lg bg-surface border border-line text-ink text-sm"
               value={o.password != null ? String(o.password) : ''}
               onChange={(e) =>
                 patch({
@@ -538,7 +538,7 @@ const IrcList: React.FC<{ list: unknown[]; setList: (l: unknown[]) => void; t: (
                 })
               }
             />
-            <p className="text-xs text-text-secondary mt-1">{t('config.secretLeaveUnchanged')}</p>
+            <p className="text-xs text-ink-2 mt-1">{t('config.secretLeaveUnchanged')}</p>
           </div>
           <Allowlist value={asArray(o.allowlist)} onChange={(v) => patch({ allowlist: v })} t={t} />
           <Toggle label={t('config.sections.channels.enableAllowlist')} checked={Boolean(o.enableAllowlist ?? true)} onChange={(v) => patch({ enableAllowlist: v })} id={`iea-${idx}`} />
@@ -546,7 +546,7 @@ const IrcList: React.FC<{ list: unknown[]; setList: (l: unknown[]) => void; t: (
         </div>
       )
     })}
-    <button type="button" className="px-4 py-2 rounded-lg bg-surface border border-border text-sm" onClick={() => setList([...list, { enabled: false, name: 'irc', server: null, port: 6697, nickname: null, channels: [], useTls: true, password: null, allowlist: [], enableAllowlist: true, agent: 'main' }])}>
+    <button type="button" className="px-4 py-2 rounded-lg bg-surface border border-line text-sm" onClick={() => setList([...list, { enabled: false, name: 'irc', server: null, port: 6697, nickname: null, channels: [], useTls: true, password: null, allowlist: [], enableAllowlist: true, agent: 'main' }])}>
       {t('config.sections.channels.addInstance')}
     </button>
   </div>

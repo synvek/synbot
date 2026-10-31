@@ -129,18 +129,18 @@ export const LogSection: React.FC<SectionProps> = ({ draft, setDraft, t }) => {
         placeholder={t('config.sections.log.customTimestampFormatPlaceholder')}
       />
       <div>
-        <label className="block text-sm font-medium text-text mb-1" htmlFor="moduleLevels">
+        <label className="block text-sm font-medium text-ink mb-1" htmlFor="moduleLevels">
           {t('config.sections.log.moduleLevels')}
         </label>
         <textarea
           id="moduleLevels"
           spellCheck={false}
-          className="w-full min-h-[120px] font-mono text-sm px-3 py-2 rounded-lg bg-surface border border-border text-text focus:outline-none focus:ring-2 focus:ring-primary/30"
+          className="w-full min-h-[120px] font-mono text-sm px-3 py-2 rounded-lg bg-surface border border-line text-ink focus:outline-none focus:ring-2 focus:ring-accent/30"
           value={moduleLines}
           onChange={(e) => patchLog({ moduleLevels: parseModuleLevels(e.target.value) })}
           placeholder={t('config.sections.log.moduleLevelsPlaceholder')}
         />
-        <p className="text-xs text-text-secondary mt-1">{t('config.sections.log.moduleLevelsHint')}</p>
+        <p className="text-xs text-ink-2 mt-1">{t('config.sections.log.moduleLevelsHint')}</p>
       </div>
     </FieldGroup>
   )

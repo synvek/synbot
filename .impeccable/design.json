@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-02-11T18:00:00.000Z",
+  "title": "Design System: Synbot Console",
+  "extensions": {
+    "colorMeta": {
+      "background": {
+        "role": "neutral",
+        "displayName": "Paper",
+        "canonical": "#ffffff",
+        "tonalRamp": ["#ffffff", "#f7f7f8", "#f4f4f5", "#e7e7ea", "#d5d6da"]
+      },
+      "surface-2": {
+        "role": "neutral",
+        "displayName": "Inset",
+        "canonical": "#f4f4f5",
+        "tonalRamp": ["#fafafa", "#f4f4f5", "#ededef", "#e7e7ea", "#d5d6da"]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "#17181b",
+        "tonalRamp": ["#17181b", "#2c2e33", "#5c5f66", "#676a72", "#9a9da4"]
+      },
+      "accent": {
+        "role": "primary",
+        "displayName": "Operator Accent",
+        "canonical": "#2f6fed",
+        "tonalRamp": ["#255fd6", "#2f6fed", "#5b8dff", "#8fb2ff", "#eaf1fd"],
+        "notes": "Six operator-selectable ramps: blue-ocean #2f6fed, green-forest #12805c, purple-mystic #6f4df7, orange-sunset #b84a10, pink-blossom #db2777, gray-modern #3f4147. Dark variants lighten the 500 step and flip accent-fg to near-black."
+      },
+      "success": { "role": "neutral", "displayName": "Settled Green", "canonical": "#0d7a52", "tonalRamp": ["#0d7a52", "#35a97c"] },
+      "warning": { "role": "neutral", "displayName": "Pending Amber", "canonical": "#9a5a0c", "tonalRamp": ["#9a5a0c", "#d18a2b"] },
+      "danger": { "role": "neutral", "displayName": "Failed Red", "canonical": "#c3352d", "tonalRamp": ["#c3352d", "#e5645b"] },
+      "info": { "role": "neutral", "displayName": "Informational Blue", "canonical": "#2a63d4", "tonalRamp": ["#2a63d4", "#5b8dff"] }
+    },
+    "typographyMeta": {
+      "page": { "displayName": "Page Title", "purpose": "One per screen, inside PageHeader." },
+      "section": { "displayName": "Section", "purpose": "Panel and inspector headings." },
+      "body": { "displayName": "Body", "purpose": "Transcript prose, form values, dialog copy." },
+      "small": { "displayName": "Small", "purpose": "Table cells, buttons, labels, navigation." },
+      "micro": { "displayName": "Micro", "purpose": "Metadata, column headers, chips, tool rows." },
+      "mono": { "displayName": "Mono", "purpose": "Numbers, IDs, paths, code, durations; always tabular." }
+    },
+    "shadows": [
+      {
+        "name": "overlay",
+        "value": "0 12px 32px rgba(0, 0, 0, 0.14), 0 1px 2px rgba(0, 0, 0, 0.08)",
+        "purpose": "Dialogs, command palette, popover menus, toasts. No resting surface uses a shadow."
+      }
+    ],
+    "motion": [
+      { "name": "fast", "value": "120ms", "purpose": "Hover and press." },
+      { "name": "base", "value": "160ms", "purpose": "Disclosure and expand." },
+      { "name": "overlay", "value": "220ms", "purpose": "Dialogs, palette, menus." },
+      {
+        "name": "reduced",
+        "value": "0.01ms",
+        "purpose": "prefers-reduced-motion: reduce collapses every animation and transition."
+      }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" },
+      { "name": "lg", "value": "1024px" },
+      { "name": "compact-page", "value": "768px" }
+    ],
+    "focus": {
+      "outline": "2px solid var(--color-focus)",
+      "offset": "2px",
+      "selector": ":where(a, button, input, select, textarea, summary, [tabindex]):focus-visible",
+      "notes": "Never removed and never replaced by a glow."
+    }
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single primary action on a screen: accent fill, one per view.",
+      "html": "<button class=\"ds-btn\">Deploy</button>",
+      "css": ".ds-btn { height: 32px; padding: 0 12px; border: 1px solid transparent; border-radius: 6px; background: var(--color-accent); color: var(--color-accent-fg); font: 500 13px/1.45 Geist, sans-serif; transition: background-color 120ms ease-out; } .ds-btn:hover { background: var(--color-accent-hover); } .ds-btn:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }"
+    },
+    {
+      "name": "Table Row",
+      "kind": "card",
+      "refersTo": "table-row",
+      "description": "36px compact row with a 1px separator; clickable rows are focusable and answer Enter and Space.",
+      "html": "<table class=\"ds-table\"><thead><tr><th scope=\"col\">Session</th><th scope=\"col\">Messages</th></tr></thead><tbody><tr tabindex=\"0\"><td>web:console:main</td><td class=\"tabular\">84</td></tr></tbody></table>",
+      "css": ".ds-table { width: 100%; border-collapse: collapse; font: 400 13px/1.45 Geist, sans-serif; } .ds-table th { height: 32px; padding: 0 12px; text-align: left; font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-ink-3); border-bottom: 1px solid var(--color-line); } .ds-table td { height: 36px; padding: 0 12px; border-bottom: 1px solid var(--color-line); color: var(--color-text); } .ds-table tbody tr:hover { background: var(--color-surface-2); }"
+    },
+    {
+      "name": "Transcript Turn",
+      "kind": "custom",
+      "refersTo": "user-turn",
+      "description": "The user's turn is an inset block; the assistant answers in plain text with a 12px metadata line, never in a bubble.",
+      "html": "<div class=\"ds-turn\"><p>把配色收敛成一条中性色阶。</p></div><p class=\"ds-meta\">user · 16:02:41</p>",
+      "css": ".ds-turn { padding: 12px 14px; border-radius: 10px; background: var(--color-surface-2); color: var(--color-text); font: 400 14px/1.45 Geist, sans-serif; } .ds-meta { margin-top: 6px; font: 400 12px/1.45 'Geist Mono', monospace; color: var(--color-ink-3); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Instrument Panel",
+    "overview": "Synbot is the admin surface of a self-hosted agent runtime, so the console behaves like an instrument panel: one neutral substrate, one accent that only ever means 'this is the live control', and typography that keeps numbers from moving while they update. The language is borrowed from current developer tools on purpose — operators arrive with expectations about tables, dialogs, tabs and focus rings, and meeting those expectations is faster than teaching a new one. Both themes share the structure; the six colour schemes change the accent and nothing else.",
+    "keyCharacteristics": [
+      "Neutral substrate, one accent ramp, six operator-chosen hues.",
+      "Flat at rest: 1px rules separate surfaces, shadows belong to overlays only.",
+      "Dense but quiet: 13px table body, 12px metadata, mono for every number.",
+      "Two languages at equal quality, with localised dates, durations and enum labels.",
+      "Verified with axe on all 13 surfaces in both themes: zero violations."
+    ],
+    "rules": [
+      {
+        "name": "The One Accent Rule",
+        "body": "A screen has exactly one accent. It marks the primary action, the current selection, the focus ring or a live process — never decoration, never two of those at once in the same block.",
+        "section": "colors"
+      },
+      {
+        "name": "The Contrast Floor Rule",
+        "body": "Every text token clears 4.5:1 against every surface it can land on, including its own 10% tint.",
+        "section": "colors"
+      },
+      {
+        "name": "The Tabular Rule",
+        "body": "Any figure that can change while the operator watches it is set in Geist Mono with tabular figures, so the layout never shifts mid-stream.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat-By-Default Rule",
+        "body": "Surfaces are flat at rest. The overlay shadow is the only shadow in the system and appears only on things that float above the page.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do keep one accent per screen and let it mark action, selection, focus or liveness.",
+      "Do separate regions with a 1px line rule; reserve shadows for overlays.",
+      "Do set every number that can change in Geist Mono with tabular figures.",
+      "Do localise dates, durations and enum labels in both languages.",
+      "Do keep a keyboard path for every action, with a visible :focus-visible ring."
+    ],
+    "donts": [
+      "Don't introduce a second accent, a gradient, a glow, a coloured shadow or a glass panel.",
+      "Don't wrap tables and lists in cards, or add zebra striping.",
+      "Don't use emoji, icon walls or a badge for every state.",
+      "Don't animate anything other than transform, opacity, background-color or border-color.",
+      "Don't hard-code English in a component that renders in both languages."
+    ]
+  }
+}

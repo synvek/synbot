@@ -60,7 +60,7 @@ export const WebSection: React.FC<SectionProps> = ({ draft, setDraft, t }) => {
         onChange={(v) => patchWeb({ showToolCalls: v })}
       />
       <Subheading>{t('config.sections.web.auth')}</Subheading>
-      <p className="text-sm text-text-secondary -mt-2 mb-2">{t('config.sections.web.authHint')}</p>
+      <p className="text-sm text-ink-2 -mt-2 mb-2">{t('config.sections.web.authHint')}</p>
       <TextField
         id="webAuthUser"
         label={t('config.sections.web.authUsername')}
@@ -75,13 +75,13 @@ export const WebSection: React.FC<SectionProps> = ({ draft, setDraft, t }) => {
         onChange={(v) => setAuth(username, v)}
       />
       <div>
-        <label className="block text-sm font-medium text-text mb-1" htmlFor="corsOrigins">
+        <label className="block text-sm font-medium text-ink mb-1" htmlFor="corsOrigins">
           {t('config.sections.web.corsOrigins')}
         </label>
         <textarea
           id="corsOrigins"
           spellCheck={false}
-          className="w-full min-h-[88px] font-mono text-sm px-3 py-2 rounded-lg bg-surface border border-border text-text focus:outline-none focus:ring-2 focus:ring-primary/30"
+          className="w-full min-h-[88px] font-mono text-sm px-3 py-2 rounded-lg bg-surface border border-line text-ink focus:outline-none focus:ring-2 focus:ring-accent/30"
           value={corsOrigins}
           onChange={(e) =>
             patchWeb({
@@ -93,7 +93,7 @@ export const WebSection: React.FC<SectionProps> = ({ draft, setDraft, t }) => {
           }
           placeholder={t('config.sections.web.corsOriginsPlaceholder')}
         />
-        <p className="text-xs text-text-secondary mt-1">{t('config.sections.web.corsOriginsHint')}</p>
+        <p className="text-xs text-ink-2 mt-1">{t('config.sections.web.corsOriginsHint')}</p>
       </div>
     </FieldGroup>
   )

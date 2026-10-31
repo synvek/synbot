@@ -1,159 +1,258 @@
-import React, { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { Clock, RefreshCw } from 'lucide-react'
 import { apiClient } from '../api/client'
 import type { CronJobInfo } from '../types/api'
 import { useI18n } from '../i18n/I18nContext'
+import { formatShortDateTime } from '../utils/datetime'
+import {
+  Badge,
+  Button,
+  CodeBlock,
+  DataTable,
+  Dialog,
+  EmptyState,
+  PageHeader,
+  useToast,
+  type Column,
+} from '../ui'
 
-const CronJobs: React.FC = () => {
+const formatTimestamp = (ms: number | null | undefined, fallback: string) =>
+  ms ? formatShortDateTime(ms) : fallback
+
+/** Last-run outcomes come back as enum strings; translate them instead of printing them. */
+const RUN_STATUS: Record<string, { key: string; fallback: string }> = {
+  success: { key: 'cron.runSuccess', fallback: 'Succeeded' },
+  running: { key: 'cron.runRunning', fallback: 'Running' },
+  failed: { key: 'cron.runFailed', fallback: 'Failed' },
+}
+
+function runStatusLabel(status: string, t: (key: string, fallback: string) => string): string {
+  const entry = RUN_STATUS[status]
+  return entry ? t(entry.key, entry.fallback) : status
+}
+
+export default function CronJobs() {
   const [jobs, setJobs] = useState<CronJobInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [updating, setUpdating] = useState<string | null>(null)
+  const [detail, setDetail] = useState<CronJobInfo | null>(null)
   const { t } = useI18n()
+  const { toast } = useToast()
 
-  const fetchJobs = async () => {
-    try {
-      setLoading(true)
-      const data = await apiClient.getCronJobs()
-      setJobs(data)
-      setError(null)
-    } catch (err) {
-      setError(t('cron.failedToFetch'))
-      console.error(err)
-    } finally {
-      setLoading(false)
-    }
-  }
+  const fetchJobs = useCallback(
+    async (quiet = false) => {
+      if (!quiet) setLoading(true)
+      try {
+        setJobs(await apiClient.getCronJobs())
+        setError(null)
+      } catch (err) {
+        console.error(err)
+        if (!quiet) setError(t('cron.failedToFetch', 'Failed to fetch cron jobs'))
+      } finally {
+        if (!quiet) setLoading(false)
+      }
+    },
+    [t]
+  )
 
   useEffect(() => {
-    fetchJobs()
-  }, [])
+    void fetchJobs()
+  }, [fetchJobs])
 
-  const handleToggle = async (id: string, currentEnabled: boolean) => {
+  const toggle = async (job: CronJobInfo) => {
+    setUpdating(job.id)
     try {
-      setUpdating(id)
-      await apiClient.updateCronJob(id, !currentEnabled)
-      await fetchJobs()
+      await apiClient.updateCronJob(job.id, !job.enabled)
+      await fetchJobs(true)
+      toast(t('cron.updated', { name: job.name }))
     } catch (err) {
       console.error('Failed to update cron job:', err)
-      alert(t('cron.failedToFetch'))
+      setError(t('cron.updateFailed', 'Could not update the job'))
+      toast(t('cron.updateFailed', 'Could not update the job'), 'error')
     } finally {
       setUpdating(null)
     }
   }
 
-  const formatTimestamp = (ms: number | null | undefined) => {
-    if (!ms) return t('cron.na')
-    return new Date(ms).toLocaleString()
-  }
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-text-secondary">{t('common.loading')}</div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-        <p className="text-red-800">{error}</p>
-      </div>
-    )
-  }
+  const columns: Array<Column<CronJobInfo>> = [
+    {
+      key: 'name',
+      header: t('cron.title', 'Cron'),
+      sortValue: (row) => row.name,
+      render: (row) => (
+        <div className="min-w-0">
+          <div className="truncate font-medium text-ink">{row.name}</div>
+          <div className="truncate font-mono text-micro text-ink-3">{row.id}</div>
+        </div>
+      ),
+    },
+    {
+      key: 'schedule',
+      header: t('cron.schedule', 'Schedule'),
+      width: '150px',
+      sortValue: (row) => row.schedule,
+      render: (row) => (
+        <span className="rounded-control bg-surface-2 px-1.5 py-0.5 font-mono text-micro text-ink-2">
+          {row.schedule}
+        </span>
+      ),
+    },
+    {
+      key: 'enabled',
+      header: t('cron.status', 'Status'),
+      width: '120px',
+      sortValue: (row) => (row.enabled ? 1 : 0),
+      render: (row) => (
+        <Badge tone={row.enabled ? 'success' : 'neutral'}>
+          {row.enabled ? t('cron.enabled', 'Enabled') : t('cron.disabled', 'Disabled')}
+        </Badge>
+      ),
+    },
+    {
+      key: 'lastRun',
+      header: t('cron.lastRun', 'Last run'),
+      width: '170px',
+      sortValue: (row) => row.state.last_run_at_ms ?? 0,
+      render: (row) => (
+        <div className="flex flex-col">
+          <span className="whitespace-nowrap tabular text-micro text-ink-2">
+            {formatTimestamp(row.state.last_run_at_ms, t('cron.na', '—'))}
+          </span>
+          {row.state.last_status && (
+            <span className="truncate text-micro text-ink-3">
+              {runStatusLabel(row.state.last_status, t)}
+            </span>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: 'nextRun',
+      header: t('cron.nextRun', 'Next run'),
+      width: '170px',
+      sortValue: (row) => row.state.next_run_at_ms ?? Number.MAX_SAFE_INTEGER,
+      render: (row) => (
+        <span className="whitespace-nowrap tabular text-micro text-ink-2">
+          {formatTimestamp(row.state.next_run_at_ms, t('cron.na', '—'))}
+        </span>
+      ),
+    },
+    {
+      key: 'actions',
+      header: <span className="sr-only">{t('common.status', 'Status')}</span>,
+      align: 'right',
+      width: '110px',
+      render: (row) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={updating === row.id}
+          onClick={(event) => {
+            event.stopPropagation()
+            void toggle(row)
+          }}
+        >
+          {updating === row.id
+            ? t('cron.updating', 'Updating…')
+            : row.enabled
+              ? t('cron.disable', 'Disable')
+              : t('cron.enable', 'Enable')}
+        </Button>
+      ),
+    },
+  ]
 
   return (
     <div>
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold text-text">{t('cron.title')}</h2>
-        <p className="text-text-secondary mt-1">{t('cron.description')}</p>
-      </div>
-
-      <div className="space-y-4">
-        {jobs.map((job) => (
-          <div
-            key={job.id}
-            className="bg-surface rounded-lg shadow p-6 hover:shadow-lg transition-shadow"
+      <PageHeader
+        title={t('cron.title', 'Cron')}
+        count={jobs.length}
+        description={t('cron.description', 'Scheduled jobs run by the daemon')}
+        actions={
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<RefreshCw className="h-3.5 w-3.5" />}
+            onClick={() => void fetchJobs()}
           >
-            <div className="flex items-start justify-between">
-              <div className="flex-1">
-                <div className="flex items-center gap-3">
-                  <h3 className="text-lg font-semibold text-text">
-                    {job.name}
-                  </h3>
-                  <span
-                    className={`px-2 py-1 rounded text-xs font-medium ${
-                      job.enabled
-                        ? 'bg-green-100 text-green-800'
-                        : 'bg-gray-100 text-gray-600'
-                    }`}
-                  >
-                    {job.enabled ? t('cron.enabled') : t('cron.disabled')}
-                  </span>
-                </div>
-                <p className="text-sm text-gray-600 mt-1">{t('cron.id')}: {job.id}</p>
-                <p className="text-sm text-gray-600 mt-1">
-                  {t('cron.schedule')}: <code className="bg-gray-100 px-2 py-0.5 rounded">{job.schedule}</code>
-                </p>
-              </div>
+            {t('common.refresh', 'Refresh')}
+          </Button>
+        }
+      />
 
-              <button
-                onClick={() => handleToggle(job.id, job.enabled)}
-                disabled={updating === job.id}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
-                  job.enabled
-                    ? 'bg-red-100 text-red-700 hover:bg-red-200'
-                    : 'bg-green-100 text-green-700 hover:bg-green-200'
-                } disabled:opacity-50 disabled:cursor-not-allowed`}
-              >
-                {updating === job.id
-                  ? t('cron.updating')
-                  : job.enabled
-                  ? t('cron.disable')
-                  : t('cron.enable')}
-              </button>
+      {error && <div className="mb-3 rounded-panel border px-3 py-2 text-small tone-danger">{error}</div>}
+
+      {loading ? (
+        <p className="py-10 text-center text-small text-ink-2">{t('common.loading', 'Loading…')}</p>
+      ) : (
+        <DataTable
+          rows={jobs}
+          columns={columns}
+          rowKey={(row) => row.id}
+          density="compact"
+          onRowClick={setDetail}
+          empty={
+            <EmptyState
+              size="inline"
+              icon={<Clock className="h-5 w-5" aria-hidden="true" />}
+              title={t('cron.noJobs', 'No cron jobs')}
+              body={t('cron.emptyHint', 'Jobs are declared in the configuration file; nothing is scheduled yet.')}
+            />
+          }
+        />
+      )}
+
+      <Dialog
+        open={!!detail}
+        onClose={() => setDetail(null)}
+        title={detail?.name ?? ''}
+        description={detail?.schedule}
+        closeLabel={t('common.close', 'Close')}
+        width="md"
+      >
+        {detail && (
+          <div className="space-y-3">
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-small">
+              {[
+                [t('cron.id', 'ID'), detail.id],
+                [t('cron.schedule', 'Schedule'), detail.schedule],
+                [t('cron.status', 'Status'), detail.enabled ? t('cron.enabled', 'Enabled') : t('cron.disabled', 'Disabled')],
+                [
+                  t('cron.lastRun', 'Last run'),
+                  formatTimestamp(detail.state.last_run_at_ms, t('cron.na', '—')),
+                ],
+                [
+                  t('cron.nextRun', 'Next run'),
+                  formatTimestamp(detail.state.next_run_at_ms, t('cron.na', '—')),
+                ],
+                [t('cron.status', 'Status'), detail.state.last_status ?? t('cron.na', '—')],
+              ].map(([label, value]) => (
+                <div key={label} className="flex flex-col gap-0.5">
+                  <dt className="text-micro text-ink-3">{label}</dt>
+                  <dd className="break-all font-mono text-micro text-ink">{value}</dd>
+                </div>
+              ))}
+            </dl>
+            <div>
+              <p className="mb-1 text-micro text-ink-3">{t('cron.payload', 'Payload')}</p>
+              <CodeBlock title={detail.id} maxHeight={240}>
+                {JSON.stringify(detail.payload, null, 2)}
+              </CodeBlock>
             </div>
-
-            <div className="mt-4 pt-4 border-t border-gray-200 grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <p className="text-sm font-medium text-gray-700">{t('cron.lastRun')}</p>
-                <p className="text-sm text-gray-600 mt-1">
-                  {formatTimestamp(job.state.last_run_at_ms)}
-                </p>
-                {job.state.last_status && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    {t('cron.status')}: {job.state.last_status}
-                  </p>
-                )}
-              </div>
-
-              <div>
-                <p className="text-sm font-medium text-gray-700">{t('cron.nextRun')}</p>
-                <p className="text-sm text-gray-600 mt-1">
-                  {formatTimestamp(job.state.next_run_at_ms)}
-                </p>
-              </div>
-
-              <div>
-                <p className="text-sm font-medium text-gray-700">{t('cron.payload')}</p>
-                <div className="mt-1 bg-gray-50 rounded p-2">
-                  <pre className="text-xs text-gray-600 overflow-x-auto">
-                    {JSON.stringify(job.payload, null, 2)}
-                  </pre>
-                </div>
-              </div>
+            <div className="flex justify-end">
+              <Button
+                variant={detail.enabled ? 'ghost' : 'primary'}
+                size="sm"
+                disabled={updating === detail.id}
+                onClick={() => void toggle(detail)}
+              >
+                {detail.enabled ? t('cron.disable', 'Disable') : t('cron.enable', 'Enable')}
+              </Button>
             </div>
           </div>
-        ))}
-      </div>
-
-      {jobs.length === 0 && (
-        <div className="text-center py-12 text-text-secondary">
-          {t('cron.noJobs')}
-        </div>
-      )}
+        )}
+      </Dialog>
     </div>
   )
 }
-
-export default CronJobs

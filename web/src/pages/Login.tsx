@@ -2,6 +2,7 @@ import { useState, FormEvent } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { apiClient } from '../api/client';
 import { useI18n } from '../i18n/I18nContext';
+import { Button, Field, Input } from '../ui';
 
 export default function Login() {
   const [username, setUsername] = useState('');
@@ -24,13 +25,13 @@ export default function Login() {
     try {
       // Set auth credentials
       apiClient.setAuth(username, password);
-      
+
       // Verify credentials by making a test API call
       await apiClient.getStatus();
-      
+
       // If successful, navigate to home
       navigate('/');
-    } catch (err) {
+    } catch {
       // Clear invalid credentials
       apiClient.clearAuth();
       setError(t('login.invalidCredentials'));
@@ -40,56 +41,57 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <div className="max-w-md w-full bg-surface rounded-lg shadow-md p-8">
-        <h1 className="text-2xl font-bold text-center mb-6">{t('login.title')}</h1>
-        
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label htmlFor="username" className="block text-sm font-medium text-gray-700 mb-1">
-              {t('common.username')}
-            </label>
-            <input
+    <main className="flex min-h-screen items-center justify-center bg-background px-6 text-ink">
+      <div className="w-full max-w-[352px]">
+        <div className="mb-8 flex items-center gap-2">
+          <span className="flex h-7 w-7 items-center justify-center rounded-control bg-ink text-small font-semibold text-background">
+            S
+          </span>
+          <span className="text-section font-semibold">Synbot</span>
+        </div>
+
+        <h1 className="text-display font-semibold">{t('login.title', 'Sign in')}</h1>
+        <p className="mt-1 text-small text-ink-2">
+          {t('login.subtitle', 'Sign in to manage this daemon.')}
+        </p>
+
+        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+          <Field label={t('common.username', 'Username')} htmlFor="username" required>
+            <Input
               id="username"
               type="text"
+              autoComplete="username"
+              autoFocus
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               required
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               disabled={loading}
             />
-          </div>
+          </Field>
 
-          <div>
-            <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-              {t('common.password')}
-            </label>
-            <input
+          <Field label={t('common.password', 'Password')} htmlFor="password" required>
+            <Input
               id="password"
               type="password"
+              autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               disabled={loading}
             />
-          </div>
+          </Field>
 
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+            <p role="alert" className="rounded-control border px-2.5 py-2 text-small tone-danger">
               {error}
-            </div>
+            </p>
           )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-400 disabled:cursor-not-allowed"
-          >
+          <Button type="submit" variant="primary" className="w-full" loading={loading}>
             {loading ? t('login.loggingIn') : t('common.login')}
-          </button>
+          </Button>
         </form>
       </div>
-    </div>
+    </main>
   );
 }

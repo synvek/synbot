@@ -62,6 +62,12 @@ export const I18nProvider: React.FC<I18nProviderProps> = ({ children }) => {
     localStorage.setItem('language', lang)
   }
 
+  // Keep the document language in sync: screen readers pick the pronunciation from it, and the
+  // inline bootstrap in index.html only covers the first paint.
+  useEffect(() => {
+    document.documentElement.setAttribute('lang', language === 'zh' ? 'zh-CN' : 'en')
+  }, [language])
+
   const t = (key: string, paramsOrFallback?: Record<string, string | number> | string): string => {
     const keys = key.split('.')
     let value: any = translations

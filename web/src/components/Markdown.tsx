@@ -50,7 +50,7 @@ function highlight(code: string, lang: string): ReactNode[] {
     const [token, comment, hash, string, number, word] = m;
     if (comment || hash) {
       nodes.push(
-        <span key={key++} className="text-text-secondary italic">
+        <span key={key++} className="text-ink-2 italic">
           {token}
         </span>
       );
@@ -62,13 +62,13 @@ function highlight(code: string, lang: string): ReactNode[] {
       );
     } else if (number) {
       nodes.push(
-        <span key={key++} className="text-secondary">
+        <span key={key++} className="text-info">
           {token}
         </span>
       );
     } else if (word && CODE_KEYWORDS.has(word)) {
       nodes.push(
-        <span key={key++} className="text-primary font-medium">
+        <span key={key++} className="text-accent font-medium">
           {token}
         </span>
       );
@@ -95,20 +95,20 @@ function CodeBlock({ code, lang }: { code: string; lang: string }) {
   };
 
   return (
-    <div className="my-2 rounded-md overflow-hidden border border-border bg-background">
-      <div className="flex items-center justify-between px-3 py-1 bg-tool-execution text-xs text-text-secondary">
-        <span>{lang || 'text'}</span>
+    <div className="my-2 overflow-hidden rounded-panel border border-line bg-surface-2">
+      <div className="flex items-center justify-between gap-2 px-2.5 py-1 text-micro text-ink-3">
+        <span className="font-mono">{lang || 'text'}</span>
         <button
           type="button"
           onClick={copy}
-          className="flex items-center gap-1 hover:text-text transition-colors"
+          className="flex items-center gap-1 transition-colors duration-fast hover:text-ink"
           aria-label="Copy code"
         >
-          {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+          {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
           <span>{copied ? 'copied' : 'copy'}</span>
         </button>
       </div>
-      <pre className="p-3 overflow-x-auto text-xs leading-relaxed">
+      <pre className="overflow-x-auto px-2.5 py-2 font-mono text-micro leading-relaxed text-ink">
         <code>{highlight(code, lang)}</code>
       </pre>
     </div>
@@ -242,7 +242,7 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
     const id = `${keyPrefix}-${key++}`;
     if (code) {
       nodes.push(
-        <code key={id} className="px-1 py-0.5 rounded bg-tool-execution text-[0.9em]">
+        <code key={id} className="rounded bg-surface-2 px-1 py-0.5 font-mono text-[0.9em] text-ink">
           {code}
         </code>
       );
@@ -269,7 +269,7 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
             href={url}
             target="_blank"
             rel="noreferrer noopener"
-            className="text-primary underline"
+            className="text-accent underline decoration-accent/40 underline-offset-2 hover:decoration-accent"
           >
             {label}
           </a>
@@ -284,7 +284,7 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
           href={bareUrl}
           target="_blank"
           rel="noreferrer noopener"
-          className="text-primary underline break-all"
+          className="break-all text-accent underline decoration-accent/40 underline-offset-2 hover:decoration-accent"
         >
           {bareUrl}
         </a>
@@ -300,12 +300,12 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
 }
 
 const HEADING_CLASS = [
-  'text-lg font-semibold mt-2 mb-1',
-  'text-base font-semibold mt-2 mb-1',
-  'text-sm font-semibold mt-2 mb-1',
-  'text-sm font-semibold mt-1 mb-1',
-  'text-sm font-semibold mt-1 mb-1',
-  'text-sm font-semibold mt-1 mb-1',
+  'text-section font-semibold mt-3 mb-1',
+  'text-body font-semibold mt-3 mb-1',
+  'text-small font-semibold mt-2 mb-1',
+  'text-small font-semibold mt-2 mb-1',
+  'text-small font-semibold mt-2 mb-1',
+  'text-small font-semibold mt-2 mb-1',
 ];
 
 export default function Markdown({
@@ -318,7 +318,7 @@ export default function Markdown({
   const blocks = useMemo(() => parseBlocks(content), [content]);
 
   return (
-    <div className={`text-sm break-words ${className}`}>
+    <div className={`text-body break-words ${className}`}>
       {blocks.map((block, index) => {
         switch (block.kind) {
           case 'code':
@@ -332,12 +332,12 @@ export default function Markdown({
             );
           }
           case 'hr':
-            return <hr key={index} className="my-3 border-border" />;
+            return <hr key={index} className="my-3 border-line" />;
           case 'quote':
             return (
               <blockquote
                 key={index}
-                className="my-2 pl-3 border-l-2 border-border text-text-secondary"
+                className="my-2 border-l border-line pl-3 text-ink-2"
               >
                 {block.lines.map((line, j) => (
                   <div key={j}>{renderInline(line, `q${index}-${j}`)}</div>
@@ -361,11 +361,11 @@ export default function Markdown({
           case 'table':
             return (
               <div key={index} className="my-2 overflow-x-auto">
-                <table className="min-w-full text-xs border border-border">
-                  <thead className="bg-tool-execution">
+                <table className="min-w-full border border-line text-micro">
+                  <thead className="bg-surface-2">
                     <tr>
                       {block.header.map((cell, j) => (
-                        <th key={j} className="px-2 py-1 text-left font-medium border border-border">
+                        <th key={j} className="border border-line px-2 py-1 text-left font-medium">
                           {renderInline(cell, `th${index}-${j}`)}
                         </th>
                       ))}
@@ -375,7 +375,7 @@ export default function Markdown({
                     {block.rows.map((row, j) => (
                       <tr key={j}>
                         {row.map((cell, k) => (
-                          <td key={k} className="px-2 py-1 border border-border align-top">
+                          <td key={k} className="border border-line px-2 py-1 align-top">
                             {renderInline(cell, `td${index}-${j}-${k}`)}
                           </td>
                         ))}
