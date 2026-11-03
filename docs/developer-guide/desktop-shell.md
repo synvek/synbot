@@ -77,7 +77,7 @@ object-src 'none'; base-uri 'self'; frame-ancestors 'none'
 
 `connect-src` is the interesting part: `ipc:` / `http://ipc.localhost` for `invoke`, and loopback `http`/`ws` for the daemon. No external origin is reachable from the shell's own page. `style-src` keeps `'unsafe-inline'` because the dashboard sets inline styles (including the terminal's dynamic geometry).
 
-## Tray, close-to-tray and native events
+## Tray, window-close policy and native events
 
 `src-tauri/src/tray.rs` builds the icon and menu at startup:
 
@@ -89,7 +89,12 @@ object-src 'none'; base-uri 'self'; frame-ancestors 'none'
 
 Left click restores the window as well (`show_menu_on_left_click(false)`), so the menu does not pop up on the common gesture. A tray build failure is logged and *not* fatal.
 
-Close-to-tray is deliberately conditional: `install_close_to_tray` intercepts `CloseRequested` only when a `TRAY_READY` flag was set, otherwise closing the window quits the app. Hiding a window with no way to bring it back would strand the user.
+The close button is a policy decision, not a gesture handler. `close_action(desktop.closeToTray, tray_ready)` returns `Quit` or `Park` and is unit tested without a display:
+
+- **`Quit` (default).** `CloseRequested` calls `prevent_close()` and then `app.exit(0)`. macOS would otherwise keep a windowless process alive — indistinguishable from a hang, and the state the Dock icon could not leave before `RunEvent::Reopen` existed. `RunEvent::Exit` still kills the sidecar.
+- **`Park`.** Only with `desktop.closeToTray: true` **and** a tray that actually built. The window hides, the daemon keeps running, and a one-per-launch notification says where the window went. Coming back: tray `Show Synbot`, left click on the tray icon, or a Dock click (`RunEvent::Reopen` → `show_main_window`).
+
+The value is read from `config.json` on every close (`daemon::close_to_tray()`), so saving it in **Config → Desktop** applies to the next close without a restart.
 
 The open-project action has to cross from Rust into React. The shell evaluates a tiny script in the webview:
 
@@ -107,9 +112,9 @@ The path is serialised with `serde_json` before interpolation, so a directory na
 
 | Layer | Where |
 |-------|-------|
-| Endpoint parsing, token shape, readiness probe | `desktop/src-tauri/src/daemon.rs` (6 tests) |
+| Endpoint parsing, token shape, readiness probe, `desktop.closeToTray` | `desktop/src-tauri/src/daemon.rs` (7 tests) |
 | Bootstrap payload, notification clipping | `desktop/src-tauri/src/commands.rs` (3 tests) |
-| Menu script escaping | `desktop/src-tauri/src/tray.rs` (2 tests) |
+| Menu script escaping, close policy | `desktop/src-tauri/src/tray.rs` (3 tests) |
 | Bearer / query token, constant time compare | `src/web/auth.rs` |
 | Desktop origins and allow-all preservation | `src/web/cors.rs` |
 | Bridge + `wsUrl` behaviour | `web/src/desktop/bridge.test.ts`, `web/src/api/client.test.ts` |

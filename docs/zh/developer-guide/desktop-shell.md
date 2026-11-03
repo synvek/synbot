@@ -77,7 +77,7 @@ object-src 'none'; base-uri 'self'; frame-ancestors 'none'
 
 其中 `connect-src` 是关键：`ipc:` / `http://ipc.localhost` 供 `invoke` 使用，回环 `http`/`ws` 供守护进程使用。外壳自身页面对任何外部 origin 都不可达。`style-src` 保留 `'unsafe-inline'`，因为仪表盘会写内联样式（包括终端面板的动态尺寸）。
 
-## 托盘、关闭到托盘与原生事件
+## 托盘、窗口关闭策略与原生事件
 
 `src-tauri/src/tray.rs` 在启动时构建图标与菜单：
 
@@ -89,7 +89,12 @@ object-src 'none'; base-uri 'self'; frame-ancestors 'none'
 
 左键点击同样会恢复窗口（`show_menu_on_left_click(false)`），因此最常用的手势不会弹出菜单。托盘构建失败只记录日志，**不会**让应用启动失败。
 
-关闭到托盘是有条件的：`install_close_to_tray` 只在 `TRAY_READY` 标记已置位时拦截 `CloseRequested`，否则关闭窗口即退出应用。把窗口藏起来又没有任何办法叫回来，会把用户困住。
+关闭按钮是一项策略决策，而不是手势处理。`close_action(desktop.closeToTray, tray_ready)` 返回 `Quit` 或 `Park`，无需显示器即可单测：
+
+- **`Quit`（默认）**：`CloseRequested` 先 `prevent_close()` 再 `app.exit(0)`。macOS 默认会让一个没有窗口的进程继续活着——那与卡死无异，也正是 `RunEvent::Reopen` 出现前 Dock 图标无法脱身的状态。`RunEvent::Exit` 仍会回收 sidecar。
+- **`Park`**：仅在 `desktop.closeToTray` 为 `true` **且** 托盘确实创建成功时生效。窗口隐藏、守护进程继续运行，并弹出一条（每次启动仅一次）通知告知窗口去向。唤回方式：托盘 `Show Synbot`、左键点击托盘图标，或点击 Dock 图标（`RunEvent::Reopen` → `show_main_window`）。
+
+每次关闭都会重新从 `config.json` 读取（`daemon::close_to_tray()`），因此在 **配置 → 桌面** 里保存后，下次关闭即生效，无需重启。
 
 「打开项目」需要从 Rust 跨到 React。壳会在 webview 里执行一小段脚本：
 
@@ -107,9 +112,9 @@ window.dispatchEvent(new CustomEvent('synbot:open-project', { detail: "<JSON 引
 
 | 层次 | 位置 |
 |------|------|
-| 地址解析、令牌形态、就绪探测 | `desktop/src-tauri/src/daemon.rs`（6 个） |
+| 地址解析、令牌形态、就绪探测、`desktop.closeToTray` | `desktop/src-tauri/src/daemon.rs`（7 个） |
 | bootstrap 载荷、通知裁剪 | `desktop/src-tauri/src/commands.rs`（3 个） |
-| 菜单脚本转义 | `desktop/src-tauri/src/tray.rs`（2 个） |
+| 菜单脚本转义、关闭策略 | `desktop/src-tauri/src/tray.rs`（3 个） |
 | Bearer / query 令牌、常量时间比较 | `src/web/auth.rs` |
 | 桌面 origin 与 allow-all 保持 | `src/web/cors.rs` |
 | 桥与 `wsUrl` 行为 | `web/src/desktop/bridge.test.ts`、`web/src/api/client.test.ts` |

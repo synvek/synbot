@@ -746,6 +746,24 @@ You can override or add auth in config:
 }
 ```
 
+## Desktop Shell Configuration
+
+Only the desktop app (`Synbot.app`, `.msi`, `.AppImage`) reads this section; the daemon ignores it.
+
+```json
+{
+  "desktop": {
+    "closeToTray": false
+  }
+}
+```
+
+| Field          | Type    | Default | Meaning |
+|----------------|---------|---------|---------|
+| `closeToTray`  | boolean | `false` | Off: the window's close button quits Synbot and stops the local daemon. On: the window hides and the daemon keeps running, so channels, cron and running turns survive — reopen it from the tray menu, the menu bar icon or the Dock icon. |
+
+The shell re-reads the value on every close, so a change applies to the next close without restarting. Parking needs a tray icon; when one could not be created the close button still quits.
+
 ## Plugin Market Configuration
 
 Synbot can install WASM plugin packages from one or more published indexes. An empty `sources` list disables the market — nothing is fetched until you configure a source.

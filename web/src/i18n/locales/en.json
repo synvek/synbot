@@ -322,6 +322,7 @@
         "memory": "Memory",
         "tools": "Tools",
         "web": "Web",
+        "desktop": "Desktop",
         "log": "Logging",
         "heartbeat": "Heartbeat",
         "cron": "Cron",
@@ -349,6 +350,10 @@
         "corsOrigins": "CORS allowed origins",
         "corsOriginsPlaceholder": "One origin per line, e.g. https://app.example.com",
         "corsOriginsHint": "Empty means default browser same-origin behavior."
+      },
+      "desktop": {
+        "closeToTray": "Keep running in the tray when the window closes",
+        "closeToTrayHint": "Desktop app only. Off (default): closing the window quits Synbot and stops the local daemon. On: the window hides and the agent keeps running — reopen it from the menu bar icon or the Dock icon. Applies to the next close, no restart needed."
       },
       "log": {
         "level": "Log level",

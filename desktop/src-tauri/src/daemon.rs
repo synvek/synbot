@@ -74,6 +74,8 @@ impl Endpoint {
 struct ConfigFile {
     #[serde(default)]
     web: Option<WebSection>,
+    #[serde(default)]
+    desktop: Option<DesktopSection>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -82,6 +84,12 @@ struct WebSection {
     port: Option<u16>,
     #[serde(default)]
     host: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct DesktopSection {
+    #[serde(default, rename = "closeToTray")]
+    close_to_tray: Option<bool>,
 }
 
 /// A bind address such as `0.0.0.0` or `::` is not dialable, so the shell maps wildcards back to
@@ -119,6 +127,23 @@ pub fn config_path() -> PathBuf {
 
 pub fn config_exists() -> bool {
     config_path().exists()
+}
+
+/// `desktop.closeToTray` from the config JSON. Missing, broken or `false` all mean "close quits".
+pub fn close_to_tray_from_config(json: &str) -> bool {
+    serde_json::from_str::<ConfigFile>(json)
+        .ok()
+        .and_then(|config| config.desktop)
+        .and_then(|desktop| desktop.close_to_tray)
+        .unwrap_or(false)
+}
+
+/// Re-read on every window close, so flipping the setting in the UI takes effect immediately
+/// instead of after a restart.
+pub fn close_to_tray() -> bool {
+    std::fs::read_to_string(config_path())
+        .map(|json| close_to_tray_from_config(&json))
+        .unwrap_or(false)
 }
 
 /// Per-launch secret: 64 hex characters of UUID randomness. It is only ever handed to the sidecar
@@ -297,6 +322,19 @@ mod tests {
     fn zero_port_falls_back_to_the_default() {
         let parsed = endpoint_from_config(r#"{"web":{"port":0}}"#);
         assert_eq!(parsed, Endpoint::new("127.0.0.1", DEFAULT_PORT));
+    }
+
+    #[test]
+    fn close_to_tray_is_opt_in() {
+        // Absent section, absent key, broken JSON and an explicit `false` all mean "close quits".
+        for json in ["", "{}", "{ this is not json", r#"{"desktop":{}}"#, r#"{"desktop":{"closeToTray":false}}"#] {
+            assert!(!close_to_tray_from_config(json), "{json}");
+        }
+        assert!(close_to_tray_from_config(r#"{"desktop":{"closeToTray":true}}"#));
+        // The web section still parses next to it; the two settings are independent.
+        assert!(close_to_tray_from_config(
+            r#"{"web":{"port":19999},"desktop":{"closeToTray":true}}"#
+        ));
     }
 
     #[test]

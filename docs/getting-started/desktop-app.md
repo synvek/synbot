@@ -25,7 +25,7 @@ desktop/
     └── src/
         ├── daemon.rs # endpoint parsing, health check, sidecar spawn
         ├── commands.rs # desktop_bootstrap / desktop_pick_folder / desktop_notify
-        └── tray.rs   # tray icon, menu, close-to-tray
+        └── tray.rs   # tray icon, menu, window-close policy
 ```
 
 On first launch, if `~/.synbot/config.json` is missing, the app runs `synbot onboard` before starting the daemon — in development too, so a fresh clone shows a working window instead of a dead UI.
@@ -133,13 +133,13 @@ SYNBOT_DESKTOP=1 SYNBOT_DESKTOP_TOKEN=<64 hex chars> cargo run -- start
 2. If `~/.synbot/config.json` is missing, the app runs `synbot onboard` (enables the web dashboard and creates Basic auth with `admin` plus a random password).
 3. The sidecar starts `synbot start` with `SYNBOT_DESKTOP=1` and a per-launch token in `SYNBOT_DESKTOP_TOKEN`; the shell waits until the configured port (default **18888**) accepts connections (60 seconds max).
 4. The shell returns `{ apiBase, wsBase, token }` over IPC; the page sends `Authorization: Bearer <token>` on REST calls and `?token=<token>` on `/ws/*` handshakes. The web password is never typed, stored or sent by the desktop app.
-5. On quit (menu bar or tray → Quit) the sidecar process is terminated. Closing the window only hides it — use the tray icon or ⌘/Ctrl+Q to restore or quit.
+5. On quit (⌘Q, menu bar → Quit Synbot, or the tray menu) the sidecar process is terminated. The window's close button **quits** the app by default. Set `desktop.closeToTray` to `true` to keep Synbot (and the agent) running in the background instead — the window then hides, and the tray menu, the menu bar icon or the Dock icon bring it back.
 
 ### Desktop-only features
 
 | Feature | Where it shows up |
 |---------|-------------------|
-| System tray | Show / Open Project… / Quit; left click restores the window |
+| System tray | Show / Open Project… / Quit; left click restores a window parked by `desktop.closeToTray` |
 | Native folder picker | The folder button next to the workspace path in the chat workbench; tray → Open Project… |
 | Notifications | “Turn finished” when a run ends while the window is in the background |
 | CSP | Strict policy for the bundled page (`connect-src` limited to itself plus loopback `http`/`ws`) |

@@ -1125,6 +1125,30 @@ impl Default for WebConfig {
     }
 }
 
+/// Desktop shell behaviour (`desktop.*`).
+///
+/// The daemon ignores this section: the Tauri shell reads it straight from `config.json` every
+/// time the window is closed (`desktop/src-tauri/src/daemon.rs`), so a saved change applies to
+/// the next close without restarting anything.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopConfig {
+    /// When true, closing the window hides it and keeps the daemon running; the tray menu, the
+    /// menu bar icon and the macOS Dock icon bring it back. Defaults to false, i.e. closing the
+    /// window quits the app — a hidden window with no obvious way back reads as a hang.
+    #[serde(default)]
+    pub close_to_tray: bool,
+}
+
+impl Default for DesktopConfig {
+    fn default() -> Self {
+        Self {
+            close_to_tray: false,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Memory config
 // ---------------------------------------------------------------------------
@@ -1931,6 +1955,9 @@ pub struct Config {
     pub tools: ToolsConfig,
     #[serde(default)]
     pub web: WebConfig,
+    /// Desktop shell behaviour; only the Tauri shell reads it.
+    #[serde(default)]
+    pub desktop: DesktopConfig,
     #[serde(default)]
     pub log: LogConfig,
     #[serde(default)]

@@ -51,6 +51,17 @@
         }
       ]
     },
+    "desktop": {
+      "description": "Desktop shell behaviour; only the Tauri shell reads it.",
+      "default": {
+        "closeToTray": false
+      },
+      "allOf": [
+        {
+          "$ref": "#/definitions/DesktopConfig"
+        }
+      ]
+    },
     "heartbeat": {
       "description": "Heartbeat: periodic tasks (enabled, interval, tasks with channel/userId/target).",
       "default": {
@@ -708,6 +719,17 @@
         "userId": {
           "description": "User id to receive result.",
           "type": "string"
+        }
+      }
+    },
+    "DesktopConfig": {
+      "description": "Desktop shell behaviour (`desktop.*`).\n\nThe daemon ignores this section: the Tauri shell reads it straight from `config.json` every time the window is closed (`desktop/src-tauri/src/daemon.rs`), so a saved change applies to the next close without restarting anything.",
+      "type": "object",
+      "properties": {
+        "closeToTray": {
+          "description": "When true, closing the window hides it and keeps the daemon running; the tray menu, the menu bar icon and the macOS Dock icon bring it back. Defaults to false, i.e. closing the window quits the app \u2014 a hidden window with no obvious way back reads as a hang.",
+          "default": false,
+          "type": "boolean"
         }
       }
     },

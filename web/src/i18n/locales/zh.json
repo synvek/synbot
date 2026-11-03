@@ -322,6 +322,7 @@
         "memory": "记忆",
         "tools": "工具",
         "web": "Web",
+        "desktop": "桌面",
         "log": "日志",
         "heartbeat": "心跳",
         "cron": "定时任务",
@@ -349,6 +350,10 @@
         "corsOrigins": "CORS 允许的来源",
         "corsOriginsPlaceholder": "每行一个来源，例如 https://app.example.com",
         "corsOriginsHint": "留空则使用浏览器默认同源策略。"
+      },
+      "desktop": {
+        "closeToTray": "关闭窗口时保留在托盘后台运行",
+        "closeToTrayHint": "仅桌面应用生效。关闭（默认）：点关闭按钮即退出 Synbot 并停止本地守护进程。开启：窗口隐藏、智能体继续运行，可从菜单栏图标或 Dock 图标唤回。改动在下次关闭时生效，无需重启。"
       },
       "log": {
         "level": "日志级别",

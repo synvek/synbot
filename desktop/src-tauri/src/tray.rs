@@ -1,4 +1,4 @@
-//! Tray icon, tray menu and the "close hides, tray restores" behaviour.
+//! Tray icon, tray menu and the window-close policy.
 //!
 //! Tray labels stay in English on purpose: the shell has no access to the UI locale without
 //! reading `~/.synbot/config.json` again and the tray is a shortcut, not a surface.
@@ -7,7 +7,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, WebviewWindow};
+use tauri::{AppHandle, Manager, WebviewWindow};
+use tauri_plugin_notification::NotificationExt;
 
 use crate::daemon;
 
@@ -18,8 +19,11 @@ pub const MENU_QUIT: &str = "tray-quit";
 /// DOM event the bundled UI listens for (`web/src/desktop/bridge.ts`).
 pub const OPEN_PROJECT_EVENT: &str = "synbot:open-project";
 
-/// Set once a tray icon exists. Without it, closing the window would hide the app with no way back.
+/// Set once a tray icon exists. Without it, parking the window would leave no way back.
 static TRAY_READY: AtomicBool = AtomicBool::new(false);
+
+/// The "still running" notice is worth showing once per launch, not on every close.
+static PARKED_NOTICE_SHOWN: AtomicBool = AtomicBool::new(false);
 
 pub fn tray_ready() -> bool {
     TRAY_READY.load(Ordering::Relaxed)
@@ -104,8 +108,10 @@ pub fn install(app: &AppHandle) {
             }
         });
 
-    if let Some(icon) = app.default_window_icon() {
-        builder = builder.icon(icon.clone());
+    match app.default_window_icon() {
+        Some(icon) => builder = builder.icon(icon.clone()),
+        // An icon-less status item is invisible on macOS, which would make "close to tray" a trap.
+        None => eprintln!("[synbot-desktop] no window icon; the tray item may be invisible"),
     }
 
     match builder.build(app) {
@@ -114,14 +120,63 @@ pub fn install(app: &AppHandle) {
     }
 }
 
-/// Closing the window parks the app in the tray instead of quitting, as long as a tray exists.
-pub fn install_close_to_tray(window: &WebviewWindow) {
+/// What the window's close button does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloseAction {
+    /// Quit the app (and the daemon with it). The default, and what the close button means
+    /// everywhere else in the OS.
+    Quit,
+    /// Hide the window and keep the daemon running; the tray and the Dock icon bring it back.
+    Park,
+}
+
+/// Parking is opt-in (`desktop.closeToTray`) and needs a tray to come back from. Without one,
+/// hiding would leave a windowless process with no way to restore it.
+pub fn close_action(close_to_tray: bool, tray_ready: bool) -> CloseAction {
+    if close_to_tray && tray_ready {
+        CloseAction::Park
+    } else {
+        CloseAction::Quit
+    }
+}
+
+fn notice_parked(app: &AppHandle) {
+    if PARKED_NOTICE_SHOWN.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    let _ = app
+        .notification()
+        .builder()
+        .title("Synbot is still running")
+        .body("Click the menu bar icon or the Dock icon to reopen it. Quit Synbot stops it.")
+        .show();
+}
+
+/// Window policy for the main window.
+///
+/// Closing quits by default: the daemon owns channels, cron and the agent runtime, but a window
+/// that vanishes while the process lives — and that macOS Dock clicks could not restore — reads
+/// as a hang. Users who want the assistant to keep running in the background opt in through
+/// `desktop.closeToTray`, and then get three ways back: the tray menu, the menu bar icon and the
+/// Dock icon (`RunEvent::Reopen` in `lib.rs`).
+pub fn install_close_handler(window: &WebviewWindow) {
     let handle = window.clone();
     window.on_window_event(move |event| {
-        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-            if tray_ready() {
+        let tauri::WindowEvent::CloseRequested { api, .. } = event else {
+            return;
+        };
+        // The setting is read per close, so saving it in the UI needs no restart.
+        match close_action(daemon::close_to_tray(), tray_ready()) {
+            CloseAction::Quit => {
+                // macOS keeps a windowless app alive by default; exit explicitly so the close
+                // button always means "quit", and `RunEvent::Exit` still kills the sidecar.
+                api.prevent_close();
+                handle.app_handle().exit(0);
+            }
+            CloseAction::Park => {
                 api.prevent_close();
                 let _ = handle.hide();
+                notice_parked(handle.app_handle());
             }
         }
     });
@@ -130,6 +185,15 @@ pub fn install_close_to_tray(window: &WebviewWindow) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn close_parks_only_when_opted_in_and_a_tray_exists() {
+        assert_eq!(close_action(false, true), CloseAction::Quit);
+        assert_eq!(close_action(false, false), CloseAction::Quit);
+        assert_eq!(close_action(true, true), CloseAction::Park);
+        // Opted in but the tray failed to build: quitting beats a window that cannot come back.
+        assert_eq!(close_action(true, false), CloseAction::Quit);
+    }
 
     #[test]
     fn open_project_script_quotes_the_path() {

@@ -25,7 +25,7 @@ desktop/
     └── src/
         ├── daemon.rs # 地址解析、健康检查、sidecar 拉起
         ├── commands.rs # desktop_bootstrap / desktop_pick_folder / desktop_notify
-        └── tray.rs   # 托盘图标、菜单、关闭到托盘
+        └── tray.rs   # 托盘图标、菜单、窗口关闭策略
 ```
 
 首次启动时，若 `~/.synbot/config.json` 不存在，应用会先执行 `synbot onboard` 再启动守护进程——开发模式也一样，新克隆的仓库打开即能用，而不是一个没有后端的空壳。
@@ -133,13 +133,13 @@ SYNBOT_DESKTOP=1 SYNBOT_DESKTOP_TOKEN=<64 位十六进制> cargo run -- start
 2. 若缺少 `~/.synbot/config.json`，执行 `synbot onboard`（启用 Web 控制台，并生成 `admin` + 随机密码的 Basic auth）。
 3. sidecar 以 `SYNBOT_DESKTOP=1` 与一次性令牌（`SYNBOT_DESKTOP_TOKEN`）启动 `synbot start`；壳等待配置端口（默认 **18888**）可连接（最多 60 秒）。
 4. 壳通过 IPC 返回 `{ apiBase, wsBase, token }`；页面在 REST 请求上发送 `Authorization: Bearer <token>`，在 `/ws/*` 握手上发送 `?token=<token>`。桌面应用从不输入、保存或传递 Web 密码。
-5. 退出（菜单栏或托盘 → 退出）时终止 sidecar 进程。关闭窗口只是隐藏窗口——用托盘图标或 ⌘/Ctrl+Q 恢复或退出。
+5. 退出（⌘Q、菜单栏 → 退出 Synbot，或托盘菜单）时终止 sidecar 进程。窗口关闭按钮默认**直接退出**应用；把 `desktop.closeToTray` 设为 `true` 才会转为后台常驻——此时窗口隐藏，守护进程与智能体继续运行，可从托盘菜单、菜单栏图标或 Dock 图标唤回。
 
 ### 仅桌面端的能力
 
 | 能力 | 表现形式 |
 |------|----------|
-| 系统托盘 | 显示 / 打开项目… / 退出；左键点击恢复窗口 |
+| 系统托盘 | 显示 / 打开项目… / 退出；左键点击恢复被 `desktop.closeToTray` 隐藏的窗口 |
 | 原生目录选择器 | 聊天工作台工作区路径旁的文件夹按钮；托盘 → 打开项目… |
 | 通知 | 窗口在后台时一轮对话结束，弹出「本轮已完成」 |
 | CSP | 针对打包页面的严格策略（`connect-src` 仅限自身与回环 `http`/`ws`） |

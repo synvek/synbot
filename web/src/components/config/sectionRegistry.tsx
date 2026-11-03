@@ -7,6 +7,7 @@ import { MainAgentSection } from './sections/MainAgentSection'
 import { MemorySection } from './sections/MemorySection'
 import { ToolsSection } from './sections/ToolsSection'
 import { WebSection } from './sections/WebSection'
+import { DesktopSection } from './sections/DesktopSection'
 import { LogSection } from './sections/LogSection'
 import { HeartbeatSection } from './sections/HeartbeatSection'
 import { CronSection } from './sections/CronSection'
@@ -23,6 +24,7 @@ export type ConfigSectionId =
   | 'memory'
   | 'tools'
   | 'web'
+  | 'desktop'
   | 'log'
   | 'heartbeat'
   | 'cron'
@@ -39,6 +41,7 @@ export const SECTION_ORDER: ConfigSectionId[] = [
   'memory',
   'tools',
   'web',
+  'desktop',
   'log',
   'heartbeat',
   'cron',
@@ -56,6 +59,7 @@ const REGISTRY: Record<ConfigSectionId, React.FC<SectionProps>> = {
   memory: MemorySection,
   tools: ToolsSection,
   web: WebSection,
+  desktop: DesktopSection,
   log: LogSection,
   heartbeat: HeartbeatSection,
   cron: CronSection,

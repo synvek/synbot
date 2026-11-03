@@ -74,17 +74,23 @@ pub fn run() {
             let handle = app.handle().clone();
             tray::install(&handle);
             if let Some(window) = daemon::main_window(&handle) {
-                tray::install_close_to_tray(&window);
+                tray::install_close_handler(&window);
             }
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app, event| {
-            if matches!(event, RunEvent::Exit) {
+        .run(|app, event| match event {
+            // The daemon is a child process, so quitting the shell has to take it down too.
+            RunEvent::Exit => {
                 if let Some(state) = app.try_state::<DesktopState>() {
                     state.kill_daemon();
                 }
             }
+            // macOS keeps the process alive for an app without windows. Without this, a hidden
+            // window (or a closed one) could only be recovered from the tray menu.
+            #[cfg(target_os = "macos")]
+            RunEvent::Reopen { .. } => tray::show_main_window(app),
+            _ => {}
         });
 }
