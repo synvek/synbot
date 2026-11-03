@@ -1,8 +1,8 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
-import { MessagesSquare, PanelRight } from 'lucide-react'
+import { MessagesSquare, PanelLeft, PanelRight } from 'lucide-react'
 import { useI18n } from '../../i18n/I18nContext'
 import { IconButton, SegmentedControl, StatusDot } from '../../ui'
-import type { CommandInfo } from '../../types/api'
+import type { CommandInfo, Project } from '../../types/api'
 import type { ChatMessage } from '../../types/websocket'
 import type { ProjectInfo, SubagentInfo } from '../../types/agentEvents'
 import ProjectPanel from '../../components/ProjectPanel'
@@ -10,6 +10,7 @@ import { useShell } from '../../components/app-shell/ShellContext'
 import { Composer } from './Composer'
 import { MessageStream } from './MessageStream'
 import { Inspector } from './Inspector'
+import { WorkspaceChip } from './WorkspaceChip'
 
 // xterm is ~340KB: load it only when the terminal tab is opened for the first time.
 const TerminalPanel = lazy(() => import('../../components/TerminalPanel'))
@@ -22,6 +23,8 @@ interface ChatSurfaceProps {
   running: boolean
   messages: ChatMessage[]
   project: ProjectInfo | null
+  /** Registered folders, for the workspace chip in the header. */
+  projects: Project[]
   planVersion: number
   subagents: SubagentInfo[]
   commands: CommandInfo[]
@@ -29,18 +32,21 @@ interface ChatSurfaceProps {
   onStop: () => void
   onApprove: (requestId: string, approved: boolean) => void
   onSelectProject: (projectId: string | null) => void
+  onCloseProject: () => void
 }
 
 /**
  * The workbench: transcript in the middle, tabs for the shell the agent is running in, and one
- * panel on the right that owns everything file-shaped. Nothing here knows the WebSocket protocol;
- * it renders what the page hands it.
+ * panel on the right that owns everything file-shaped. Its header is now the app's only bar —
+ * the workspace chip, the view switch, and the panel toggle all live here. Nothing here knows the
+ * WebSocket protocol; it renders what the page hands it.
  */
 export function ChatSurface({
   connected,
   running,
   messages,
   project,
+  projects,
   planVersion,
   subagents,
   commands,
@@ -48,9 +54,10 @@ export function ChatSurface({
   onStop,
   onApprove,
   onSelectProject,
+  onCloseProject,
 }: ChatSurfaceProps) {
   const { t } = useI18n()
-  const { focusMode } = useShell()
+  const { focusMode, setSidebarOpen } = useShell()
   const [view, setView] = useState<View>('chat')
   const [terminalMounted, setTerminalMounted] = useState(false)
   const [teamMounted, setTeamMounted] = useState(false)
@@ -103,7 +110,16 @@ export function ChatSurface({
       {/* The workbench has no visible page title; screen readers still need one. */}
       <h1 className="sr-only">{t('sidebar.chat', 'Chat')}</h1>
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex h-11 shrink-0 items-center gap-3 border-b border-line px-3">
+        <div className="flex h-12 shrink-0 items-center gap-2 border-b border-line px-3">
+          {/* Below lg the sidebar is a drawer, so this is where it is opened from. */}
+          <IconButton
+            className="lg:hidden"
+            size="sm"
+            label={t('shell.openSidebar')}
+            onClick={() => setSidebarOpen(true)}
+          >
+            <PanelLeft className="h-4 w-4" aria-hidden="true" />
+          </IconButton>
           <SegmentedControl<View>
             ariaLabel={t('chat.views', 'Views')}
             value={view}
@@ -118,27 +134,30 @@ export function ChatSurface({
               { value: 'team', label: t('chat.tabTeam', 'Team') },
             ]}
           />
-          {running && (
-            <span className="flex items-center gap-1.5 text-micro text-ink-2">
-              <StatusDot tone="running" />
-              {t('chat.toolRunning', 'running')}
-            </span>
-          )}
-          {runningTeammates > 0 && view !== 'team' && (
-            <span className="tabular flex items-center gap-1.5 text-micro text-ink-3">
-              <MessagesSquare className="h-3 w-3" aria-hidden="true" />
-              {runningTeammates}
-            </span>
-          )}
-          <div className="ml-auto flex min-w-0 items-center gap-2">
-            {project && (
-              <span className="hidden truncate font-mono text-micro text-ink-3 sm:block" title={project.path}>
-                {project.name}
+          <div className="ml-auto flex min-w-0 items-center gap-1">
+            {running && (
+              <span className="mr-1 hidden items-center gap-1.5 text-micro text-ink-2 sm:flex">
+                <StatusDot tone="running" />
+                {t('chat.toolRunning', 'running')}
               </span>
             )}
+            {runningTeammates > 0 && view !== 'team' && (
+              <span className="tabular flex items-center gap-1.5 text-micro text-ink-3">
+                <MessagesSquare className="h-3 w-3" aria-hidden="true" />
+                {runningTeammates}
+              </span>
+            )}
+            <WorkspaceChip
+              project={project}
+              projects={projects}
+              running={running}
+              onSelect={onSelectProject}
+            />
             {!focusMode && (
               <IconButton
                 size="sm"
+                // Below `lg` the inspector is hidden altogether, so the toggle would be dead.
+                className="hidden lg:inline-flex"
                 label={
                   inspectorOpen
                     ? t('chat.hideInspector', 'Hide workspace panel')
@@ -213,7 +232,8 @@ export function ChatSurface({
             turnId={lastTurnId}
             focusFile={focusFile}
             planVersion={planVersion}
-            onSelect={onSelectProject}
+            onClose={onCloseProject}
+            onUndone={() => setFocusFile(null)}
           />
         </Inspector>
       )}

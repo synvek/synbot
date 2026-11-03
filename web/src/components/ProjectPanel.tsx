@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Folder,
-  FolderPlus,
   File as FileIcon,
   GitBranch,
   RefreshCw,
@@ -10,7 +9,6 @@ import {
   X,
 } from 'lucide-react';
 import { apiClient } from '../api';
-import { isDesktop, onOpenProject, pickFolder } from '../desktop/bridge';
 import type {
   CheckpointFile,
   CheckpointView,
@@ -45,7 +43,8 @@ interface ProjectPanelProps {
   onUndone?: (turnId: string) => void;
   /** Bumped by the socket on `plan_updated`, so the board reflects agent-written plans. */
   planVersion?: number;
-  onSelect: (projectId: string | null) => void;
+  /** Drop the folder binding; the sidebar picks the next workspace. */
+  onClose: () => void;
 }
 
 function formatBytes(size: number) {
@@ -55,8 +54,9 @@ function formatBytes(size: number) {
 }
 
 /**
- * Right-hand workbench panel: which folder the agent works in, its file tree, and what the last
- * turn changed. Folder switching goes through the agent socket so the server owns the binding.
+ * Right-hand workbench panel: the file tree, what the last turn changed, the task board and the
+ * deliverables. Picking a folder now belongs to the conversation (sidebar + header chip), so this
+ * panel is content only.
  */
 export default function ProjectPanel({
   project,
@@ -66,17 +66,14 @@ export default function ProjectPanel({
   focusFile,
   onUndone,
   planVersion = 0,
-  onSelect,
+  onClose,
 }: ProjectPanelProps) {
   const { t } = useI18n();
-  const [projects, setProjects] = useState<Project[]>([]);
   const [dirPath, setDirPath] = useState('');
   const [entries, setEntries] = useState<ProjectFileEntry[]>([]);
   const [reloadToken, setReloadToken] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [openPath, setOpenPath] = useState('');
-  const [opening, setOpening] = useState(false);
   const [tab, setTab] = useState<'files' | 'changes' | 'tasks' | 'delivery'>('files');
   const [preview, setPreview] = useState<ProjectFileContent | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
@@ -99,18 +96,6 @@ export default function ProjectPanel({
   /** Line to centre the preview on (set when a symbol hit is opened). */
   const [previewLine, setPreviewLine] = useState<number | null>(null);
   const requestIdRef = useRef(0);
-
-  const refreshProjects = useCallback(async () => {
-    try {
-      setProjects(await apiClient.getProjects());
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }, []);
-
-  useEffect(() => {
-    void refreshProjects();
-  }, [refreshProjects]);
 
   // Load the directory listing whenever the folder (or the browsed subdirectory) changes.
   useEffect(() => {
@@ -330,52 +315,6 @@ export default function ProjectPanel({
   const diffFile = diffPath ? shownFiles.find((f) => f.display_path === diffPath) : undefined;
   const doneTasks = tasks.filter((task) => task.status === 'completed').length;
 
-  const openProjectPath = useCallback(
-    async (rawPath: string) => {
-      const path = rawPath.trim();
-      if (!path) return;
-      setOpening(true);
-      setError(null);
-      try {
-        const opened = await apiClient.openProject(path);
-        await refreshProjects();
-        setOpenPath('');
-        setDirPath('');
-        onSelect(opened.id);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-      } finally {
-        setOpening(false);
-      }
-    },
-    [onSelect, refreshProjects]
-  );
-
-  const handleOpen = async (event: React.FormEvent) => {
-    event.preventDefault();
-    await openProjectPath(openPath);
-  };
-
-  // The tray menu's "Open Project…" sends the folder it picked as a DOM event.
-  useEffect(() => onOpenProject((path) => void openProjectPath(path)), [openProjectPath]);
-
-  /** Desktop only: the path comes from the native folder picker instead of typing. */
-  const handleBrowse = async () => {
-    const path = await pickFolder();
-    if (path) await openProjectPath(path);
-  };
-
-  const handleClose = async () => {
-    if (!project) return;
-    try {
-      await apiClient.closeProject(project.id);
-      await refreshProjects();
-      onSelect(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  };
-
   const openFile = async (path: string, line: number | null = null) => {
     if (!project) return;
     setPreviewLine(line);
@@ -405,10 +344,7 @@ export default function ProjectPanel({
         <span className="text-sm font-semibold text-ink">{t('project.title', '工作区')}</span>
         <button
           type="button"
-          onClick={() => {
-            setReloadToken((value) => value + 1);
-            void refreshProjects();
-          }}
+          onClick={() => setReloadToken((value) => value + 1)}
           className="ml-auto p-1 rounded text-ink-2 hover:text-ink hover:bg-surface-2"
           title={t('project.refresh', '刷新')}
         >
@@ -417,20 +353,6 @@ export default function ProjectPanel({
       </div>
 
       <div className="px-3 py-2 space-y-2 border-b border-line">
-        <select
-          aria-label={t('project.workspaceSelect', '工作区')}
-          value={project?.id ?? ''}
-          onChange={(e) => onSelect(e.target.value || null)}
-          className="w-full text-sm px-2 py-1.5 rounded border border-line bg-surface-2 text-ink"
-        >
-          <option value="">{t('project.globalWorkspace', '默认工作区（~/.synbot/workspace）')}</option>
-          {projects.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.name} — {item.path}
-            </option>
-          ))}
-        </select>
-
         {project && (
           <div className="text-xs text-ink-2 space-y-0.5">
             <div className="truncate font-mono" title={project.path}>
@@ -448,7 +370,7 @@ export default function ProjectPanel({
               )}
               <button
                 type="button"
-                onClick={() => void handleClose()}
+                onClick={onClose}
                 className="ml-auto p-0.5 rounded hover:text-error"
                 title={t('project.close', '移除')}
               >
@@ -473,41 +395,13 @@ export default function ProjectPanel({
                 {git.behind > 0 && <span>↓{git.behind}</span>}
                 <span className="ml-1">
                   {git.files.length > 0
-                    ? t('project.gitChanged', `${git.files.length} 个未提交`)
+                    ? t('project.gitChanged', { count: git.files.length })
                     : t('project.gitClean', '干净')}
                 </span>
               </button>
             )}
           </div>
         )}
-
-        <form onSubmit={handleOpen} className="flex gap-1">
-          <input
-            value={openPath}
-            onChange={(e) => setOpenPath(e.target.value)}
-            placeholder={t('project.openPathPlaceholder', '输入文件夹路径…')}
-            className="flex-1 min-w-0 text-xs px-2 py-1 rounded border border-line bg-surface-2 text-ink focus:outline-none focus:ring-1 focus:ring-accent"
-          />
-          {isDesktop() && (
-            <button
-              type="button"
-              onClick={handleBrowse}
-              disabled={opening}
-              className="p-1.5 rounded border border-line text-ink-2 hover:text-ink disabled:opacity-50"
-              title={t('project.browse', '选择文件夹…')}
-            >
-              <Folder size={13} />
-            </button>
-          )}
-          <button
-            type="submit"
-            disabled={opening || !openPath.trim()}
-            className="p-1.5 rounded border border-line text-ink-2 hover:text-ink disabled:opacity-50"
-            title={t('project.open', '打开文件夹')}
-          >
-            <FolderPlus size={13} />
-          </button>
-        </form>
 
         {error && <div className="text-xs text-error break-all">{error}</div>}
       </div>
@@ -885,7 +779,7 @@ export default function ProjectPanel({
                 {git.head ? ` @ ${git.head}` : ''}
               </span>
               <span className="text-[11px] text-ink-2">
-                {t('project.gitChanged', `${git.files.length} 个未提交`)}
+                {t('project.gitChanged', { count: git.files.length })}
               </span>
               <button
                 type="button"

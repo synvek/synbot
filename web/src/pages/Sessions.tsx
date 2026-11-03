@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { MessagesSquare } from 'lucide-react'
 import { apiClient } from '../api/client'
 import type { SessionDetail, SessionSummary } from '../types/api'
@@ -63,6 +64,19 @@ export default function Sessions() {
       setDetailLoading(false)
     }
   }, [])
+
+  // The sidebar history rows deep-link here with `?id=`, so the detail is already open on arrival.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const linkedId = searchParams.get('id')
+  useEffect(() => {
+    if (linkedId) void openSession(linkedId)
+  }, [linkedId, openSession])
+
+  /** Picking another row drops the deep link, otherwise a reload would jump back to it. */
+  const selectSession = (id: string) => {
+    if (linkedId) setSearchParams({}, { replace: true })
+    void openSession(id)
+  }
 
   const columns: Array<Column<SessionSummary>> = [
     {
@@ -169,7 +183,7 @@ export default function Sessions() {
               rowKey={(row) => row.id}
               density="compact"
               selectedKey={selectedId}
-              onRowClick={(row) => void openSession(row.id)}
+              onRowClick={(row) => selectSession(row.id)}
               className="[&>table]:min-w-0"
             />
           </div>

@@ -35,6 +35,8 @@ interface UseAgentSocketReturn {
   send: (content: string) => void;
   cancel: () => void;
   sendApprovalResponse: (requestId: string, approved: boolean) => void;
+  /** Drop the local transcript without touching the connection (a new conversation). */
+  resetMessages: () => void;
   /** Switch workspace for the next turn; the server echoes the active project. */
   selectProject: (projectId: string | null) => void;
 }
@@ -498,6 +500,11 @@ export function useAgentSocket({
     [sendRaw]
   );
 
+  const resetMessages = useCallback(() => {
+    activeAssistantRef.current = null;
+    setMessages([]);
+  }, []);
+
   const cancel = useCallback(() => {
     sendRaw({ type: 'cancel' });
     // A cancelled turn publishes `turn_finished`; `/stop` with nothing running only answers with a
@@ -561,6 +568,7 @@ export function useAgentSocket({
     send,
     cancel,
     sendApprovalResponse,
+    resetMessages,
     selectProject,
   };
 }

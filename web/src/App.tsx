@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react'
-import { BrowserRouter, HashRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, HashRouter, Navigate, Routes, Route } from 'react-router-dom'
 import { I18nProvider } from './i18n/I18nContext'
 import { isDesktop } from './desktop/bridge'
 import Layout from './components/Layout'
@@ -30,6 +30,10 @@ function RouteFallback() {
   )
 }
 
+/**
+ * The console opens on the conversation, not on a dashboard: everything that administers the
+ * runtime is one 「更多」 menu away. Overview keeps its own path so old links still land.
+ */
 function App() {
   // The desktop app loads `index.html` from bundled assets, where nothing rewrites deep links to
   // the SPA, so a reload on `/chat` would 404. Hash routing keeps every route reloadable.
@@ -49,7 +53,8 @@ function App() {
                 </ProtectedRoute>
               }
             >
-              <Route index element={<Overview />} />
+              <Route index element={<Navigate to="/chat" replace />} />
+              <Route path="overview" element={<Overview />} />
               <Route path="channels" element={<Channels />} />
               <Route path="sessions" element={<Sessions />} />
               <Route path="cron" element={<CronJobs />} />

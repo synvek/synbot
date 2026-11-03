@@ -9,7 +9,13 @@ interface PopoverProps {
   /** Text shown next to the label; omit for an icon-only trigger. */
   text?: ReactNode
   align?: 'start' | 'end'
+  /** Which side of the trigger the menu opens on. Footer menus open upwards. */
+  side?: 'bottom' | 'top'
   className?: string
+  /** Extra classes for the trigger button; footer rows use `w-full justify-start`. */
+  triggerClassName?: string
+  /** Navigation menus close after a row is picked; settings menus stay open for a second change. */
+  closeOnSelect?: boolean
   children: ReactNode
 }
 
@@ -18,7 +24,17 @@ interface PopoverProps {
  * on purpose: a popover is ~200 lines of behaviour, and adding a focus-management dependency for
  * three menus would cost more than it saves.
  */
-export function Popover({ label, icon, text, align = 'end', className, children }: PopoverProps) {
+export function Popover({
+  label,
+  icon,
+  text,
+  align = 'end',
+  side = 'bottom',
+  className,
+  triggerClassName,
+  closeOnSelect = false,
+  children,
+}: PopoverProps) {
   const [open, setOpen] = useState(false)
   const wrapperRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -60,7 +76,8 @@ export function Popover({ label, icon, text, align = 'end', className, children 
         className={cn(
           'inline-flex items-center gap-1.5 rounded-control text-small text-ink-2',
           'transition-colors duration-fast hover:bg-surface-2 hover:text-ink',
-          text ? 'h-8 px-2' : 'h-8 w-8 justify-center'
+          text ? 'h-8 px-2' : 'h-8 w-8 justify-center',
+          triggerClassName
         )}
       >
         {icon}
@@ -72,8 +89,15 @@ export function Popover({ label, icon, text, align = 'end', className, children 
           ref={panelRef}
           role="menu"
           aria-label={label}
+          onClick={(event) => {
+            const row = (event.target as HTMLElement).closest('[role="menuitem"]')
+            if (closeOnSelect && row) setOpen(false)
+          }}
           className={cn(
-            'absolute z-50 mt-1 min-w-[200px] overflow-hidden rounded-panel border border-line bg-surface py-1 shadow-overlay',
+            // Tall enough for the account menu (identity, appearance, six accents, language,
+            // focus, sign out) so nothing lands behind a scrollbar on a 900px-tall window.
+            'absolute z-50 max-h-[min(80vh,640px)] min-w-[200px] overflow-y-auto rounded-panel border border-line bg-surface py-1 shadow-overlay',
+            side === 'top' ? 'bottom-full mb-1' : 'top-full mt-1',
             align === 'end' ? 'right-0' : 'left-0'
           )}
         >

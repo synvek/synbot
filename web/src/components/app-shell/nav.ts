@@ -27,16 +27,26 @@ export interface NavGroup {
 }
 
 /**
- * The rail's information architecture. Paths are unchanged from the first console — `/chat`,
- * `/security`, and the rest are bookmarked and linked in the docs, so only grouping is new.
+ * The one destination the shell is built around. It is not part of the admin menu: the app opens
+ * here, the sidebar's primary action belongs to it, and everything else is reachable from 「更多」.
  */
-export const navGroups: NavGroup[] = [
+export const primaryNav: NavItem = {
+  path: '/chat',
+  labelKey: 'sidebar.chat',
+  icon: MessageSquare,
+}
+
+/**
+ * Everything that administers the runtime. Grouped here and rendered by the sidebar's 「更多」
+ * menu and the ⌘K palette; the sidebar itself only lists conversations, so a new admin page has to
+ * be added in exactly one place.
+ */
+export const adminNavGroups: NavGroup[] = [
   {
     id: 'workspace',
     labelKey: 'nav.workspace',
     items: [
-      { path: '/', labelKey: 'sidebar.overview', icon: LayoutDashboard },
-      { path: '/chat', labelKey: 'sidebar.chat', icon: MessageSquare },
+      { path: '/overview', labelKey: 'sidebar.overview', icon: LayoutDashboard },
       { path: '/sessions', labelKey: 'sidebar.sessions', icon: MessagesSquare },
     ],
   },
@@ -69,4 +79,5 @@ export const navGroups: NavGroup[] = [
   },
 ]
 
-export const navItems: NavItem[] = navGroups.flatMap((group) => group.items)
+/** Every destination, in menu order: the palette and the sidebar walk the same list. */
+export const navItems: NavItem[] = [primaryNav, ...adminNavGroups.flatMap((group) => group.items)]

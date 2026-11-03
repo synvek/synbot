@@ -1,10 +1,17 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useChatSession } from '../chat-session/ChatSessionContext'
 
 interface ShellContextValue {
-  /** Rail is icon-only. Persisted in `localStorage: shell-rail`. */
-  railCollapsed: boolean
-  toggleRail: () => void
-  /** Focus mode hides the rail and the chat inspector; ⌘. toggles it. */
+  /** Sidebar is icon-only. Persisted in `localStorage: shell-rail`. */
+  sidebarCollapsed: boolean
+  toggleSidebar: () => void
+  /**
+   * Sidebar as an overlay. Only meaningful below `lg`, where the sidebar would otherwise squeeze
+   * the transcript; the wide layout ignores it.
+   */
+  sidebarOpen: boolean
+  setSidebarOpen: (open: boolean) => void
+  /** Focus mode hides the sidebar and the chat inspector; ⌘. toggles it. */
   focusMode: boolean
   toggleFocusMode: () => void
   paletteOpen: boolean
@@ -19,47 +26,64 @@ export function useShell() {
   return context
 }
 
-const RAIL_KEY = 'shell-rail'
+const SIDEBAR_KEY = 'shell-rail'
 
 export function ShellProvider({ children }: { children: ReactNode }) {
-  const [railCollapsed, setRailCollapsed] = useState<boolean>(() => localStorage.getItem(RAIL_KEY) === 'collapsed')
+  const { newConversation } = useChatSession()
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(
+    () => localStorage.getItem(SIDEBAR_KEY) === 'collapsed'
+  )
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const [focusMode, setFocusMode] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
 
-  const toggleRail = useCallback(() => {
-    setRailCollapsed((current) => {
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((current) => {
       const next = !current
-      localStorage.setItem(RAIL_KEY, next ? 'collapsed' : 'expanded')
+      localStorage.setItem(SIDEBAR_KEY, next ? 'collapsed' : 'expanded')
       return next
     })
   }, [])
 
   const toggleFocusMode = useCallback(() => setFocusMode((current) => !current), [])
 
-  // ⌘K / Ctrl+K opens the palette, ⌘. toggles focus mode. Both are ignored while typing in a
-  // field so a chord never eats text.
+  // ⌘K opens the palette, ⌘N starts a new conversation, ⌘. toggles focus mode. All three are
+  // ignored while typing in a field so a chord never eats text.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
       const typing =
         target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable
       const meta = event.metaKey || event.ctrlKey
-      if (!meta) return
-      if (event.key.toLowerCase() === 'k') {
+      if (!meta || typing) return
+      const key = event.key.toLowerCase()
+      if (key === 'k') {
         event.preventDefault()
         setPaletteOpen((open) => !open)
-      } else if (event.key === '.' && !typing) {
+      } else if (key === 'n') {
+        event.preventDefault()
+        newConversation()
+      } else if (event.key === '.') {
         event.preventDefault()
         setFocusMode((current) => !current)
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
+  }, [newConversation])
 
   const value = useMemo(
-    () => ({ railCollapsed, toggleRail, focusMode, toggleFocusMode, paletteOpen, setPaletteOpen }),
-    [railCollapsed, toggleRail, focusMode, toggleFocusMode, paletteOpen]
+    () => ({
+      sidebarCollapsed,
+      toggleSidebar,
+      sidebarOpen,
+      setSidebarOpen,
+      focusMode,
+      toggleFocusMode,
+      paletteOpen,
+      setPaletteOpen,
+    }),
+    [sidebarCollapsed, toggleSidebar, sidebarOpen, focusMode, toggleFocusMode, paletteOpen]
   )
 
   return <ShellContext.Provider value={value}>{children}</ShellContext.Provider>

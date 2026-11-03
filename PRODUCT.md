@@ -27,6 +27,7 @@ One small portable binary that is both the agent and its control plane: no gatew
 - Shipped two ways: a Tauri desktop app (sidecar binary, one-time Bearer token over IPC) and a browser console served by `synbot start` on `127.0.0.1:18888` with HTTP Basic auth.
 - Long sessions next to a terminal and an editor; the agent writes files in the workspace, so diffs, file trees, and deliverables are read in place.
 - The chat surface carries three peer views — Chat, Terminal (xterm), Team (subagents) — plus a project panel with the workspace file tree, symbol search, and turn diffs, a deliverable preview (docx/xlsx/pptx/pdf), and inline approval cards.
+- The console opens on the conversation, not on a dashboard: the sidebar holds the conversation's context (new chat, workspaces, recent sessions), the eleven admin pages sit behind the footer's「更多」menu and ⌘K, and the chat header is the app's only bar.
 - Two languages (zh/en) and six colour schemes in light and dark are part of the shipped product, not preferences added later.
 - Operators may run several chats and agents in parallel and switch between them while a turn streams.
 

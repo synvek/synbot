@@ -139,14 +139,14 @@ saturated colour on the screen.
 
 ### Primary
 - **Operator Accent** (`#2f6fed` default "blue-ocean", `#12805c` forest, `#6f4df7` mystic,
-  `#b84a10` sunset, `#db2777` blossom, `#3f4147` modern): primary buttons, the active rail row's
-  2px left rule, focus rings, running indicators, selected table rows. Nothing else.
+  `#b84a10` sunset, `#db2777` blossom, `#3f4147` modern): primary buttons, the check on the current
+  sidebar row, focus rings, running indicators, selected table rows. Nothing else.
 - **Accent Hover** (`#255fd6` and per-scheme `*-600`): one step down in lightness, used for hover
   and pressed states of accent-filled controls.
 
 ### Neutral
 - **Paper** (`#ffffff` light / `#0b0c0e` dark background): the page substrate. Never tinted.
-- **Sheet** (`#ffffff` light / `#131417` dark surface): panels, dialogs, the AppBar.
+- **Sheet** (`#ffffff` light / `#131417` dark surface): panels, dialogs, the sidebar.
 - **Inset** (`#f4f4f5` light / `#1a1c20` dark surface-2): code blocks, table headers, hover rows,
   the user's own turn in the transcript.
 - **Ink** (`#17181b` / `#e9eaec`): primary text.
@@ -198,19 +198,26 @@ invent a fifth size.
 
 ## Layout
 
-A fixed 52px AppBar, a rail that is 232px expanded and 64px collapsed (state in
-`localStorage: shell-rail`), and `<main>`. Every route except the workbench scrolls with 24px
+The app opens on the conversation. A 264px sidebar (56px collapsed, state in
+`localStorage: shell-rail`) holds the conversation's context — new chat, workspaces, history — and
+`<main>` holds the work. There is no global top bar: the shell has no room above the transcript,
+so each page owns its header and the chat's is a 48px row carrying the view switch, the workspace
+chip, the run state and the inspector toggle. Every route except the workbench scrolls with 24px
 padding (16px at or below 768px); the chat route is `h-full overflow-hidden` and keeps the whole
 viewport for the transcript.
 
-The transcript column is capped at 760px and centred; the workspace inspector is a fixed 320px.
-Detail pages that pair a list with a panel use `minmax(0, 30rem)` for the list so the panel keeps a
-readable measure, and tables inside those columns drop the 640px minimum so no column is ever cut.
-Below `lg` the pairs stack; below 768px the rail keeps its width and content scrolls rather than
-reflowing into a mobile layout.
+The transcript column is capped at 760px and centred; the workspace inspector is a fixed 320px
+and folds with ⌘B. Detail pages that pair a list with a panel use `minmax(0, 30rem)` for the list
+so the panel keeps a readable measure, and tables inside those columns drop the 640px minimum so
+no column is ever cut.
 
-Spacing is a 4px scale: 4/8/12/16/24. Table rows are 40px comfortable and 36px compact; the table
-header is 32px and sticky.
+Below `lg` the sidebar stops taking width: it becomes a drawer (fixed, off-canvas, 40% scrim)
+opened from the chat header, and the inspector hides so the transcript is never squeezed between
+two panels on a laptop. Below 768px the same holds — content scrolls rather than reflowing into a
+mobile layout.
+
+Spacing is a 4px scale: 4/8/12/16/24. Sidebar rows are 28px; table rows are 40px comfortable and
+36px compact; the table header is 32px and sticky.
 
 ## Elevation & Depth
 
@@ -228,8 +235,8 @@ Shadows exist for exactly one situation: something floats above the page and mus
 
 Controls are 6px, panels 10px, pills 999px. Nothing is fully square and nothing is a capsule except
 chips, badges and the "jump to latest" pill. Borders are always 1px; there are no 2px panel frames
-and no double borders. The one deliberate exception is the 2px left rule on approval cards and the
-rail's active row: a rule, not a frame, marking state or consent.
+and no double borders. The one deliberate exception is the 2px left rule on approval cards: a
+rule, not a frame, marking consent.
 
 ## Components
 
@@ -265,11 +272,19 @@ rail's active row: a rule, not a frame, marking state or consent.
 - **Error:** `danger` text under the field plus a 10% danger tint on the border; the label stays.
 
 ### Navigation
-- **Rail:** grouped (Workspace / Automation / Extensions / System), 32px rows, 13px labels,
-  `surface-2` plus a 2px accent left rule on the active row, tooltips when collapsed.
-- **AppBar:** product mark, ⌘K search, daemon status dot, appearance, language, account.
+- **Sidebar:** the conversation's context, not a product map — `新对话`, the workspace list (the
+  bound folder marked with an accent check), the eight most recent sessions, and a footer with
+  「更多」, the account menu and the daemon dot. 28px rows, 13px labels, `surface-2` on the current
+  row; collapsed to 56px it keeps the icons and moves every label into a tooltip.
+- **More menu / account menu:** the eleven admin pages, grouped as Workspace / Automation /
+  Extensions / System, open upward from the sidebar footer; appearance, accent, language, focus
+  mode and sign-out sit beside them in the account menu. Both are `Popover` menus, so they close
+  on Esc, on an outside click, and return focus to their trigger.
+- **Chat header:** the only bar in the app. 48px, view switch on the left, workspace chip, run
+  state and panel toggle on the right; the offline rule sits beneath it, not across the shell.
 - **Command palette:** ⌘K/Ctrl+K, listbox semantics, ↑↓/↵/Esc, Tab trapped inside, focus returned
-  to where it came from.
+  to where it came from. It reaches all thirteen routes, `新对话`, `打开文件夹`, the six accents,
+  the three appearance modes, focus mode and sign-out.
 
 ### Transcript rows (signature component)
 The chat is a log, not a chat. The user's turn is an inset block (`surface-2`, 10px radius,
