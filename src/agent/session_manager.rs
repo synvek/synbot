@@ -15,7 +15,27 @@ use crate::agent::timestamp_serde;
 // Session metadata
 // ---------------------------------------------------------------------------
 
+/// A per-session model choice made from the console (`provider` + `model`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ModelOverride {
+    pub provider: String,
+    pub model: String,
+}
+
+/// A plan the agent produced in plan mode and is waiting for the user to approve.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PendingPlan {
+    pub id: String,
+    pub summary: String,
+    pub steps: Vec<crate::agent::events::PlanStep>,
+    #[serde(with = "timestamp_serde::rfc3339_local")]
+    pub created_at: DateTime<Utc>,
+}
+
 /// Metadata associated with a session.
+///
+/// Every field added after the first release is `#[serde(default)]`: session files written by an
+/// older build must load unchanged, and files written by this build must stay readable there.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionMeta {
     /// The unique session identifier.
@@ -28,6 +48,60 @@ pub struct SessionMeta {
     /// When the session was last updated (message appended).
     #[serde(with = "timestamp_serde::rfc3339_local")]
     pub updated_at: DateTime<Utc>,
+    /// Display title. Derived from the first user message when absent.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// Hidden from the default session list but still readable.
+    #[serde(default)]
+    pub archived: bool,
+    /// Model chosen for this conversation; `None` means the configured default.
+    #[serde(default)]
+    pub model_override: Option<ModelOverride>,
+    /// Plan-first mode: the next turn may only read, then stops with a plan.
+    #[serde(default)]
+    pub plan_mode: bool,
+    /// Plan produced by the last plan-mode turn, waiting for an approval decision.
+    #[serde(default)]
+    pub pending_plan: Option<PendingPlan>,
+}
+
+impl Default for SessionMeta {
+    fn default() -> Self {
+        let now = Utc::now();
+        Self {
+            id: SessionId::main_session(),
+            participants: Vec::new(),
+            created_at: now,
+            updated_at: now,
+            title: None,
+            archived: false,
+            model_override: None,
+            plan_mode: false,
+            pending_plan: None,
+        }
+    }
+}
+
+/// Derive a display title from the first user message.
+///
+/// Counts `char`s (not bytes) so CJK and emoji are never cut mid-codepoint, and collapses
+/// newlines/tabs so a pasted block does not turn into a multi-line sidebar row.
+pub fn derive_title(content: &str) -> String {
+    let flat: String = content
+        .chars()
+        .map(|c| match c {
+            '\n' | '\r' | '\t' => ' ',
+            c if c.is_control() => ' ',
+            c => c,
+        })
+        .collect();
+    let trimmed = flat.split_whitespace().collect::<Vec<_>>().join(" ");
+    let title: String = trimmed.chars().take(40).collect();
+    if title.trim().is_empty() {
+        "New conversation".to_string()
+    } else {
+        title.trim().to_string()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -90,6 +164,7 @@ impl SessionManager {
                 participants: Vec::new(),
                 created_at: now,
                 updated_at: now,
+                ..Default::default()
             };
             (meta, Vec::new())
         });
@@ -144,11 +219,92 @@ impl SessionManager {
                 participants: Vec::new(),
                 created_at: now,
                 updated_at: now,
+                ..Default::default()
             };
             (meta, Vec::new())
         });
         entry.0.updated_at = Utc::now();
+        // First user message names the conversation; a manual rename always wins.
+        if entry.0.title.is_none() && message.role == "user" {
+            entry.0.title = Some(derive_title(&message.content));
+        }
         entry.1.push(message);
+    }
+
+    /// Borrow a session's metadata, creating the session if needed.
+    pub fn meta_mut(&mut self, id: &SessionId) -> &mut SessionMeta {
+        if !self.sessions.contains_key(id) {
+            self.get_or_create(id);
+        }
+        &mut self
+            .sessions
+            .get_mut(id)
+            .expect("session was just inserted")
+            .0
+    }
+
+    /// Rename a session. Returns `false` when the session does not exist.
+    pub fn set_title(&mut self, id: &SessionId, title: Option<String>) -> bool {
+        match self.sessions.get_mut(id) {
+            Some((meta, _)) => {
+                meta.title = title.map(|t| t.trim().chars().take(80).collect::<String>());
+                meta.updated_at = Utc::now();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Hide/show a session in the default list. Returns `false` when it does not exist.
+    pub fn set_archived(&mut self, id: &SessionId, archived: bool) -> bool {
+        match self.sessions.get_mut(id) {
+            Some((meta, _)) => {
+                meta.archived = archived;
+                meta.updated_at = Utc::now();
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Persist a per-session model choice (`None` restores the configured default).
+    pub fn set_model_override(&mut self, id: &SessionId, model: Option<ModelOverride>) -> bool {
+        match self.sessions.get_mut(id) {
+            Some((meta, _)) => {
+                meta.model_override = model;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Toggle plan-first mode for the next turn.
+    pub fn set_plan_mode(&mut self, id: &SessionId, enabled: bool) -> bool {
+        match self.sessions.get_mut(id) {
+            Some((meta, _)) => {
+                meta.plan_mode = enabled;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Store the plan awaiting an approval decision.
+    pub fn set_pending_plan(&mut self, id: &SessionId, plan: Option<PendingPlan>) -> bool {
+        match self.sessions.get_mut(id) {
+            Some((meta, _)) => {
+                meta.pending_plan = plan;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Take the pending plan out of the session (the decision consumes it).
+    pub fn take_pending_plan(&mut self, id: &SessionId) -> Option<PendingPlan> {
+        self.sessions
+            .get_mut(id)
+            .and_then(|(meta, _)| meta.pending_plan.take())
     }
 
     /// Remove a session by id. Used when resetting a conversation so it appears fresh.
@@ -437,5 +593,120 @@ mod tests {
         mgr.get_or_create(&sid);
         let meta = mgr.get_meta(&sid).unwrap();
         assert_eq!(meta.id, sid);
+    }
+
+    // ── multi-session metadata ──────────────────────────────────────
+
+    #[test]
+    fn derive_title_collapses_whitespace_and_truncates_by_char() {
+        assert_eq!(
+            derive_title("  fix   the\nbuild\tplease "),
+            "fix the build please"
+        );
+        assert_eq!(derive_title("   "), "New conversation");
+        // 41 CJK characters: the cut must land on a char boundary, not a byte one.
+        let long: String = "改".repeat(41);
+        let title = derive_title(&long);
+        assert_eq!(title.chars().count(), 40);
+        assert!(long.starts_with(&title));
+    }
+
+    #[test]
+    fn append_derives_title_once_and_manual_rename_wins() {
+        let mut mgr = manager();
+        let sid = SessionId::full("main", "web", SessionScope::Dm, "w-0123456789ab");
+        mgr.append(
+            &sid,
+            SessionMessage {
+                role: "user".into(),
+                content: "first question".into(),
+                timestamp: Utc::now(),
+            },
+        );
+        assert_eq!(
+            mgr.get_meta(&sid).unwrap().title.as_deref(),
+            Some("first question")
+        );
+
+        // A later user message must not rewrite the derived title.
+        mgr.append(
+            &sid,
+            SessionMessage {
+                role: "user".into(),
+                content: "second question".into(),
+                timestamp: Utc::now(),
+            },
+        );
+        assert_eq!(
+            mgr.get_meta(&sid).unwrap().title.as_deref(),
+            Some("first question")
+        );
+
+        assert!(mgr.set_title(&sid, Some("  renamed  ".into())));
+        assert_eq!(
+            mgr.get_meta(&sid).unwrap().title.as_deref(),
+            Some("renamed")
+        );
+    }
+
+    #[test]
+    fn setters_cover_archive_model_and_plan() {
+        let mut mgr = manager();
+        let sid = SessionId::full("main", "web", SessionScope::Dm, "w-0123456789ab");
+        mgr.get_or_create(&sid);
+
+        assert!(mgr.set_archived(&sid, true));
+        assert!(mgr.get_meta(&sid).unwrap().archived);
+
+        assert!(mgr.set_model_override(
+            &sid,
+            Some(ModelOverride {
+                provider: "openai".into(),
+                model: "gpt-4o-mini".into(),
+            })
+        ));
+        assert_eq!(
+            mgr.get_meta(&sid)
+                .unwrap()
+                .model_override
+                .as_ref()
+                .map(|m| m.model.as_str()),
+            Some("gpt-4o-mini")
+        );
+        assert!(mgr.set_model_override(&sid, None));
+        assert!(mgr.get_meta(&sid).unwrap().model_override.is_none());
+
+        assert!(mgr.set_plan_mode(&sid, true));
+        assert!(mgr.get_meta(&sid).unwrap().plan_mode);
+
+        let missing = SessionId::full("main", "web", SessionScope::Dm, "w-ffffffffffff");
+        assert!(!mgr.set_archived(&missing, true));
+        assert!(!mgr.set_title(&missing, Some("x".into())));
+    }
+
+    #[test]
+    fn pending_plan_is_consumed_once() {
+        let mut mgr = manager();
+        let sid = SessionId::full("main", "web", SessionScope::Dm, "w-0123456789ab");
+        mgr.get_or_create(&sid);
+        let plan = PendingPlan {
+            id: "plan-1".into(),
+            summary: "do the thing".into(),
+            steps: Vec::new(),
+            created_at: Utc::now(),
+        };
+        assert!(mgr.set_pending_plan(&sid, Some(plan)));
+        assert_eq!(
+            mgr.get_meta(&sid)
+                .unwrap()
+                .pending_plan
+                .as_ref()
+                .map(|p| p.id.as_str()),
+            Some("plan-1")
+        );
+        let taken = mgr.take_pending_plan(&sid).expect("plan must be pending");
+        assert_eq!(taken.id, "plan-1");
+        assert!(mgr.get_meta(&sid).unwrap().pending_plan.is_none());
+        assert!(mgr.take_pending_plan(&sid).is_none());
     }
 }

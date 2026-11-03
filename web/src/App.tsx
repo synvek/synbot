@@ -66,6 +66,8 @@ function App() {
               <Route path="config" element={<Config />} />
               <Route path="logs" element={<Logs />} />
               <Route path="chat" element={<Chat />} />
+              {/* One conversation per chat id: reload, bookmark and back/forward all land here. */}
+              <Route path="chat/:chatId" element={<Chat />} />
             </Route>
           </Routes>
         </Suspense>

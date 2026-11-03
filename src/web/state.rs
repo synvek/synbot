@@ -33,6 +33,9 @@ pub struct AppState {
     pub projects: Arc<RwLock<crate::project::ProjectStore>>,
     /// Turn snapshots (write before/after images) shared with the agent loop.
     pub checkpoints: Arc<crate::checkpoint::CheckpointStore>,
+    /// Persistence for console session CRUD (create / rename / archive). `None` in tests and in
+    /// instances that never start the agent loop; handlers then only update in-memory state.
+    pub session_store: Option<Arc<crate::agent::session::SessionStore>>,
     /// Persistent PTY sessions for the workbench terminal (`/ws/terminal`).
     pub terminals: Arc<crate::terminal::TerminalHub>,
     /// Subagents (spawn / run_team / directive routing) shown in the workbench team panel.
@@ -78,6 +81,7 @@ impl AppState {
             runtime_status,
             projects,
             checkpoints,
+            session_store: None,
             terminals: Arc::new(crate::terminal::TerminalHub::new()),
             subagents: Arc::new(tokio::sync::Mutex::new(
                 crate::agent::subagent::SubagentManager::new(4, None),

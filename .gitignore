@@ -16,6 +16,7 @@
 /desktop/src-tauri/target
 /desktop/src-tauri/binaries/synbot-*
 /notes/
+/plan/
 
 # Agent state written into the workspace (task board and per-project overrides).
 /.synbot/plans/

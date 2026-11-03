@@ -66,6 +66,8 @@ export interface ChatMessage {
   turnTokens?: { prompt: number; completion: number; total: number };
   /** Why the turn ended: completed, cancelled, max_iterations, ... (protocol v2). */
   turnReason?: string;
+  /** `provider/model` when the turn ran on a model other than the configured default. */
+  turnModel?: string;
   /** Files the turn touched (protocol v2 `file_changed`), later replaced by a diff view. */
   turnFiles?: { path: string; kind: string }[];
   /** Turn id — the key for `/api/checkpoints/{turn_id}` (diff + undo). */

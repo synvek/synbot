@@ -278,16 +278,50 @@ pub struct Config {
 ### Session Structures
 
 ```rust
-pub struct Session {
-    pub id: SessionId,
-    pub channel: String,
-    pub user_id: String,
-    pub context: Context,
-    pub memory: Memory,
+pub struct SessionMeta {
+    pub id: SessionId,                        // agent:<agent>:<channel>:<scope>:<chat_id>
+    pub participants: Vec<String>,            // sender ids seen in this conversation
     pub created_at: DateTime<Utc>,
-    pub last_activity: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    #[serde(default)] pub title: Option<String>,                 // derived from the first user message
+    #[serde(default)] pub archived: bool,                        // hidden from lists, still readable
+    #[serde(default)] pub model_override: Option<ModelOverride>, // { provider, model }
+    #[serde(default)] pub plan_mode: bool,                       // next turn may only read, then proposes
+    #[serde(default)] pub pending_plan: Option<PendingPlan>,     // { id, summary, steps, created_at }
 }
 ```
+
+#### Keying: sender vs `chat_id`
+
+A conversation is keyed by `chat_id`, not by the sender. `user_id` still travels on every
+`InboundMessage` (approvals and the audit trail name the operator), but history, events, replay,
+approval routing and project binding all resolve through
+`agent:<agent>:<channel>:<scope>:<chat_id>`:
+
+| Concern | Key |
+|---------|-----|
+| Session file, history, `SessionMeta` | `chat_id` |
+| Event bus (`seq`, replay, `/ws/agent`) | `channel:chat_id` |
+| Approval request / response | `channel:chat_id` |
+| Workspace binding (`select_project`) | `chat_id` |
+| Credentials, audit trail | `user_id` |
+
+Consequences worth remembering:
+
+- The console mints one chat id per conversation (`POST /api/sessions` → `w-<12 hex>`) and opens
+  `/ws/agent?chat_id=…`; switching conversations reconnects the socket instead of multiplexing.
+- IM channels keep their existing resolution (`telegram:12345` is both sender and chat in a DM), so
+  nothing changes for them.
+- Every field added after the first release is `#[serde(default)]`: an old session file loads
+  unchanged, and a file written by this build stays readable by an older one (unknown fields are
+  ignored).
+- `model_override` is a per-conversation pin resolved per turn (`chat.model` overrides it for that
+  turn only); model instances are built lazily and cached, and a failing pin falls back to the
+  configured default instead of failing the turn.
+- `plan_mode` is armed per conversation over the socket and cleared by the daemon as soon as a plan
+  is proposed. `pending_plan` is what the console renders as the approval card and what
+  `plan_decision` consumes; approving turns the plan into an explicit user instruction, canceling
+  drops it without executing anything.
 
 ### Tool Structures
 

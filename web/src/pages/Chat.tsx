@@ -14,13 +14,20 @@ export default function Chat() {
     messages,
     project,
     projects,
+    modelOverride,
+    pendingPlan,
+    planApproved,
+    planMode,
     planVersion,
     subagents,
     commands,
     send,
     cancel,
     approve,
+    decidePlan,
+    setPlanMode,
     selectProject,
+    setModelOverride,
     closeProject,
   } = useChatSession();
 
@@ -31,13 +38,22 @@ export default function Chat() {
       messages={messages}
       project={project}
       projects={projects}
+      model={modelOverride}
+      pendingPlan={pendingPlan}
+      planApproved={planApproved}
+      planMode={planMode}
       planVersion={planVersion}
       subagents={subagents}
       commands={commands}
       onSend={send}
       onStop={cancel}
       onApprove={approve}
+      onDecidePlan={decidePlan}
+      onTogglePlanMode={setPlanMode}
       onSelectProject={selectProject}
+      onSelectModel={(next) => {
+        void setModelOverride(next);
+      }}
       onCloseProject={() => {
         if (project) void closeProject(project.id);
       }}

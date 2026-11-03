@@ -144,6 +144,25 @@ SYNBOT_DESKTOP=1 SYNBOT_DESKTOP_TOKEN=<64 hex chars> cargo run -- start
 | Notifications | “Turn finished” when a run ends while the window is in the background |
 | CSP | Strict policy for the bundled page (`connect-src` limited to itself plus loopback `http`/`ws`) |
 
+### Conversations, models and plan mode
+
+The console keeps many conversations side by side: each one has its own chat id, workspace and
+history, and the sidebar lists them newest first.
+
+- **New conversation** — the button under the sidebar mints a chat id and routes to `/chat/<chatId>`.
+  The old conversation keeps running and stays one click away; its turns are not touched.
+- **Switching** — selecting another conversation reconnects the socket to that chat, so a turn left
+  behind finishes server-side and rejoins when you come back (up to the 2048-event replay buffer).
+- **Rename / archive** — the row menu renames a conversation (the title also shows in the header) or
+  archives it. Archiving only hides it; the history file stays on disk.
+- **Model chip** — the chip next to the workspace pins a `provider/model` to the current
+  conversation (`PATCH /api/sessions/{chat_id}`). The pin applies from the next turn on and each
+  finished turn is labelled with the model that actually answered. `Default model` drops the pin.
+- **Plan mode** — the `Plan mode` button in the composer arms the next turn for planning only: the
+  agent may read, and every write is refused by the runtime, so nothing on disk changes. The turn
+  ends with a plan card listing the steps. **Approve and run** executes that plan as a normal turn;
+  **Cancel** drops it. A pending plan survives a reload and is shown again when the window reopens.
+
 ### Development build
 
 1. The window loads `devUrl` directly (Vite, `http://localhost:3000`), then bootstraps the daemon over IPC like the packaged app.

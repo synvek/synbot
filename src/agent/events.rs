@@ -109,7 +109,14 @@ pub struct SubagentInfo {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentEvent {
     /// A new turn started (one user message → one final answer, possibly with tool calls).
-    TurnStarted { turn_id: String, agent_id: String },
+    TurnStarted {
+        turn_id: String,
+        agent_id: String,
+        /// `provider/model` when this turn used something other than the configured default.
+        /// Absent for default turns so single-model consoles stay free of labels.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
+    },
     /// Incremental assistant text. Concatenate in order to get the message body.
     MessageDelta { turn_id: String, delta: String },
     /// Incremental reasoning/thinking text (providers that expose it).
@@ -135,6 +142,15 @@ pub enum AgentEvent {
         turn_id: String,
         steps: Vec<PlanStep>,
     },
+    /// A plan-mode turn ended with a plan that needs the operator's approval before it runs.
+    PlanProposed {
+        plan_id: String,
+        /// The agent's own summary of the plan (its last message, trimmed).
+        summary: String,
+        steps: Vec<PlanStep>,
+    },
+    /// A pending plan was dropped without executing anything.
+    PlanCancelled { plan_id: String },
     /// A tool call needs human approval before it can proceed.
     ApprovalRequested {
         turn_id: String,

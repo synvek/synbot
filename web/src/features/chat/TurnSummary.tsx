@@ -1,3 +1,4 @@
+import { Cpu } from 'lucide-react'
 import { useI18n } from '../../i18n/I18nContext'
 import { Badge } from '../../ui'
 import { FAILED_TURN_REASONS, WARNING_TURN_REASONS, formatDuration } from './format'
@@ -7,6 +8,8 @@ interface TurnSummaryProps {
   totalTokens?: number
   reason?: string
   files: { path: string; kind: string }[]
+  /** `provider/model` when the turn did not run on the configured default. */
+  model?: string
   turnId?: string
   onOpenFile: (turnId: string, path: string) => void
 }
@@ -20,6 +23,7 @@ export function TurnSummary({
   totalTokens,
   reason,
   files,
+  model,
   turnId,
   onOpenFile,
 }: TurnSummaryProps) {
@@ -39,6 +43,15 @@ export function TurnSummary({
           <span>{t('chat.tokens', { total: totalTokens.toLocaleString() })}</span>
         )}
         {files.length > 0 && <span>{t('chat.filesChanged', { count: files.length })}</span>}
+        {model && (
+          <span
+            className="inline-flex max-w-[220px] items-center gap-1 text-ink-3"
+            title={t('chat.turnModelHint', '本轮使用的模型')}
+          >
+            <Cpu className="h-3 w-3 shrink-0" aria-hidden="true" />
+            <span className="truncate">{model}</span>
+          </span>
+        )}
         {outcome && (
           <Badge tone={failed ? 'danger' : warning ? 'warning' : 'neutral'}>{outcome}</Badge>
         )}

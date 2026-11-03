@@ -274,16 +274,43 @@ pub struct Config {
 ### 会话结构
 
 ```rust
-pub struct Session {
-    pub id: SessionId,
-    pub channel: String,
-    pub user_id: String,
-    pub context: Context,
-    pub memory: Memory,
+pub struct SessionMeta {
+    pub id: SessionId,                        // agent:<agent>:<channel>:<scope>:<chat_id>
+    pub participants: Vec<String>,            // 该对话中出现过的发送者 id
     pub created_at: DateTime<Utc>,
-    pub last_activity: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    #[serde(default)] pub title: Option<String>,                 // 缺省时由首条用户消息生成
+    #[serde(default)] pub archived: bool,                        // 从列表隐藏，仍可读取
+    #[serde(default)] pub model_override: Option<ModelOverride>, // { provider, model }
+    #[serde(default)] pub plan_mode: bool,                       // 下一轮只读，结束时给出计划
+    #[serde(default)] pub pending_plan: Option<PendingPlan>,     // { id, summary, steps, created_at }
 }
 ```
+
+#### 键位：发送者与 `chat_id`
+
+会话以 `chat_id` 为键，而不是发送者。`user_id` 仍随每条 `InboundMessage` 传递（审批与审计需要知道是谁在操作），
+但历史、事件、重放、审批路由与项目绑定都统一按 `agent:<agent>:<channel>:<scope>:<chat_id>` 解析：
+
+| 关注点 | 键 |
+|--------|----|
+| 会话文件、历史、`SessionMeta` | `chat_id` |
+| 事件总线（`seq`、重放、`/ws/agent`） | `channel:chat_id` |
+| 审批请求 / 响应 | `channel:chat_id` |
+| 工作区绑定（`select_project`） | `chat_id` |
+| 凭证、审计记录 | `user_id` |
+
+需要记住的推论：
+
+- 控制台为每个对话生成一个 chat id（`POST /api/sessions` → `w-<12 位 hex>`），并以
+  `/ws/agent?chat_id=…` 连接；切换对话是**重连**而不是多路复用。
+- IM 渠道保持原有解析（私聊中 `telegram:12345` 既是发送者也是 chat），行为不变。
+- 首版之后新增的字段全部 `#[serde(default)]`：旧会话文件可直接读取，本版写出的文件也能被旧版本读取
+  （未知字段被忽略）。
+- `model_override` 是按对话的模型钉住，每轮解析（`chat.model` 只覆盖该轮）；模型实例懒构建并缓存，
+  钉住的 provider 不可用时回落默认模型，而不是让回合失败。
+- `plan_mode` 按对话通过 WebSocket 开启，一旦给出计划就由守护进程清除；`pending_plan` 既是控制台渲染的
+  确认卡片，也是 `plan_decision` 的消费对象——批准会把计划变成一条显式用户指令执行，取消则直接丢弃。
 
 ### 工具结构
 

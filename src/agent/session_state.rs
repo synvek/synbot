@@ -123,25 +123,7 @@ impl SharedSessionState {
             history.push(Message::user(content));
         }
         let messages = session_messages.lock().await.clone();
-        let now = chrono::Utc::now();
-        let meta = if let Ok(sid) = SessionId::parse(session_key) {
-            {
-                let mut sm = self.session_manager.write().await;
-                let session_messages_sm: Vec<SessionMessage> =
-                    messages.iter().map(SessionMessage::from_message).collect();
-                let history = sm.get_or_create(&sid);
-                history.clear();
-                history.extend(session_messages_sm);
-            }
-            Some(SessionMeta {
-                id: sid,
-                participants: vec![],
-                created_at: now,
-                updated_at: now,
-            })
-        } else {
-            None
-        };
+        let meta = self.session_meta_for_persist(session_key, &messages).await;
         if let Err(e) = self
             .session_store
             .save_session(session_key, &messages, meta.as_ref())
@@ -169,25 +151,7 @@ impl SharedSessionState {
             history.push(Message::assistant(content));
         }
         let messages = session_messages.lock().await.clone();
-        let now = chrono::Utc::now();
-        let meta = if let Ok(sid) = SessionId::parse(session_key) {
-            {
-                let mut sm = self.session_manager.write().await;
-                let session_messages_sm: Vec<SessionMessage> =
-                    messages.iter().map(SessionMessage::from_message).collect();
-                let history = sm.get_or_create(&sid);
-                history.clear();
-                history.extend(session_messages_sm);
-            }
-            Some(SessionMeta {
-                id: sid,
-                participants: vec![],
-                created_at: now,
-                updated_at: now,
-            })
-        } else {
-            None
-        };
+        let meta = self.session_meta_for_persist(session_key, &messages).await;
         if let Err(e) = self
             .session_store
             .save_session(session_key, &messages, meta.as_ref())
@@ -200,6 +164,39 @@ impl SharedSessionState {
             );
         }
         Ok(())
+    }
+
+    /// Sync `messages` into the manager and return the session's **existing** metadata.
+    ///
+    /// Every append used to rebuild `SessionMeta` from scratch, which silently dropped a rename,
+    /// an archive flag or a model override on the next message. Reading the meta back keeps
+    /// console-side settings stable across ordinary conversation traffic, and lets the first user
+    /// message name the conversation.
+    async fn session_meta_for_persist(
+        &self,
+        session_key: &str,
+        messages: &[Message],
+    ) -> Option<SessionMeta> {
+        let sid = SessionId::parse(session_key).ok()?;
+        let mut sm = self.session_manager.write().await;
+        {
+            let history = sm.get_or_create(&sid);
+            history.clear();
+            history.extend(messages.iter().map(SessionMessage::from_message));
+        }
+        let derived = if sm.get_meta(&sid).map(|m| m.title.is_none()).unwrap_or(true) {
+            sm.get_history(&sid)
+                .and_then(|history| history.iter().find(|m| m.role == "user"))
+                .map(|m| crate::agent::session_manager::derive_title(&m.content))
+        } else {
+            None
+        };
+        let meta = sm.meta_mut(&sid);
+        meta.updated_at = chrono::Utc::now();
+        if meta.title.is_none() {
+            meta.title = derived;
+        }
+        Some(meta.clone())
     }
 
     /// Clear a session: remove from in-memory map, from SessionManager, and delete

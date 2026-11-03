@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, Square } from 'lucide-react'
+import { ArrowUp, ListChecks, Square } from 'lucide-react'
 import { useI18n } from '../../i18n/I18nContext'
 import { Button } from '../../ui'
 import type { CommandInfo } from '../../types/api'
@@ -9,6 +9,9 @@ interface ComposerProps {
   running: boolean
   /** Workspace slash commands, rescanned when the project changes. */
   commands: CommandInfo[]
+  /** The next turn plans before it writes. */
+  planMode: boolean
+  onTogglePlanMode: (enabled: boolean) => void
   onSend: (text: string) => void
   onStop: () => void
 }
@@ -21,7 +24,15 @@ const MAX_HEIGHT = 168
  * starts. Enter sends, Shift+Enter breaks the line, and a leading "/" turns the field into a
  * command picker without leaving the keyboard.
  */
-export function Composer({ connected, running, commands, onSend, onStop }: ComposerProps) {
+export function Composer({
+  connected,
+  running,
+  commands,
+  planMode,
+  onTogglePlanMode,
+  onSend,
+  onStop,
+}: ComposerProps) {
   const { t } = useI18n()
   const [value, setValue] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
@@ -139,11 +150,32 @@ export function Composer({ connected, running, commands, onSend, onStop }: Compo
               value={value}
               onChange={(event) => setValue(event.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={connected ? t('chat.typeMessage', 'Message') : t('chat.waitingConnection')}
+              placeholder={
+                connected
+                  ? planMode
+                    ? t('chat.planModePlaceholder', '描述任务，我会先给出计划供你确认')
+                    : t('chat.typeMessage', 'Message')
+                  : t('chat.waitingConnection')
+              }
               disabled={!connected}
               className="block max-h-[168px] w-full resize-none bg-transparent px-3 py-2 text-body text-ink placeholder:text-ink-3 focus:outline-none disabled:cursor-not-allowed"
             />
             <div className="flex items-center gap-2 px-2 pb-2">
+              <button
+                type="button"
+                aria-pressed={planMode}
+                disabled={!connected}
+                onClick={() => onTogglePlanMode(!planMode)}
+                title={t('chat.planModeHint', '开启后本轮只读：先给出计划，批准前不修改任何文件')}
+                className={`inline-flex shrink-0 items-center gap-1 rounded-pill border px-2 py-0.5 text-micro transition-colors duration-fast disabled:cursor-not-allowed disabled:opacity-60 ${
+                  planMode
+                    ? 'border-primary/20 bg-accent/10 text-accent'
+                    : 'border-line text-ink-3 hover:text-ink-2'
+                }`}
+              >
+                <ListChecks className="h-3 w-3" aria-hidden="true" />
+                {t('chat.planMode', '计划模式')}
+              </button>
               <span className="min-w-0 truncate text-micro text-ink-3">
                 {t('chat.composerHint', 'Enter to send · Shift+Enter for a new line · / for commands')}
               </span>

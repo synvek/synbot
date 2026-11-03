@@ -2,15 +2,16 @@ import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { MessagesSquare, PanelLeft, PanelRight } from 'lucide-react'
 import { useI18n } from '../../i18n/I18nContext'
 import { IconButton, SegmentedControl, StatusDot } from '../../ui'
-import type { CommandInfo, Project } from '../../types/api'
+import type { CommandInfo, ModelOverride, Project } from '../../types/api'
 import type { ChatMessage } from '../../types/websocket'
-import type { ProjectInfo, SubagentInfo } from '../../types/agentEvents'
+import type { PendingPlan, ProjectInfo, SubagentInfo } from '../../types/agentEvents'
 import ProjectPanel from '../../components/ProjectPanel'
 import { useShell } from '../../components/app-shell/ShellContext'
 import { Composer } from './Composer'
 import { MessageStream } from './MessageStream'
 import { Inspector } from './Inspector'
 import { WorkspaceChip } from './WorkspaceChip'
+import { ModelChip } from './ModelChip'
 
 // xterm is ~340KB: load it only when the terminal tab is opened for the first time.
 const TerminalPanel = lazy(() => import('../../components/TerminalPanel'))
@@ -25,13 +26,24 @@ interface ChatSurfaceProps {
   project: ProjectInfo | null
   /** Registered folders, for the workspace chip in the header. */
   projects: Project[]
+  /** Model pinned to this conversation, for the chip next to the workspace. */
+  model: ModelOverride | null
+  /** Plan-mode proposal waiting for a decision (`null` when none). */
+  pendingPlan: PendingPlan | null
+  /** The plan was approved and its turn is starting. */
+  planApproved: boolean
+  /** The next turn plans before it writes. */
+  planMode: boolean
   planVersion: number
   subagents: SubagentInfo[]
   commands: CommandInfo[]
   onSend: (text: string) => void
   onStop: () => void
   onApprove: (requestId: string, approved: boolean) => void
+  onDecidePlan: (approve: boolean) => void
+  onTogglePlanMode: (enabled: boolean) => void
   onSelectProject: (projectId: string | null) => void
+  onSelectModel: (model: ModelOverride | null) => void
   onCloseProject: () => void
 }
 
@@ -47,13 +59,20 @@ export function ChatSurface({
   messages,
   project,
   projects,
+  model,
+  pendingPlan,
+  planApproved,
+  planMode,
   planVersion,
   subagents,
   commands,
   onSend,
   onStop,
   onApprove,
+  onDecidePlan,
+  onTogglePlanMode,
   onSelectProject,
+  onSelectModel,
   onCloseProject,
 }: ChatSurfaceProps) {
   const { t } = useI18n()
@@ -147,6 +166,7 @@ export function ChatSurface({
                 {runningTeammates}
               </span>
             )}
+            <ModelChip value={model} running={running} onChange={onSelectModel} />
             <WorkspaceChip
               project={project}
               projects={projects}
@@ -184,14 +204,19 @@ export function ChatSurface({
             messages={messages}
             connected={connected}
             hasProject={!!project}
+            pendingPlan={pendingPlan}
+            planApproved={planApproved}
             onApprove={(requestId) => onApprove(requestId, true)}
             onReject={(requestId) => onApprove(requestId, false)}
+            onDecidePlan={onDecidePlan}
             onOpenFile={openFile}
           />
           <Composer
             connected={connected}
             running={running}
             commands={commands}
+            planMode={planMode}
+            onTogglePlanMode={onTogglePlanMode}
             onSend={onSend}
             onStop={onStop}
           />

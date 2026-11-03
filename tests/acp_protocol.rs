@@ -262,7 +262,12 @@ async fn permission_request_round_trip_approves_command() {
     assert_eq!(requests[0].options.len(), 2);
 
     let texts = chunk_texts(&updates.lock().unwrap());
-    assert_eq!(texts, vec!["approved".to_string()]);
+    // Answering a card broadcasts a receipt for every other surface that may still be waiting on
+    // it; ACP renders that as a notice first, and the turn's own answer follows.
+    assert!(texts
+        .iter()
+        .any(|text| text.starts_with("approved elsewhere (acp)")));
+    assert_eq!(texts.last().map(String::as_str), Some("approved"));
 
     agent_task.abort();
     harness.loop_task.abort();

@@ -1,12 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter, useLocation } from 'react-router-dom'
 import { I18nProvider } from '../../i18n/I18nContext'
 import type { ChatMessage } from '../../types/websocket'
 import { ChatSessionProvider, useChatSession } from './ChatSessionContext'
 
 /**
- * The socket is mocked, not exercised: this suite pins the one behaviour the shell depends on —
- * 「新对话」 goes through `/clear` on the daemon and then drops the local transcript.
+ * The socket is mocked, not exercised: this suite pins the shell contract around conversations —
+ * 「新对话」 mints a session and routes to it, a route id selects that chat, and archiving the open
+ * one falls back to the next conversation instead of leaving a dangling transcript.
  */
 const socket = {
   connected: true,
@@ -18,17 +20,53 @@ const socket = {
   resetMessages: vi.fn(),
   project: null,
   planVersion: 0,
+  pendingPlan: null,
+  planApproved: false,
+  setPlanMode: vi.fn(),
+  sendPlanDecision: vi.fn(),
   subagents: [],
   selectProject: vi.fn(),
 }
 
+const sockets: Array<{ url: string }> = []
+
 vi.mock('../../hooks/useAgentSocket', () => ({
-  useAgentSocket: () => socket,
+  useAgentSocket: (options: { url: string }) => {
+    sockets.push({ url: options.url })
+    return socket
+  },
 }))
+
+const session = (chatId: string, title: string | null = null) => ({
+  id: `agent:main:web:dm:${chatId}`,
+  chat_id: chatId,
+  channel: 'web',
+  scope: 'dm',
+  identifier: chatId,
+  title,
+  archived: false,
+  pending_plan_id: null,
+  plan_mode: false,
+  model_override: null,
+  message_count: 2,
+  created_at: '2026-01-01T00:00:00Z',
+  updated_at: '2026-01-01T00:00:00Z',
+})
+
+const api = {
+  getSessions: vi.fn(),
+  createSession: vi.fn(),
+  patchSession: vi.fn(),
+  archiveSession: vi.fn(),
+}
 
 vi.mock('../../api', () => ({
   apiClient: {
-    wsUrl: () => 'ws://test/ws/agent',
+    wsUrl: (path: string) => `ws://test${path}`,
+    getSessions: (...args: unknown[]) => api.getSessions(...args),
+    createSession: (...args: unknown[]) => api.createSession(...args),
+    patchSession: (...args: unknown[]) => api.patchSession(...args),
+    archiveSession: (...args: unknown[]) => api.archiveSession(...args),
     getProjects: vi.fn(async () => []),
     getCommands: vi.fn(async () => []),
     openProject: vi.fn(),
@@ -42,76 +80,155 @@ vi.mock('../../desktop/bridge', () => ({
 }))
 
 function Probe() {
-  const { newConversation } = useChatSession()
+  const { newConversation, activeChatId, sessions, archiveSession, decidePlan, planMode } =
+    useChatSession()
+  const location = useLocation()
   return (
-    <button type="button" onClick={newConversation}>
-      new
-    </button>
+    <div>
+      <button type="button" onClick={newConversation}>
+        new
+      </button>
+      <button type="button" onClick={() => void archiveSession(activeChatId ?? '')}>
+        archive
+      </button>
+      <button type="button" onClick={() => decidePlan(true)}>
+        approve plan
+      </button>
+      <output data-testid="path">{location.pathname}</output>
+      <output data-testid="chat">{activeChatId ?? ''}</output>
+      <output data-testid="planMode">{planMode ? 'on' : 'off'}</output>
+      <output data-testid="titles">{sessions.map((item) => item.title).join('|')}</output>
+    </div>
   )
 }
 
-const message = (id: string, role: 'user' | 'assistant', content: string): ChatMessage => ({
-  id,
-  role,
-  content,
-  timestamp: '2026-01-01T00:00:00Z',
-})
-
-const renderProvider = async () => {
+const renderProvider = async (initialPath = '/chat') => {
   render(
-    <I18nProvider>
-      <ChatSessionProvider>
-        <Probe />
-      </ChatSessionProvider>
-    </I18nProvider>
+    <MemoryRouter initialEntries={[initialPath]}>
+      <I18nProvider>
+        <ChatSessionProvider>
+          <Probe />
+        </ChatSessionProvider>
+      </I18nProvider>
+    </MemoryRouter>
   )
-  // Let the provider's project/command fetches settle inside act, so the suite stays quiet.
+  // Let the provider's project/session fetches settle inside act, so the suite stays quiet.
   await act(async () => {})
 }
-
-const start = () => fireEvent.click(screen.getByRole('button', { name: 'new' }))
 
 describe('ChatSessionContext', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
+    sockets.length = 0
     socket.messages = []
     socket.send.mockClear()
     socket.resetMessages.mockClear()
+    socket.sendPlanDecision.mockClear()
+    api.getSessions.mockReset()
+    api.createSession.mockReset()
+    api.patchSession.mockReset()
+    api.archiveSession.mockReset()
+    api.getSessions.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 })
     vi.spyOn(window, 'confirm').mockReturnValue(true)
   })
 
-  it('clears the daemon session before dropping the local transcript', async () => {
-    socket.messages = [message('1', 'user', 'hello'), message('2', 'assistant', 'hi')]
+  it('routes an id-less /chat to the most recent conversation', async () => {
+    api.getSessions.mockResolvedValue({
+      items: [session('w-aaaaaaaaaaaa', 'Latest'), session('w-bbbbbbbbbbbb', 'Older')],
+      total: 2,
+      page: 1,
+      page_size: 20,
+    })
     await renderProvider()
 
-    start()
+    await waitFor(() =>
+      expect(screen.getByTestId('path').textContent).toBe('/chat/w-aaaaaaaaaaaa')
+    )
+    expect(screen.getByTestId('chat').textContent).toBe('w-aaaaaaaaaaaa')
+  })
 
-    await waitFor(() => expect(socket.send).toHaveBeenCalledWith('/clear'))
-    expect(socket.resetMessages).toHaveBeenCalledTimes(1)
-    expect(socket.send.mock.invocationCallOrder[0]).toBeLessThan(
-      socket.resetMessages.mock.invocationCallOrder[0]
+  it('binds the socket to the conversation in the route', async () => {
+    api.getSessions.mockResolvedValue({
+      items: [session('w-cccccccccccc')],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    })
+    await renderProvider('/chat/w-cccccccccccc')
+
+    const last = sockets[sockets.length - 1]
+    expect(last.url).toBe('ws://test/ws/agent?chat_id=w-cccccccccccc')
+  })
+
+  it('mints a new conversation instead of clearing the current one', async () => {
+    socket.messages = [
+      { id: '1', role: 'user', content: 'hello', timestamp: '2026-01-01T00:00:00Z' },
+    ]
+    api.createSession.mockResolvedValue({ chat_id: 'w-dddddddddddd', session_id: 'agent:x' })
+    await renderProvider('/chat/w-cccccccccccc')
+
+    fireEvent.click(screen.getByRole('button', { name: 'new' }))
+
+    await waitFor(() => expect(api.createSession).toHaveBeenCalledTimes(1))
+    expect(socket.send).not.toHaveBeenCalled()
+    await waitFor(() =>
+      expect(screen.getByTestId('path').textContent).toBe('/chat/w-dddddddddddd')
     )
   })
 
-  it('asks before discarding a transcript, and does nothing when declined', async () => {
-    socket.messages = [message('1', 'user', 'hello')]
+  it('asks before starting over and does nothing when declined', async () => {
+    socket.messages = [
+      { id: '1', role: 'user', content: 'hello', timestamp: '2026-01-01T00:00:00Z' },
+    ]
     vi.spyOn(window, 'confirm').mockReturnValue(false)
-    await renderProvider()
+    await renderProvider('/chat/w-cccccccccccc')
 
-    start()
+    fireEvent.click(screen.getByRole('button', { name: 'new' }))
 
     expect(window.confirm).toHaveBeenCalledTimes(1)
-    expect(socket.send).not.toHaveBeenCalled()
-    expect(socket.resetMessages).not.toHaveBeenCalled()
+    expect(api.createSession).not.toHaveBeenCalled()
   })
 
-  it('starts over without a prompt when the conversation is already empty', async () => {
-    await renderProvider()
+  it('leaves the archived conversation for the next one still listed', async () => {
+    const open = session('w-aaaaaaaaaaaa', 'Open')
+    api.getSessions.mockResolvedValue({
+      items: [open, session('w-bbbbbbbbbbbb', 'Later')],
+      total: 2,
+      page: 1,
+      page_size: 20,
+    })
+    api.archiveSession.mockResolvedValue(undefined)
+    await renderProvider('/chat/w-aaaaaaaaaaaa')
 
-    start()
+    fireEvent.click(screen.getByRole('button', { name: 'archive' }))
 
-    await waitFor(() => expect(socket.send).toHaveBeenCalledWith('/clear'))
-    expect(window.confirm).not.toHaveBeenCalled()
-    expect(socket.resetMessages).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(api.archiveSession).toHaveBeenCalledWith('w-aaaaaaaaaaaa'))
+    await waitFor(() => expect(screen.getByTestId('path').textContent).toBe('/chat/w-bbbbbbbbbbbb'))
+  })
+
+  it('reflects plan mode from the conversation listing', async () => {
+    api.getSessions.mockResolvedValue({
+      items: [{ ...session('w-cccccccccccc'), plan_mode: true }],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    })
+    await renderProvider('/chat/w-cccccccccccc')
+
+    expect(screen.getByTestId('planMode').textContent).toBe('on')
+  })
+
+  it('forwards a plan decision to the bound socket', async () => {
+    api.getSessions.mockResolvedValue({
+      items: [session('w-cccccccccccc')],
+      total: 1,
+      page: 1,
+      page_size: 20,
+    })
+    await renderProvider('/chat/w-cccccccccccc')
+
+    fireEvent.click(screen.getByRole('button', { name: 'approve plan' }))
+
+    expect(socket.sendPlanDecision).toHaveBeenCalledWith(true)
   })
 })

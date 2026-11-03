@@ -3,9 +3,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useI18n } from '../../i18n/I18nContext'
 import { EmptyState } from '../../ui'
 import type { ChatMessage } from '../../types/websocket'
+import type { PendingPlan } from '../../types/agentEvents'
 import { ApprovalCard } from './ApprovalCard'
 import { AssistantTurn } from './AssistantTurn'
 import { NoticeRow } from './NoticeRow'
+import { PlanCard } from './PlanCard'
 import { ToolRow } from './ToolRow'
 import { TurnSummary } from './TurnSummary'
 import { UserTurn } from './UserTurn'
@@ -14,8 +16,13 @@ interface MessageStreamProps {
   messages: ChatMessage[]
   connected: boolean
   hasProject: boolean
+  /** Plan-mode proposal waiting for a decision (`null` when none). */
+  pendingPlan: PendingPlan | null
+  /** The plan was approved and its turn is starting. */
+  planApproved: boolean
   onApprove: (requestId: string) => void
   onReject: (requestId: string) => void
+  onDecidePlan: (approve: boolean) => void
   onOpenFile: (turnId: string, path: string) => void
 }
 
@@ -31,8 +38,11 @@ export function MessageStream({
   messages,
   connected,
   hasProject,
+  pendingPlan,
+  planApproved,
   onApprove,
   onReject,
+  onDecidePlan,
   onOpenFile,
 }: MessageStreamProps) {
   const { t } = useI18n()
@@ -51,7 +61,7 @@ export function MessageStream({
   useEffect(() => {
     const node = scrollRef.current
     if (node && stick.current) node.scrollTop = node.scrollHeight
-  }, [messages])
+  }, [messages, pendingPlan])
 
   const jumpToLatest = () => {
     const node = scrollRef.current
@@ -133,6 +143,7 @@ export function MessageStream({
                       totalTokens={message.turnTokens?.total}
                       reason={message.turnReason}
                       files={message.turnFiles ?? []}
+                      model={message.turnModel}
                       turnId={message.turnId}
                       onOpenFile={onOpenFile}
                     />
@@ -141,6 +152,9 @@ export function MessageStream({
                   return null
               }
             })
+          )}
+          {pendingPlan && (
+            <PlanCard plan={pendingPlan} approved={planApproved} onDecide={onDecidePlan} />
           )}
         </div>
       </div>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { MessagesSquare } from 'lucide-react'
 import { apiClient } from '../api/client'
 import type { SessionDetail, SessionSummary } from '../types/api'
@@ -8,6 +8,7 @@ import { formatDateTime, formatShortDateTime } from '../utils/datetime'
 import {
   Badge,
   Button,
+  Checkbox,
   DataTable,
   EmptyState,
   Field,
@@ -28,13 +29,21 @@ export default function Sessions() {
   const [error, setError] = useState<string | null>(null)
   const [channelFilter, setChannelFilter] = useState('')
   const [scopeFilter, setScopeFilter] = useState('')
+  const [showArchived, setShowArchived] = useState(false)
   const { t } = useI18n()
+  const navigate = useNavigate()
 
   useEffect(() => {
     let active = true
     setLoading(true)
     apiClient
-      .getSessions(undefined, undefined, channelFilter || undefined, scopeFilter || undefined)
+      .getSessions(
+        undefined,
+        undefined,
+        channelFilter || undefined,
+        scopeFilter || undefined,
+        showArchived
+      )
       .then((page) => {
         if (!active) return
         setSessions(page.items)
@@ -50,7 +59,7 @@ export default function Sessions() {
     return () => {
       active = false
     }
-  }, [channelFilter, scopeFilter, t])
+  }, [channelFilter, scopeFilter, showArchived, t])
 
   const openSession = useCallback(async (id: string) => {
     setSelectedId(id)
@@ -82,11 +91,14 @@ export default function Sessions() {
     {
       key: 'identifier',
       header: t('sessions.sessionList', 'Sessions'),
-      sortValue: (row) => row.identifier || '',
+      sortValue: (row) => row.title || row.identifier || '',
       render: (row) => (
         <div className="min-w-0">
-          <div className="truncate font-medium text-ink">
-            {row.identifier || t('sessions.anonymous', 'Anonymous')}
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate font-medium text-ink">
+              {row.title || row.identifier || t('sessions.anonymous', 'Anonymous')}
+            </span>
+            {row.archived && <Badge tone="neutral">{t('sessions.archived', 'Archived')}</Badge>}
           </div>
           <div className="truncate font-mono text-micro text-ink-3">{row.id}</div>
         </div>
@@ -162,6 +174,12 @@ export default function Sessions() {
             placeholder={t('sessions.filterByScope', 'Filter by scope')}
           />
         </Field>
+        <Checkbox
+          label={t('sessions.showArchived', 'Show archived')}
+          checked={showArchived}
+          onChange={(event) => setShowArchived(event.target.checked)}
+          className="pb-1.5"
+        />
       </div>
 
       {error && <div className="mb-3 rounded-panel border px-3 py-2 text-small tone-danger">{error}</div>}
@@ -199,23 +217,35 @@ export default function Sessions() {
               </p>
             ) : (
               <div className="rounded-panel border border-line">
-                <div className="border-b border-line px-4 py-3">
-                  <h2 className="text-section font-semibold text-ink">
-                    {detail.meta.identifier || t('sessions.anonymous', 'Anonymous')}
-                  </h2>
-                  <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-micro">
-                    {[
-                      [t('sessions.id', 'ID'), detail.meta.id],
-                      [t('sessions.channel', 'Channel'), detail.meta.channel],
-                      [t('sessions.scope', 'Scope'), detail.meta.scope || t('sessions.direct', 'Direct')],
-                      [t('sessions.created', 'Created'), formatDate(detail.meta.created_at)],
-                    ].map(([label, value]) => (
-                      <div key={label} className="flex min-w-0 flex-col gap-0.5">
-                        <dt className="text-ink-3">{label}</dt>
-                        <dd className="truncate font-mono text-ink-2">{value}</dd>
-                      </div>
-                    ))}
-                  </dl>
+                <div className="flex items-start justify-between gap-3 border-b border-line px-4 py-3">
+                  <div className="min-w-0">
+                    <h2 className="truncate text-section font-semibold text-ink">
+                      {detail.meta.identifier || t('sessions.anonymous', 'Anonymous')}
+                    </h2>
+                    <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-micro">
+                      {[
+                        [t('sessions.id', 'ID'), detail.meta.id],
+                        [t('sessions.channel', 'Channel'), detail.meta.channel],
+                        [t('sessions.scope', 'Scope'), detail.meta.scope || t('sessions.direct', 'Direct')],
+                        [t('sessions.created', 'Created'), formatDate(detail.meta.created_at)],
+                      ].map(([label, value]) => (
+                        <div key={label} className="flex min-w-0 flex-col gap-0.5">
+                          <dt className="text-ink-3">{label}</dt>
+                          <dd className="truncate font-mono text-ink-2">{value}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </div>
+                  {/* Console conversations are live workbenches: reopening one resumes it. */}
+                  {detail.meta.channel === 'web' && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => navigate(`/chat/${encodeURIComponent(detail.meta.identifier)}`)}
+                    >
+                      {t('sessions.openInChat', 'Open in chat')}
+                    </Button>
+                  )}
                 </div>
 
                 <div className="px-4 py-3">

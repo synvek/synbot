@@ -19,6 +19,19 @@ export interface PlanStep {
   status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
 }
 
+/**
+ * A plan from a plan-mode turn waiting for approval (`plan_proposed`, `plan` socket message). It
+ * is persisted with the session, so the card survives a reload the replay buffer no longer covers.
+ */
+export interface PendingPlan {
+  id: string;
+  /** The agent's own summary of the plan (its last message). */
+  summary: string;
+  steps: PlanStep[];
+  /** RFC 3339 timestamp. */
+  created_at: string;
+}
+
 /** A teammate (spawn / run_team / directive routing) as the team panel renders it. */
 export type SubagentState = 'running' | 'completed' | 'failed' | 'cancelled';
 
@@ -43,7 +56,7 @@ export interface ProjectInfo {
 }
 
 export type AgentEvent =
-  | { type: 'turn_started'; turn_id: string; agent_id: string }
+  | { type: 'turn_started'; turn_id: string; agent_id: string; model?: string }
   | { type: 'message_delta'; turn_id: string; delta: string }
   | { type: 'reasoning_delta'; turn_id: string; delta: string }
   | {
@@ -63,6 +76,9 @@ export type AgentEvent =
       duration_ms: number;
     }
   | { type: 'plan_updated'; turn_id: string; steps: PlanStep[] }
+  // A plan-mode turn ended with a plan that needs a decision before anything runs.
+  | { type: 'plan_proposed'; plan_id: string; summary: string; steps: PlanStep[] }
+  | { type: 'plan_cancelled'; plan_id: string }
   | { type: 'subagent_updated'; subagent: SubagentInfo }
   | { type: 'approval_requested'; turn_id: string; request: ApprovalRequest }
   | { type: 'file_changed'; turn_id: string; path: string; change_kind: string }
@@ -91,19 +107,25 @@ export interface SequencedEvent {
 
 export type AgentClientMessage =
   | { type: 'hello'; after_seq?: number }
-  | { type: 'chat'; content: string }
+  // `model` pins this turn only; the session-level pin lives in the session meta.
+  | { type: 'chat'; content: string; model?: { provider: string; model: string } }
   | { type: 'cancel' }
   | { type: 'select_project'; project_id: string | null }
   | { type: 'approval_response'; request_id: string; approved: boolean }
+  // Arm the next turn for planning only; the runtime blocks every write until a plan is approved.
+  | { type: 'plan_mode'; enabled: boolean }
+  | { type: 'plan_decision'; approve: boolean; plan_id?: string }
   | { type: 'ping' };
 
 export type AgentServerMessage =
   | { type: 'hello'; session_id: string; chat_id: string; last_seq: number }
-  | { type: 'history'; messages: HistoryMessage[] }
+  | { type: 'history'; chat_id: string; messages: HistoryMessage[] }
   | { type: 'replay'; events: SequencedEvent[] }
   | ({ type: 'event' } & SequencedEvent)
   | { type: 'approval_request'; request: ApprovalRequest }
   | { type: 'approval_result'; request_id: string; approved: boolean; message: string; responder?: string }
   | { type: 'project'; project: ProjectInfo | null }
+  // Sent on connect: the plan waiting for approval in this conversation (`null` when none).
+  | { type: 'plan'; plan: PendingPlan | null }
   | { type: 'pong' }
   | { type: 'error'; message: string };

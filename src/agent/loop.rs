@@ -87,6 +87,11 @@ pub struct AgentLoop {
     shared_config: Arc<RwLock<Config>>,
     /// Approval manager shared with the `exec` tool; `/pending`, `/approve`, `/reject` answer through it.
     approval_manager: Option<Arc<crate::tools::approval::ApprovalManager>>,
+    /// Models other than the configured default, built on first use and keyed by `provider/model`.
+    /// Cached so switching back and forth does not rebuild a provider client per turn.
+    model_registry: Arc<Mutex<HashMap<String, Arc<dyn SynbotCompletionModel>>>>,
+    /// Registry key of the configured default model, so a pin that resolves to it reuses `model`.
+    default_model_key: String,
 }
 
 impl AgentLoop {
@@ -114,6 +119,7 @@ impl AgentLoop {
         let tool_result_preview_chars = config.tool_result_preview_chars as usize;
         let workflow_store = WorkflowStore::new(config::workflows_root(config).as_path());
         let workflow_user_input_timeout_secs = config.workflow.user_input_timeout_secs;
+        let default_model_key = model_key(&config.main_agent.provider, &config.main_agent.model);
         Self {
             workspace,
             projects: Arc::new(RwLock::new(
@@ -138,6 +144,8 @@ impl AgentLoop {
             workflow_user_input_timeout_secs,
             shared_config,
             approval_manager: None,
+            model_registry: Arc::new(Mutex::new(HashMap::new())),
+            default_model_key,
         }
     }
 
@@ -167,6 +175,69 @@ impl AgentLoop {
     /// requests that the `exec` tool is waiting on (including ones forwarded from another chat).
     pub fn set_approval_manager(&mut self, manager: Arc<crate::tools::approval::ApprovalManager>) {
         self.approval_manager = Some(manager);
+    }
+
+    /// Resolve the model one turn should use: per-turn choice > the chat's pin > the configured
+    /// default.
+    ///
+    /// The second value is the `provider/model` label, present only when the turn does **not** use
+    /// the default — that is what the console tags the turn with. A pin that cannot be built
+    /// (unknown provider, missing key) logs and falls back to the default instead of failing the
+    /// turn: a stale console setting must not brick a conversation.
+    async fn resolve_model(
+        &self,
+        session_id: &crate::agent::session_id::SessionId,
+        per_turn: Option<crate::agent::session_manager::ModelOverride>,
+    ) -> (Arc<dyn SynbotCompletionModel>, Option<String>) {
+        let session_pin = if per_turn.is_none() {
+            let sm = self.session_state.session_manager.read().await;
+            sm.get_meta(session_id)
+                .and_then(|meta| meta.model_override.clone())
+        } else {
+            // A per-turn choice is exactly that: it must not read the session pin at all.
+            None
+        };
+        let Some(choice) = pick_model_choice(per_turn, session_pin) else {
+            return (Arc::clone(&self.model), None);
+        };
+        let key = model_key(&choice.provider, &choice.model);
+        if key == self.default_model_key {
+            return (Arc::clone(&self.model), None);
+        }
+        let cached = {
+            let registry = self.model_registry.lock().await;
+            registry.get(&key).cloned()
+        };
+        if let Some(model) = cached {
+            return (model, Some(key));
+        }
+        let (api_key, api_base) = {
+            let cfg = self.shared_config.read().await;
+            crate::config::resolve_provider(&cfg, &choice.provider)
+        };
+        match crate::rig_provider::build_completion_model(
+            &choice.provider,
+            &choice.model,
+            &api_key,
+            api_base.as_deref(),
+        ) {
+            Ok(model) => {
+                self.model_registry
+                    .lock()
+                    .await
+                    .insert(key.clone(), Arc::clone(&model));
+                (model, Some(key))
+            }
+            Err(e) => {
+                warn!(
+                    provider = %choice.provider,
+                    model = %choice.model,
+                    error = %e,
+                    "Conversation model unavailable; falling back to the default"
+                );
+                (Arc::clone(&self.model), None)
+            }
+        }
     }
 
     /// Filesystem root for one turn: the project bound to `chat_id`, else the agent workspace.
@@ -495,7 +566,7 @@ impl AgentLoop {
     /// Returns Ok(Some((handle, token, session_key))) when a workflow or agent run was started (so run() can track for /stop).
     async fn handle_message(
         &mut self,
-        msg: InboundMessage,
+        mut msg: InboundMessage,
         loop_ref: Arc<Mutex<AgentLoop>>,
     ) -> Result<Option<(tokio::task::JoinHandle<()>, CancellationToken, String)>> {
         let span = tracing::info_span!(
@@ -514,6 +585,29 @@ impl AgentLoop {
             if !trigger_agent {
                 self.save_message_only(&msg).await?;
                 return Ok(None);
+            }
+
+            // A plan decision is a console action, not chat text: cancelling drops the plan, and
+            // approving rewrites the message into the instruction that starts the real turn —
+            // same path (lock, persistence, turn tracking) as any other message.
+            if let Some(kind) = msg
+                .metadata
+                .get("plan_decision")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+            {
+                match self.apply_plan_decision(&msg, &kind).await? {
+                    PlanDecision::Approve(content) => {
+                        msg.content = content;
+                        // Drop the decision keys only: the rest of the metadata (group scope, …)
+                        // still has to apply to the turn that runs the plan.
+                        if let Some(map) = msg.metadata.as_object_mut() {
+                            map.remove("plan_decision");
+                            map.remove("plan_id");
+                        }
+                    }
+                    PlanDecision::Cancelled | PlanDecision::Ignored => return Ok(None),
+                }
             }
 
             let session_key = msg.session_key();
@@ -700,6 +794,94 @@ impl AgentLoop {
         }
         .instrument(span)
         .await
+    }
+
+    /// Answer the plan a plan-mode turn proposed.
+    ///
+    /// Cancelling persists the cleared plan and publishes `plan_cancelled`; approving hands back
+    /// the instruction text the caller turns into this turn's user message.
+    async fn apply_plan_decision(
+        &mut self,
+        msg: &InboundMessage,
+        kind: &str,
+    ) -> Result<PlanDecision> {
+        let agent_id = self.default_agent_for_msg(msg);
+        let session_id = {
+            let sm = self.session_state.session_manager.write().await;
+            sm.resolve_session(&agent_id, &msg.channel, &msg.chat_id, &msg.metadata)
+        };
+        let requested_id = msg
+            .metadata
+            .get("plan_id")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+        let pending = {
+            let mut sm = self.session_state.session_manager.write().await;
+            let current_id = sm
+                .get_meta(&session_id)
+                .and_then(|meta| meta.pending_plan.as_ref().map(|plan| plan.id.clone()));
+            // A card left open in another tab must not decide a plan the user never saw.
+            if let (Some(requested), Some(current)) = (&requested_id, &current_id) {
+                if requested != current {
+                    drop(sm);
+                    self.reply_control(
+                        msg,
+                        format!(
+                            "[Plan] That decision was for plan {requested}, but the pending plan is {current}. Reload the conversation."
+                        ),
+                    )?;
+                    return Ok(PlanDecision::Ignored);
+                }
+            }
+            sm.set_plan_mode(&session_id, false);
+            sm.take_pending_plan(&session_id)
+        };
+        let Some(plan) = pending else {
+            self.reply_control(
+                msg,
+                "[Plan] Nothing to decide: no plan is waiting.".to_string(),
+            )?;
+            return Ok(PlanDecision::Ignored);
+        };
+        if kind != "approve" {
+            self.persist_meta_now(&session_id).await;
+            self.events.publish(
+                &msg.channel,
+                &msg.chat_id,
+                AgentEvent::PlanCancelled {
+                    plan_id: plan.id.clone(),
+                },
+            );
+            self.reply_control(
+                msg,
+                format!("[Plan] Plan {} cancelled; nothing was executed.", plan.id),
+            )?;
+            return Ok(PlanDecision::Cancelled);
+        }
+        Ok(PlanDecision::Approve(render_approved_plan(&plan)))
+    }
+
+    /// Write the manager's current meta + history to disk, for actions that run no turn
+    /// (plan decisions, plan-mode toggles).
+    async fn persist_meta_now(&self, session_id: &crate::agent::session_id::SessionId) {
+        let session_key = session_id.format();
+        let (meta, messages) = {
+            let sm = self.session_state.session_manager.read().await;
+            (
+                sm.get_meta(session_id).cloned(),
+                sm.get_history(session_id).cloned().unwrap_or_default(),
+            )
+        };
+        let Some(meta) = meta else { return };
+        let history: Vec<Message> = messages.iter().map(|m| m.to_message()).collect();
+        if let Err(e) = self
+            .session_state
+            .session_store
+            .save_session(&session_key, &history, Some(&meta))
+            .await
+        {
+            warn!(session_key = %session_key, error = %e, "Failed to persist session metadata");
+        }
     }
 
     /// Returns Some((handle, token, session_key)) when a workflow was started (caller can track for /stop).
@@ -1237,16 +1419,15 @@ impl AgentLoop {
         }
 
         let messages = session_messages.lock().await.clone();
-        let now = chrono::Utc::now();
-        let meta = crate::agent::session_manager::SessionMeta {
-            id: session_id.clone(),
-            participants: vec![
+        let meta = meta_for_persist(
+            &self.session_state,
+            &session_id,
+            vec![
                 format!("{}:{}", msg.channel, msg.sender_id),
                 format!("agent:{}", agent_id),
             ],
-            created_at: now,
-            updated_at: now,
-        };
+        )
+        .await;
         {
             let mut sm = self.session_state.session_manager.write().await;
             let session_messages_sm: Vec<crate::agent::session::SessionMessage> = messages
@@ -1402,9 +1583,28 @@ impl AgentLoop {
                 .await;
             }
             let max_chat_history_messages = agent_ctx.params.max_chat_history_messages;
+            // Read once: the flag may flip while this turn runs (another tab), and a turn must use
+            // the mode it started with.
+            let plan_mode = {
+                let sm = self.session_state.session_manager.read().await;
+                sm.get_meta(&session_id)
+                    .map(|meta| meta.plan_mode)
+                    .unwrap_or(false)
+            };
+            let workspace_for_plan = agent_workspace.clone();
+            // Per-turn choice from the console > this chat's pin > the configured default.
+            let per_turn_model = msg
+                .metadata
+                .get("model")
+                .cloned()
+                .and_then(|value| serde_json::from_value(value).ok());
+            let (turn_model, turn_model_label) =
+                self.resolve_model(&session_id, per_turn_model).await;
             let run_result = scope(tool_ctx, async {
                 run_completion_loop(
-                    &*self.model,
+                    &*turn_model,
+                    turn_model_label,
+                    plan_mode,
                     &system_prompt,
                     agent_ctx.params.max_tokens,
                     agent_ctx.params.temperature,
@@ -1459,16 +1659,42 @@ impl AgentLoop {
 
             // Persist session with metadata and sync to session_manager
             let messages = session_messages.lock().await.clone();
-            let now = chrono::Utc::now();
-            let meta = crate::agent::session_manager::SessionMeta {
-                id: session_id.clone(),
-                participants: vec![
+            // A plan-mode turn that produced a plan stops here: the plan is stored and the console
+            // asks for approval. The flag clears so the approved turn runs normally.
+            if plan_mode {
+                let steps = crate::tasks::TaskBoard::load(&workspace_for_plan).to_event_steps();
+                if !steps.is_empty() {
+                    let plan = crate::agent::session_manager::PendingPlan {
+                        id: format!("plan-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]),
+                        summary: last_assistant_summary(&messages),
+                        steps,
+                        created_at: chrono::Utc::now(),
+                    };
+                    {
+                        let mut sm = self.session_state.session_manager.write().await;
+                        sm.set_plan_mode(&session_id, false);
+                        sm.set_pending_plan(&session_id, Some(plan.clone()));
+                    }
+                    self.events.publish(
+                        &msg.channel,
+                        &msg.chat_id,
+                        AgentEvent::PlanProposed {
+                            plan_id: plan.id.clone(),
+                            summary: plan.summary.clone(),
+                            steps: plan.steps.clone(),
+                        },
+                    );
+                }
+            }
+            let meta = meta_for_persist(
+                &self.session_state,
+                &session_id,
+                vec![
                     format!("{}:{}", msg.channel, msg.sender_id),
                     format!("agent:{}", agent_id),
                 ],
-                created_at: now,
-                updated_at: now,
-            };
+            )
+            .await;
             {
                 let mut sm = self.session_state.session_manager.write().await;
                 let session_messages_sm: Vec<crate::agent::session::SessionMessage> = messages
@@ -1603,7 +1829,12 @@ impl AgentLoop {
                 sm.append(&session_id, user_msg);
             }
 
-            let model = Arc::clone(&self.model);
+            let per_turn_model = msg
+                .metadata
+                .get("model")
+                .cloned()
+                .and_then(|value| serde_json::from_value(value).ok());
+            let (model, model_label) = self.resolve_model(&session_id, per_turn_model).await;
             let tools = Arc::clone(&self.tools);
             let checkpoints = Arc::clone(&self.checkpoints);
             let session_state = self.session_state.clone();
@@ -1626,6 +1857,14 @@ impl AgentLoop {
             let tool_result_preview_chars = self.tool_result_preview_chars;
             let max_chat_history_messages = agent_ctx.params.max_chat_history_messages;
             let max_consecutive_tool_errors = agent_ctx.params.max_consecutive_tool_errors;
+            // Directive fan-out obeys the same read-only rule; only the console's own turn proposes
+            // the plan, so nothing is stored from here.
+            let plan_mode = {
+                let sm = self.session_state.session_manager.read().await;
+                sm.get_meta(&session_id)
+                    .map(|meta| meta.plan_mode)
+                    .unwrap_or(false)
+            };
             let max_idle_iterations = agent_ctx.params.max_idle_iterations;
             let max_tokens = agent_ctx.params.max_tokens;
             let temperature = agent_ctx.params.temperature;
@@ -1646,6 +1885,8 @@ impl AgentLoop {
                 let run_result = scope(tool_ctx, async move {
                     let it = run_completion_loop(
                         &*model,
+                        model_label.clone(),
+                        plan_mode,
                         &system_prompt,
                         max_tokens,
                         temperature,
@@ -1682,16 +1923,15 @@ impl AgentLoop {
 
                 // Persist session with metadata and sync to session_manager
                 session_state.clear_active(&sk).await;
-                let now = chrono::Utc::now();
-                let meta = crate::agent::session_manager::SessionMeta {
-                    id: sid.clone(),
-                    participants: vec![
+                let meta = meta_for_persist(
+                    &session_state,
+                    &sid,
+                    vec![
                         format!("{}:{}", channel_for_meta, sender_id),
                         format!("agent:{}", aid_for_meta),
                     ],
-                    created_at: now,
-                    updated_at: now,
-                };
+                )
+                .await;
                 {
                     let mut sm = session_state.session_manager.write().await;
                     let session_messages_sm: Vec<crate::agent::session::SessionMessage> = messages
@@ -1976,8 +2216,106 @@ pub(crate) fn fix_window_start_for_tool_results(history: &[Message], mut start: 
 // Standalone completion loop
 // ---------------------------------------------------------------------------
 
+/// Registry key for a `provider/model` pair.
+///
+/// Trimmed on both sides so a pin typed in the console (` openai / gpt-4o `) matches the same
+/// cached client the config default built.
+fn model_key(provider: &str, model: &str) -> String {
+    format!("{}/{}", provider.trim(), model.trim())
+}
+
+/// The model one turn should run on: a per-turn choice wins over the chat's own pin, and `None`
+/// means the configured default.
+fn pick_model_choice(
+    per_turn: Option<crate::agent::session_manager::ModelOverride>,
+    session: Option<crate::agent::session_manager::ModelOverride>,
+) -> Option<crate::agent::session_manager::ModelOverride> {
+    per_turn.or(session)
+}
+
+/// Extra system-prompt section for a plan-mode turn. The tool layer is what actually blocks writes;
+/// this only tells the model why its write tools will fail.
+const PLAN_MODE_INSTRUCTION: &str = "## Plan mode\n\nThis turn is a planning turn. \
+Investigate with read-only tools, then publish the complete plan with `plan_write` and stop. \
+Write tools are blocked by the runtime: do not try to modify files, run state-changing commands, \
+or spawn teammates. End with a short summary of the plan and wait for the user's approval.";
+
+/// Outcome of a console plan decision (the `plan_decision` metadata on an inbound message).
+enum PlanDecision {
+    /// Run this turn with the plan as the instruction.
+    Approve(String),
+    Cancelled,
+    /// Nothing to answer, or the decision was stale; the loop has already replied.
+    Ignored,
+}
+
+/// The user message an approved plan turns into: the turn (and the transcript) then says exactly
+/// what was approved, instead of a bare "ok".
+fn render_approved_plan(plan: &crate::agent::session_manager::PendingPlan) -> String {
+    let mut body = String::from("[Approved plan]\n");
+    if !plan.summary.trim().is_empty() {
+        body.push_str(plan.summary.trim());
+        body.push_str("\n\n");
+    }
+    for (index, step) in plan.steps.iter().enumerate() {
+        body.push_str(&format!("{}. {}\n", index + 1, step.title));
+    }
+    body.push_str("\nExecute this plan now, step by step, and keep the plan board updated.");
+    body
+}
+
+/// Last assistant text of a finished turn, used as the plan card's summary.
+fn last_assistant_summary(messages: &[Message]) -> String {
+    let text = messages
+        .iter()
+        .rev()
+        .find_map(|message| match message {
+            Message::Assistant { content, .. } => {
+                let text = content
+                    .iter()
+                    .filter_map(|part| match part {
+                        AssistantContent::Text(t) => Some(t.text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                (!text.trim().is_empty()).then_some(text)
+            }
+            _ => None,
+        })
+        .unwrap_or_default();
+    let mut summary = truncate_preview(text.trim(), 600);
+    if summary.is_empty() {
+        summary = "Plan proposed; approve it to start executing.".to_string();
+    }
+    summary
+}
+
+/// Metadata to persist after a turn wrote `messages`.
+///
+/// Every call site used to build `SessionMeta` from scratch, which silently erased the console's
+/// own fields — title, archive flag, model pin, plan state — on the next message. This refreshes
+/// the existing record instead and only seeds `participants` on the first turn.
+async fn meta_for_persist(
+    session_state: &SharedSessionState,
+    session_id: &crate::agent::session_id::SessionId,
+    participants: Vec<String>,
+) -> crate::agent::session_manager::SessionMeta {
+    let mut sm = session_state.session_manager.write().await;
+    let meta = sm.meta_mut(session_id);
+    if meta.participants.is_empty() {
+        meta.participants = participants;
+    }
+    meta.updated_at = chrono::Utc::now();
+    meta.clone()
+}
+
 async fn run_completion_loop(
     model: &dyn SynbotCompletionModel,
+    // `provider/model` when this turn is pinned to a non-default model (shown in the console).
+    model_label: Option<String>,
+    // Plan-first turn: read-only tools only, and the turn stops with a plan to approve.
+    plan_mode: bool,
     system_prompt: &str,
     max_tokens: u32,
     temperature: f32,
@@ -2015,6 +2353,12 @@ async fn run_completion_loop(
         }
     }
     let message_ctx = Some((channel, chat_id, sender_id, session_id));
+    // The tool layer enforces the rule; the prompt only explains why the writes will fail.
+    let system_prompt = if plan_mode {
+        format!("{system_prompt}\n\n{PLAN_MODE_INSTRUCTION}")
+    } else {
+        system_prompt.to_string()
+    };
     // One user message maps to one turn; the UI groups every event by this id.
     let turn_id = uuid::Uuid::new_v4().to_string();
     events.publish(
@@ -2023,6 +2367,7 @@ async fn run_completion_loop(
         AgentEvent::TurnStarted {
             turn_id: turn_id.clone(),
             agent_id: agent_id.to_string(),
+            model: model_label,
         },
     );
     // Rounds actually spent doing new work, and rounds that only repeated what the turn already
@@ -2140,7 +2485,7 @@ async fn run_completion_loop(
         let request = CompletionRequest {
             preamble: Some(match progress_note.as_deref() {
                 Some(note) => format!("{system_prompt}\n\n{note}"),
-                None => system_prompt.to_string(),
+                None => system_prompt.clone(),
             }),
             chat_history,
             tools: tool_defs.to_vec(),
@@ -2365,6 +2710,7 @@ async fn run_completion_loop(
             &turn_id,
             tool_result_preview_chars,
             &reused,
+            plan_mode,
         )
         .await;
 
@@ -2593,6 +2939,7 @@ async fn run_tool_calls(
     turn_id: &str,
     tool_result_preview_chars: usize,
     reused: &[Option<String>],
+    plan_mode: bool,
 ) -> Vec<ToolOutcome> {
     let mut outcomes: Vec<Option<ToolOutcome>> = calls.iter().map(|_| None).collect();
     let mut next = 0usize;
@@ -2616,6 +2963,7 @@ async fn run_tool_calls(
                     turn_id,
                     tool_result_preview_chars,
                     reused.get(next).and_then(|r| r.as_deref()),
+                    plan_mode,
                 )
                 .await,
             );
@@ -2641,6 +2989,7 @@ async fn run_tool_calls(
                         turn_id,
                         tool_result_preview_chars,
                         cached.as_deref(),
+                        plan_mode,
                     )
                     .await;
                     (i, outcome)
@@ -2676,6 +3025,7 @@ async fn execute_tool_call(
     turn_id: &str,
     tool_result_preview_chars: usize,
     reused: Option<&str>,
+    plan_mode: bool,
 ) -> ToolOutcome {
     let args = tc.function.arguments.clone();
     let args_str = serde_json::to_string(&args).unwrap_or_else(|_| "{}".to_string());
@@ -2706,11 +3056,21 @@ async fn execute_tool_call(
     let pending_snapshot = checkpoints
         .capture_before(turn_id, &tc.function.name, &tc.function.arguments)
         .await;
-    let result = match reused {
-        Some(previous) => Ok(format!(
-            "{previous}\n\n[unchanged: the same call was made earlier in this turn — reuse the result above instead of calling again]"
-        )),
-        None => tools.execute(&tc.function.name, args, message_ctx).await,
+    let result = if plan_mode
+        && tc.function.name != "plan_write"
+        && !tools.is_read_only(&tc.function.name)
+    {
+        Err(anyhow::anyhow!(
+            "blocked by plan mode: `{}` changes state. Investigate with read-only tools, publish the plan with plan_write, and stop for approval.",
+            tc.function.name
+        ))
+    } else {
+        match reused {
+            Some(previous) => Ok(format!(
+                "{previous}\n\n[unchanged: the same call was made earlier in this turn — reuse the result above instead of calling again]"
+            )),
+            None => tools.execute(&tc.function.name, args, message_ctx).await,
+        }
     };
     let duration_ms = started.elapsed().as_millis() as u64;
     let result_text = match &result {
@@ -3278,6 +3638,7 @@ mod parallel_tool_tests {
             "turn-1",
             2000,
             &[],
+            false,
         )
         .await
     }
@@ -3304,6 +3665,7 @@ mod parallel_tool_tests {
             "turn-2",
             2000,
             &[Some("read_a ok".to_string())],
+            false,
         )
         .await;
 
@@ -3410,6 +3772,46 @@ mod parallel_tool_tests {
         assert!(reg.is_read_only("read_a"));
         assert!(!reg.is_read_only("write_x"));
         assert!(!reg.is_read_only("plugin_tool_not_registered"));
+    }
+
+    /// Plan mode is enforced in the tool layer: reads pass, writes never start.
+    #[tokio::test]
+    async fn plan_mode_blocks_writes_and_lets_reads_run() {
+        let log = Arc::new(StdMutex::new(Vec::new()));
+        let reg = registry(&[("read_a", true, 0), ("write_x", false, 0)], &log);
+        let checkpoints = crate::checkpoint::CheckpointStore::new(
+            std::env::temp_dir().join("synbot-loop-test-checkpoints-plan"),
+        );
+
+        let outcomes = run_tool_calls(
+            &[call("1", "read_a"), call("2", "write_x")],
+            &reg,
+            Some(("web", "chat", "user", "sess")),
+            &checkpoints,
+            None,
+            &EventBus::new(),
+            "web",
+            "chat",
+            "sess",
+            "turn-plan",
+            2000,
+            &[],
+            true,
+        )
+        .await;
+
+        assert_eq!(outcomes[0].status, "success");
+        assert_eq!(outcomes[1].status, "failure");
+        assert!(
+            outcomes[1].result_text.contains("blocked by plan mode"),
+            "unexpected result: {}",
+            outcomes[1].result_text
+        );
+        assert_eq!(
+            *log.lock().unwrap(),
+            vec!["start:read_a", "end:read_a"],
+            "the write tool must never run in plan mode"
+        );
     }
 }
 
@@ -3550,6 +3952,8 @@ mod plan_event_tests {
                 "turn-9",
                 2000,
                 &[],
+                // plan_write stays allowed in plan mode: it is how the plan gets proposed.
+                true,
             )
             .await
         })
@@ -3646,5 +4050,75 @@ mod provider_error_parse_tests {
             msg,
             "Invalid max_tokens value, the valid range of max_tokens is [1, 65536]"
         );
+    }
+}
+
+#[cfg(test)]
+mod model_choice_tests {
+    use super::*;
+
+    fn pin(provider: &str, model: &str) -> crate::agent::session_manager::ModelOverride {
+        crate::agent::session_manager::ModelOverride {
+            provider: provider.to_string(),
+            model: model.to_string(),
+        }
+    }
+
+    #[test]
+    fn per_turn_choice_wins_over_the_session_pin() {
+        let chosen = pick_model_choice(
+            Some(pin("openai", "gpt-4o-mini")),
+            Some(pin("anthropic", "claude-3-5-sonnet")),
+        );
+        assert_eq!(chosen, Some(pin("openai", "gpt-4o-mini")));
+    }
+
+    #[test]
+    fn session_pin_is_used_when_the_turn_has_none() {
+        let chosen = pick_model_choice(None, Some(pin("anthropic", "claude-3-5-sonnet")));
+        assert_eq!(chosen, Some(pin("anthropic", "claude-3-5-sonnet")));
+    }
+
+    #[test]
+    fn no_pin_means_the_configured_default() {
+        assert!(pick_model_choice(None, None).is_none());
+    }
+
+    #[test]
+    fn keys_are_trimmed_so_console_input_matches_the_default_key() {
+        assert_eq!(
+            model_key(" openai ", " gpt-4o "),
+            model_key("openai", "gpt-4o")
+        );
+        assert_ne!(
+            model_key("openai", "gpt-4o"),
+            model_key("openai", "gpt-4o-mini")
+        );
+    }
+
+    #[test]
+    fn an_approved_plan_becomes_an_explicit_instruction() {
+        let plan = crate::agent::session_manager::PendingPlan {
+            id: "plan-1".to_string(),
+            summary: "Why this plan".to_string(),
+            steps: vec![
+                crate::agent::events::PlanStep {
+                    id: "1".to_string(),
+                    title: "read code".to_string(),
+                    status: crate::agent::events::PlanStepStatus::Pending,
+                },
+                crate::agent::events::PlanStep {
+                    id: "2".to_string(),
+                    title: "write tests".to_string(),
+                    status: crate::agent::events::PlanStepStatus::Pending,
+                },
+            ],
+            created_at: chrono::Utc::now(),
+        };
+
+        let text = render_approved_plan(&plan);
+        assert!(text.contains("Why this plan"), "{text}");
+        assert!(text.contains("1. read code"), "{text}");
+        assert!(text.contains("2. write tests"), "{text}");
     }
 }

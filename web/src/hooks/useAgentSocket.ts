@@ -3,6 +3,7 @@ import {
   AgentClientMessage,
   AgentEvent,
   AgentServerMessage,
+  PendingPlan,
   PlanStep,
   ProjectInfo,
   SequencedEvent,
@@ -30,9 +31,18 @@ interface UseAgentSocketReturn {
   planSteps: PlanStep[];
   /** Bumped on every `plan_updated`, so panels can refetch the persisted board. */
   planVersion: number;
+  /** Plan-mode turn's proposal, waiting for a decision (`null` when there is none). */
+  pendingPlan: PendingPlan | null;
+  /** The operator approved the plan; its turn has been sent but not started yet. */
+  planApproved: boolean;
+  /** Arm the next turn for planning only — writes are blocked until the plan is approved. */
+  setPlanMode: (enabled: boolean) => void;
+  /** Run or drop the pending plan. */
+  sendPlanDecision: (approve: boolean) => void;
   /** Teammates seen on this connection (oldest first); `/api/subagents` has the full snapshot. */
   subagents: SubagentInfo[];
-  send: (content: string) => void;
+  /** `model` pins this turn only; the session's own pin lives in its metadata. */
+  send: (content: string, model?: { provider: string; model: string } | null) => void;
   cancel: () => void;
   sendApprovalResponse: (requestId: string, approved: boolean) => void;
   /** Drop the local transcript without touching the connection (a new conversation). */
@@ -82,6 +92,8 @@ export function useAgentSocket({
   const [project, setProject] = useState<ProjectInfo | null>(null);
   const [planSteps, setPlanSteps] = useState<PlanStep[]>([]);
   const [planVersion, setPlanVersion] = useState(0);
+  const [pendingPlan, setPendingPlan] = useState<PendingPlan | null>(null);
+  const [planApproved, setPlanApproved] = useState(false);
   const [subagents, setSubagents] = useState<SubagentInfo[]>([]);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -100,6 +112,10 @@ export function useAgentSocket({
   const turnUsageRef = useRef({ prompt: 0, completion: 0, total: 0 });
   /** Files touched by the current turn, in first-touch order. */
   const changedFilesRef = useRef<{ path: string; kind: string }[]>([]);
+  /** `provider/model` the running turn resolved to, when it is not the configured default. */
+  const turnModelRef = useRef<string | null>(null);
+  /** Approved plan awaiting its `turn_started`; the card then leaves the stream. */
+  const planApprovedRef = useRef(false);
 
   const sendRaw = useCallback((message: AgentClientMessage) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return false;
@@ -160,6 +176,13 @@ export function useAgentSocket({
           turnStartedAtRef.current = Date.now();
           turnUsageRef.current = { prompt: 0, completion: 0, total: 0 };
           changedFilesRef.current = [];
+          turnModelRef.current = event.model ?? null;
+          // The approved plan is now the turn that runs it: the card has served its purpose.
+          if (planApprovedRef.current) {
+            planApprovedRef.current = false;
+            setPendingPlan(null);
+            setPlanApproved(false);
+          }
           setRunning(true);
           break;
 
@@ -294,8 +317,10 @@ export function useAgentSocket({
           const startedAt = turnStartedAtRef.current;
           const usage = turnUsageRef.current;
           const files = changedFilesRef.current;
+          const model = turnModelRef.current;
           turnStartedAtRef.current = null;
           changedFilesRef.current = [];
+          turnModelRef.current = null;
           setRunning(false);
           setMessages((prev) => {
             const next = prev.map((m) => (m.streaming ? { ...m, streaming: false } : m));
@@ -309,6 +334,7 @@ export function useAgentSocket({
                 turnDurationMs: startedAt === null ? undefined : Date.now() - startedAt,
                 turnTokens: usage.total > 0 ? { ...usage } : undefined,
                 turnReason: event.reason,
+                turnModel: model ?? undefined,
                 turnId: event.turn_id,
                 turnFiles: files.length > 0 ? [...files] : undefined,
               },
@@ -324,6 +350,24 @@ export function useAgentSocket({
           setPlanVersion((v) => v + 1);
           break;
         }
+
+        // A plan-mode turn ended: the write block is lifted only once the operator decides.
+        case 'plan_proposed':
+          planApprovedRef.current = false;
+          setPlanApproved(false);
+          setPendingPlan({
+            id: event.plan_id,
+            summary: event.summary,
+            steps: event.steps,
+            created_at: new Date().toISOString(),
+          });
+          break;
+
+        case 'plan_cancelled':
+          planApprovedRef.current = false;
+          setPlanApproved(false);
+          setPendingPlan(null);
+          break;
 
         // Teammates: upsert by id so the panel shows live progress without a refetch.
         case 'subagent_updated': {
@@ -385,6 +429,14 @@ export function useAgentSocket({
 
             case 'project':
               setProject(message.project);
+              break;
+
+            // Sent on connect: restores the plan card even when its `plan_proposed` event has
+            // already left the replay buffer.
+            case 'plan':
+              planApprovedRef.current = false;
+              setPlanApproved(false);
+              setPendingPlan(message.plan);
               break;
 
             case 'history':
@@ -477,8 +529,11 @@ export function useAgentSocket({
   }, [url, reconnectInterval, maxReconnectAttempts, requestReplay, applySequenced]);
 
   const send = useCallback(
-    (content: string) => {
-      if (!sendRaw({ type: 'chat', content })) {
+    (content: string, model?: { provider: string; model: string } | null) => {
+      const message: AgentClientMessage = model
+        ? { type: 'chat', content, model }
+        : { type: 'chat', content };
+      if (!sendRaw(message)) {
         console.error('Agent socket is not connected');
         return;
       }
@@ -519,6 +574,32 @@ export function useAgentSocket({
     [sendRaw]
   );
 
+  const setPlanMode = useCallback(
+    (enabled: boolean) => {
+      sendRaw({ type: 'plan_mode', enabled });
+    },
+    [sendRaw]
+  );
+
+  const sendPlanDecision = useCallback(
+    (approve: boolean) => {
+      const sent = sendRaw({ type: 'plan_decision', approve, plan_id: pendingPlan?.id });
+      if (!sent) return;
+      if (approve) {
+        // The decision starts a turn of its own; the card stays up (showing “running”) until
+        // `turn_started` arrives, which is when it is really executing.
+        planApprovedRef.current = true;
+        setPlanApproved(true);
+        setRunning(true);
+      } else {
+        planApprovedRef.current = false;
+        setPlanApproved(false);
+        setPendingPlan(null);
+      }
+    },
+    [pendingPlan?.id, sendRaw]
+  );
+
   const selectProject = useCallback(
     (projectId: string | null) => {
       sendRaw({ type: 'select_project', project_id: projectId });
@@ -527,6 +608,27 @@ export function useAgentSocket({
   );
 
   connectFnRef.current = connect;
+
+  // A different URL is a different conversation (`/ws/agent?chat_id=…`). Everything below is
+  // scoped to the old one — transcript, sequence cursor, in-flight turn — and would corrupt the
+  // new one if it survived: the first event would be applied to the previous history and the
+  // replay cursor would ask for a range the new chat never had.
+  useEffect(() => {
+    lastSeqRef.current = null;
+    activeAssistantRef.current = null;
+    turnStartedAtRef.current = null;
+    turnModelRef.current = null;
+    changedFilesRef.current = [];
+    setMessages([]);
+    setRunning(false);
+    setSessionId(null);
+    setProject(null);
+    setPlanSteps([]);
+    setPendingPlan(null);
+    planApprovedRef.current = false;
+    setPlanApproved(false);
+    setSubagents([]);
+  }, [url]);
 
   useEffect(() => {
     if (autoConnect) {
@@ -553,8 +655,9 @@ export function useAgentSocket({
         }
       }
     };
+    // `url` is a dependency on purpose: switching conversations must close the old socket.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoConnect]);
+  }, [autoConnect, url]);
 
   return {
     connected,
@@ -564,10 +667,14 @@ export function useAgentSocket({
     project,
     planSteps,
     planVersion,
+    pendingPlan,
+    planApproved,
     subagents,
     send,
     cancel,
     sendApprovalResponse,
+    setPlanMode,
+    sendPlanDecision,
     resetMessages,
     selectProject,
   };

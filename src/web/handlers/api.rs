@@ -174,9 +174,20 @@ pub struct PaginatedResponse<T> {
 #[derive(Serialize)]
 pub struct SessionSummary {
     pub id: String,
+    /// Conversation identifier on the `web` channel. The console routes by this, not by `id`.
+    pub chat_id: String,
     pub channel: String,
     pub scope: String,
     pub identifier: String,
+    /// Sidebar label; derived from the first user message when nobody renamed it.
+    pub title: Option<String>,
+    pub archived: bool,
+    /// Plan waiting for an approval decision (populated by plan mode).
+    pub pending_plan_id: Option<String>,
+    /// Plan-first mode is on: the next turn may only read, then stops with a plan.
+    pub plan_mode: bool,
+    /// Model pinned to this conversation; `null` means the configured default.
+    pub model_override: Option<crate::agent::session_manager::ModelOverride>,
     pub message_count: usize,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -191,6 +202,9 @@ pub struct SessionQuery {
     pub page_size: usize,
     pub channel: Option<String>,
     pub scope: Option<String>,
+    /// Archived conversations are hidden by default; the console asks for them on demand.
+    #[serde(default)]
+    pub include_archived: bool,
 }
 
 fn default_page() -> usize {
@@ -212,9 +226,12 @@ pub async fn get_sessions(
     let all_sessions = sm.get_all_sessions();
 
     // Convert to SessionSummary and apply filters
-    let filtered: Vec<SessionSummary> = all_sessions
+    let mut filtered: Vec<SessionSummary> = all_sessions
         .into_iter()
         .filter_map(|(meta, message_count)| {
+            if meta.archived && !query.include_archived {
+                return None;
+            }
             // Apply channel filter
             if let Some(ref channel) = query.channel {
                 if &meta.id.channel != channel {
@@ -254,16 +271,30 @@ pub async fn get_sessions(
             let identifier = meta.id.identifier.clone().unwrap_or_default();
 
             Some(SessionSummary {
+                chat_id: identifier.clone(),
                 id: meta.id.format(),
                 channel: meta.id.channel.clone(),
                 scope,
                 identifier,
+                title: meta.title.clone(),
+                archived: meta.archived,
+                pending_plan_id: meta.pending_plan.as_ref().map(|plan| plan.id.clone()),
+                plan_mode: meta.plan_mode,
+                model_override: meta.model_override.clone(),
                 message_count,
                 created_at: meta.created_at,
                 updated_at: meta.updated_at,
             })
         })
         .collect();
+
+    // Newest first: `get_all_sessions` walks a HashMap, so without an explicit order the sidebar
+    // would reshuffle between polls. Ties fall back to the id to stay deterministic.
+    filtered.sort_by(|a, b| {
+        b.updated_at
+            .cmp(&a.updated_at)
+            .then_with(|| a.id.cmp(&b.id))
+    });
 
     let total = filtered.len();
     let page = query.page.max(1);
@@ -369,6 +400,190 @@ pub async fn get_session_by_id(
     };
 
     Ok(HttpResponse::Ok().json(ApiResponse::success(detail)))
+}
+
+/// Session id for a console conversation. One conversation = one `web/dm/<chat_id>` session;
+/// roles inside it still get their own session keys and are merged by `load_history`.
+pub(crate) fn web_session_id(chat_id: &str) -> crate::agent::session_id::SessionId {
+    crate::agent::session_id::SessionId::full(
+        "main",
+        "web",
+        crate::agent::session_id::SessionScope::Dm,
+        chat_id,
+    )
+}
+
+/// Write the manager's current meta + history to disk.
+///
+/// The agent loop persists at the end of every turn; console operations (rename, archive, create)
+/// happen between turns, so they must persist themselves or a restart would lose them.
+/// `session_store` is `None` in tests and ACP-only instances, where in-memory state is enough.
+pub(crate) async fn persist_session_meta(
+    state: &AppState,
+    session_id: &crate::agent::session_id::SessionId,
+) -> Result<(), ApiError> {
+    let Some(store) = state.session_store.clone() else {
+        return Ok(());
+    };
+    let (meta, messages) = {
+        let sm = state.session_manager.read().await;
+        (
+            sm.get_meta(session_id).cloned(),
+            sm.get_history(session_id).cloned().unwrap_or_default(),
+        )
+    };
+    let Some(meta) = meta else {
+        return Ok(());
+    };
+    let history: Vec<rig::message::Message> = messages
+        .iter()
+        .map(|message| message.to_message())
+        .collect();
+    store
+        .save_session(&session_id.format(), &history, Some(&meta))
+        .await
+        .map_err(|e| ApiError::InternalError(format!("failed to persist session: {e:#}")))?;
+    Ok(())
+}
+
+#[derive(Deserialize, Default)]
+pub struct CreateSessionRequest {
+    #[serde(default)]
+    pub title: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct CreateSessionResponse {
+    pub chat_id: String,
+    pub session_id: String,
+}
+
+/// POST /api/sessions — create an empty console conversation.
+///
+/// The id is minted server-side so it is always well formed and never collides; the console
+/// navigates to it immediately, which is why the (empty) session is persisted right away.
+pub async fn create_session(
+    state: web::Data<AppState>,
+    body: Option<web::Json<CreateSessionRequest>>,
+) -> Result<HttpResponse> {
+    use crate::web::handlers::ws_agent::{is_valid_chat_id, new_chat_id};
+
+    let title = body.and_then(|body| body.into_inner().title);
+    let mut chat_id = new_chat_id();
+    for _ in 0..5 {
+        if !is_valid_chat_id(&chat_id) {
+            chat_id = new_chat_id();
+            continue;
+        }
+        let taken = state
+            .session_manager
+            .read()
+            .await
+            .get_meta(&web_session_id(&chat_id))
+            .is_some();
+        if !taken {
+            break;
+        }
+        chat_id = new_chat_id();
+    }
+    let session_id = web_session_id(&chat_id);
+    {
+        let mut sm = state.session_manager.write().await;
+        sm.get_or_create(&session_id);
+        if let Some(title) = title {
+            sm.set_title(&session_id, Some(title));
+        }
+    }
+    persist_session_meta(state.get_ref(), &session_id).await?;
+    Ok(
+        HttpResponse::Ok().json(ApiResponse::success(CreateSessionResponse {
+            chat_id,
+            session_id: session_id.format(),
+        })),
+    )
+}
+
+#[derive(Deserialize, Default)]
+pub struct PatchSessionRequest {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub archived: Option<bool>,
+    #[serde(default)]
+    pub model_override: Option<crate::agent::session_manager::ModelOverride>,
+    /// Explicitly drop the per-session model and fall back to the configured default.
+    #[serde(default)]
+    pub clear_model_override: Option<bool>,
+}
+
+/// PATCH /api/sessions/{chat_id} — rename, archive, or pin a model to one conversation.
+pub async fn patch_session(
+    state: web::Data<AppState>,
+    path: web::Path<String>,
+    body: web::Json<PatchSessionRequest>,
+) -> Result<HttpResponse> {
+    use crate::web::handlers::ws_agent::is_valid_chat_id;
+
+    let chat_id = path.into_inner();
+    if !is_valid_chat_id(&chat_id) {
+        return Err(ApiError::BadRequest(format!("invalid chat_id: {chat_id:?}")).into());
+    }
+    let session_id = web_session_id(&chat_id);
+    {
+        let mut sm = state.session_manager.write().await;
+        if sm.get_meta(&session_id).is_none() {
+            return Err(ApiError::NotFound(format!("session not found: {chat_id}")).into());
+        }
+        if let Some(title) = body.title.as_ref() {
+            sm.set_title(&session_id, Some(title.clone()));
+        }
+        if let Some(archived) = body.archived {
+            sm.set_archived(&session_id, archived);
+        }
+        if body.clear_model_override.unwrap_or(false) {
+            sm.set_model_override(&session_id, None);
+        } else if let Some(model) = body.model_override.clone() {
+            sm.set_model_override(&session_id, Some(model));
+        }
+    }
+    persist_session_meta(state.get_ref(), &session_id).await?;
+    Ok(
+        HttpResponse::Ok().json(ApiResponse::success(serde_json::json!({
+            "chat_id": chat_id,
+            "updated": true,
+        }))),
+    )
+}
+
+/// DELETE /api/sessions/{chat_id} — hide a conversation without deleting its history.
+///
+/// Archiving keeps the file readable (and restorable); a destructive delete would make one
+/// mis-click unrecoverable, so it is deliberately not offered.
+pub async fn delete_session(
+    state: web::Data<AppState>,
+    path: web::Path<String>,
+) -> Result<HttpResponse> {
+    use crate::web::handlers::ws_agent::is_valid_chat_id;
+
+    let chat_id = path.into_inner();
+    if !is_valid_chat_id(&chat_id) {
+        return Err(ApiError::BadRequest(format!("invalid chat_id: {chat_id:?}")).into());
+    }
+    let session_id = web_session_id(&chat_id);
+    {
+        let mut sm = state.session_manager.write().await;
+        if sm.get_meta(&session_id).is_none() {
+            return Err(ApiError::NotFound(format!("session not found: {chat_id}")).into());
+        }
+        sm.set_archived(&session_id, true);
+    }
+    persist_session_meta(state.get_ref(), &session_id).await?;
+    Ok(
+        HttpResponse::Ok().json(ApiResponse::success(serde_json::json!({
+            "chat_id": chat_id,
+            "archived": true,
+        }))),
+    )
 }
 
 /// Channel information for API responses.

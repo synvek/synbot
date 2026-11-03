@@ -52,13 +52,44 @@ export interface SystemStatus {
 
 // Session Types
 export interface SessionSummary {
+  /** Full session key (`agent:main:web:dm:<chat_id>`); the detail endpoint takes this. */
   id: string;
+  /** Conversation id on the `web` channel — the console routes by this. */
+  chat_id: string;
   channel: string;
   scope: string;
   identifier: string;
+  /** Sidebar label, derived from the first user message until someone renames it. */
+  title: string | null;
+  archived: boolean;
+  /** Plan waiting for a decision (plan mode); `null` when nothing is pending. */
+  pending_plan_id: string | null;
+  /** The next turn only plans; the runtime blocks its writes until the plan is approved. */
+  plan_mode: boolean;
+  /** Model pinned to this conversation; `null` means the configured default. */
+  model_override: ModelOverride | null;
   message_count: number;
   created_at: string;
   updated_at: string;
+}
+
+/** One conversation's model pin (`PATCH /api/sessions/{chat_id}`). */
+export interface ModelOverride {
+  provider: string;
+  model: string;
+}
+
+export interface CreateSessionResponse {
+  chat_id: string;
+  session_id: string;
+}
+
+export interface PatchSessionInput {
+  title?: string;
+  archived?: boolean;
+  model_override?: ModelOverride;
+  /** Drop the pin and fall back to the configured default model. */
+  clear_model_override?: boolean;
 }
 
 export interface SessionMessage {

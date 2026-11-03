@@ -462,6 +462,9 @@ pub async fn cmd_start() -> Result<()> {
         // The workbench team panel supervises the same pool the tools spawn into.
         web_state.subagents = std::sync::Arc::clone(&subagent_mgr);
         web_state.agent_loop = Some(loop_ref_for_web);
+        // Console session CRUD (rename / archive / create) persists through the same store the
+        // agent loop writes, so a restart keeps the sidebar exactly as it was.
+        web_state.session_store = Some(std::sync::Arc::clone(&shared_session_state.session_store));
 
         // Run web server in the main task (it will block until Ctrl+C)
         tokio::select! {

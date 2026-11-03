@@ -1,16 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
+  Archive,
   Check,
   Folder,
   FolderPlus,
   History,
   PanelLeftClose,
   PanelLeftOpen,
+  Pencil,
   Plus,
   Search,
 } from 'lucide-react'
-import { apiClient } from '../../api'
 import { isDesktop, pickFolder } from '../../desktop/bridge'
 import { useI18n } from '../../i18n/I18nContext'
 import { Button, IconButton, cn } from '../../ui'
@@ -27,8 +28,10 @@ import { useShell } from './ShellContext'
 const ROW =
   'flex h-7 w-full items-center gap-2 rounded-control px-2 text-small transition-colors duration-fast'
 
-/** How many recent web sessions the history column lists. */
-const HISTORY_LIMIT = 8
+/** Sidebar label of a conversation: its title, or when it has none its last activity. */
+function sessionLabel(item: SessionSummary, fallback: string): string {
+  return item.title?.trim() || fallback
+}
 
 /**
  * The left column is the conversation's context, not a product map: what folder the agent works
@@ -40,36 +43,30 @@ const HISTORY_LIMIT = 8
  */
 export function Sidebar() {
   const { t } = useI18n()
-  const navigate = useNavigate()
   const { sidebarCollapsed, sidebarOpen, toggleSidebar, setSidebarOpen, setPaletteOpen } = useShell()
   const {
     project,
     projects,
     running,
+    sessions,
+    activeChatId,
     newConversation,
     selectProject,
     openProject,
+    selectSession,
+    renameSession,
+    archiveSession,
+    refreshSessions,
   } = useChatSession()
 
   const compact = sidebarCollapsed
-  const [history, setHistory] = useState<SessionSummary[]>([])
   const [openFolder, setOpenFolder] = useState(false)
   const [openPath, setOpenPath] = useState('')
   const [opening, setOpening] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  const loadHistory = useCallback(async () => {
-    try {
-      const page = await apiClient.getSessions(1, HISTORY_LIMIT, 'web')
-      setHistory(page.items)
-    } catch {
-      // History is a convenience: a failed listing leaves the last one on screen.
-    }
-  }, [])
-
-  useEffect(() => {
-    void loadHistory()
-  }, [loadHistory])
+  /** Conversation being renamed in place; the row turns into an input while it is set. */
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [draftTitle, setDraftTitle] = useState('')
 
   // The palette's 「打开文件夹」 just reveals this form: the picker and the error handling stay here.
   useEffect(() => {
@@ -81,12 +78,41 @@ export function Sidebar() {
     return () => window.removeEventListener(OPEN_FOLDER_EVENT, onIntent)
   }, [setSidebarOpen])
 
-  // A finished turn is when a new session row first exists, so refresh on the falling edge.
+  // A finished turn is when a new session row first exists (and its title finally exists), so
+  // refresh on the falling edge.
   const wasRunning = useRef(false)
   useEffect(() => {
-    if (wasRunning.current && !running) void loadHistory()
+    if (wasRunning.current && !running) void refreshSessions()
     wasRunning.current = running
-  }, [running, loadHistory])
+  }, [running, refreshSessions])
+
+  const startRename = (item: SessionSummary) => {
+    setRenamingId(item.chat_id)
+    setDraftTitle(item.title ?? '')
+  }
+
+  const submitRename = async (event?: React.FormEvent) => {
+    event?.preventDefault()
+    const chatId = renamingId
+    if (!chatId) return
+    setRenamingId(null)
+    try {
+      await renameSession(chatId, draftTitle)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  /** Archive is reversible (the file stays on disk), but the row does disappear: ask first. */
+  const handleArchive = async (item: SessionSummary) => {
+    const label = sessionLabel(item, t('shell.untitledChat', '未命名对话'))
+    if (!window.confirm(t('shell.archiveConfirm', { title: label }))) return
+    try {
+      await archiveSession(item.chat_id)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
 
   const submitPath = async (path: string) => {
     const trimmed = path.trim()
@@ -285,29 +311,97 @@ export function Sidebar() {
           {t('shell.history')}
         </SidebarLabel>
         <ul className="space-y-0.5">
-          {history.length === 0 ? (
+          {sessions.length === 0 ? (
             <li className={cn('px-2 py-1 text-micro text-ink-3', compact && 'lg:hidden')}>
               {t('shell.noHistory')}
             </li>
           ) : (
-            history.map((item) => (
-              <li key={item.id}>
-                <button
-                  type="button"
-                  onClick={() => navigate(`/sessions?id=${encodeURIComponent(item.id)}`)}
-                  title={formatShortDateTime(item.updated_at)}
-                  className={cn(ROW, compact && 'lg:justify-center lg:px-0', 'text-ink-2 hover:bg-surface-2 hover:text-ink')}
-                >
-                  <History className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                  <span className={cn('min-w-0 flex-1 truncate text-left', compact && 'lg:hidden')}>
-                    {formatShortDateTime(item.updated_at)}
-                  </span>
-                  {!compact && (
-                    <span className="tabular shrink-0 text-micro text-ink-3">{item.message_count}</span>
+            sessions.map((item) => {
+              const active = item.chat_id === activeChatId
+              const label = sessionLabel(item, formatShortDateTime(item.updated_at))
+              return (
+                <li key={item.chat_id}>
+                  {renamingId === item.chat_id ? (
+                    <form
+                      onSubmit={submitRename}
+                      className={cn('px-1 pb-1', compact && 'lg:hidden')}
+                    >
+                      <input
+                        autoFocus
+                        value={draftTitle}
+                        maxLength={80}
+                        aria-label={t('shell.renameChat', '重命名对话')}
+                        onChange={(event) => setDraftTitle(event.target.value)}
+                        onBlur={() => void submitRename()}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Escape') setRenamingId(null)
+                        }}
+                        placeholder={t('shell.renamePlaceholder', '对话标题')}
+                        className="w-full rounded-control border border-line-strong bg-surface px-2 py-1 text-small text-ink placeholder:text-ink-3 focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                      />
+                    </form>
+                  ) : (
+                    <div
+                      className={cn(
+                        'group/chat relative',
+                        ROW,
+                        'pr-1',
+                        compact && 'lg:justify-center lg:px-0',
+                        active
+                          ? 'bg-surface-2 font-medium text-ink'
+                          : 'text-ink-2 hover:bg-surface-2 hover:text-ink'
+                      )}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => selectSession(item.chat_id)}
+                        title={label}
+                        aria-current={active || undefined}
+                        className={cn(
+                          'flex min-w-0 flex-1 items-center gap-2 text-left',
+                          compact && 'lg:justify-center'
+                        )}
+                      >
+                        <History className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                        <span
+                          className={cn(
+                            'min-w-0 flex-1 truncate',
+                            compact && 'lg:hidden'
+                          )}
+                        >
+                          {label}
+                        </span>
+                      </button>
+                      {!compact && (
+                        <span className="tabular shrink-0 text-micro text-ink-3 group-hover/chat:hidden">
+                          {item.message_count}
+                        </span>
+                      )}
+                      {!compact && (
+                        <span className="absolute right-1 top-1/2 hidden -translate-y-1/2 items-center gap-0.5 group-hover/chat:flex">
+                          <IconButton
+                            size="sm"
+                            className="h-6 w-6"
+                            label={t('shell.renameChat', '重命名对话')}
+                            onClick={() => startRename(item)}
+                          >
+                            <Pencil className="h-3 w-3" aria-hidden="true" />
+                          </IconButton>
+                          <IconButton
+                            size="sm"
+                            className="h-6 w-6"
+                            label={t('shell.archiveChat', '归档对话')}
+                            onClick={() => void handleArchive(item)}
+                          >
+                            <Archive className="h-3 w-3" aria-hidden="true" />
+                          </IconButton>
+                        </span>
+                      )}
+                    </div>
                   )}
-                </button>
-              </li>
-            ))
+                </li>
+              )
+            })
           )}
         </ul>
       </div>

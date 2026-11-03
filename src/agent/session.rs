@@ -399,6 +399,7 @@ impl SessionStore {
             participants: Vec::new(),
             created_at: now,
             updated_at: now,
+            ..Default::default()
         };
 
         Ok(SessionData { meta, messages })
@@ -602,6 +603,7 @@ mod tests {
             participants: vec!["user:12345".into(), "agent:main".into()],
             created_at: now,
             updated_at: now,
+            ..Default::default()
         }
     }
 
@@ -803,6 +805,7 @@ mod tests {
             participants: vec![],
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            ..Default::default()
         };
 
         store
@@ -883,6 +886,7 @@ mod tests {
             participants: vec!["user:12345".into(), "agent:main".into()],
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            ..Default::default()
         };
 
         store
@@ -953,6 +957,7 @@ mod tests {
             participants: vec!["user:user_1".into(), "agent:ui_designer".into()],
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            ..Default::default()
         };
 
         let key = "agent:ui_designer:telegram:dm:user_1";
@@ -1026,6 +1031,7 @@ mod tests {
             participants: vec!["user:12345".into(), "agent:main".into()],
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            ..Default::default()
         };
         let data = SessionData {
             meta,

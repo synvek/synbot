@@ -3,6 +3,8 @@ import type {
   SystemStatus,
   SessionSummary,
   SessionDetail,
+  CreateSessionResponse,
+  PatchSessionInput,
   ChannelInfo,
   CronJobInfo,
   AgentInfo,
@@ -163,17 +165,23 @@ export class ApiClient {
   }
 
   // Sessions
+  /**
+   * Newest first. Archived conversations stay out unless asked for: the sidebar and the history
+   * page both want the working set, and an archived row there would only be noise.
+   */
   async getSessions(
     page?: number,
     pageSize?: number,
     channel?: string,
-    scope?: string
+    scope?: string,
+    includeArchived?: boolean
   ): Promise<PaginatedResponse<SessionSummary>> {
     const params: Record<string, unknown> = {};
     if (page !== undefined) params.page = page;
     if (pageSize !== undefined) params.page_size = pageSize;
     if (channel) params.channel = channel;
     if (scope) params.scope = scope;
+    if (includeArchived) params.include_archived = true;
 
     const response = await this.client.get<ApiResponse<PaginatedResponse<SessionSummary>>>(
       '/api/sessions',
@@ -185,6 +193,24 @@ export class ApiClient {
   async getSession(id: string): Promise<SessionDetail> {
     const response = await this.client.get<ApiResponse<SessionDetail>>(`/api/sessions/${id}`);
     return response.data.data!;
+  }
+
+  /** Create an empty conversation; the daemon mints the id the console then routes to. */
+  async createSession(title?: string): Promise<CreateSessionResponse> {
+    const response = await this.client.post<ApiResponse<CreateSessionResponse>>('/api/sessions', {
+      title,
+    });
+    return response.data.data!;
+  }
+
+  /** Rename, archive, or pin a model to one conversation. */
+  async patchSession(chatId: string, patch: PatchSessionInput): Promise<void> {
+    await this.client.patch(`/api/sessions/${encodeURIComponent(chatId)}`, patch);
+  }
+
+  /** Hide a conversation from the lists; its history stays readable (DELETE = archive). */
+  async archiveSession(chatId: string): Promise<void> {
+    await this.client.delete(`/api/sessions/${encodeURIComponent(chatId)}`);
   }
 
   // Channels
