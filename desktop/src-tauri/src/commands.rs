@@ -89,14 +89,14 @@ pub async fn desktop_bootstrap(
     Ok(BootstrapInfo::new(&state.endpoint(), state.token()))
 }
 
-/// Native folder picker for "open project"; returns `None` when the user cancels.
+/// Native folder picker for "add workspace"; returns `None` when the user cancels.
 #[tauri::command]
 pub async fn desktop_pick_folder(app: AppHandle) -> Result<Option<String>, String> {
     let (sender, receiver) = tokio::sync::oneshot::channel();
 
     app.dialog()
         .file()
-        .set_title("Open project folder")
+        .set_title("Choose a workspace folder")
         .pick_folder(move |picked| {
             let _ = sender.send(picked);
         });

@@ -360,7 +360,7 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
     void createSession().catch((error) => console.error('Failed to create a conversation:', error))
   }, [createSession, messages.length, resetMessages, t])
 
-  // The desktop tray's "Open Project…" sends the folder it picked as a DOM event.
+  // The desktop tray's "Add Workspace…" sends the folder it picked as a DOM event.
   useEffect(() => onOpenProject((path) => void openProject(path)), [openProject])
 
   // The pin rides along on the message, so a switch made mid-conversation applies to the very

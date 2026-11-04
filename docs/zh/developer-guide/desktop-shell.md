@@ -84,7 +84,7 @@ object-src 'none'; base-uri 'self'; frame-ancestors 'none'
 | 菜单 id | 动作 |
 |---------|------|
 | `tray-show` | 显示并聚焦主窗口 |
-| `tray-open-project` | 向页面派发「打开项目」事件 |
+| `tray-open-project` | 向页面派发「添加工作区」事件 |
 | `tray-quit` | `app.exit(0)` |
 
 左键点击同样会恢复窗口（`show_menu_on_left_click(false)`），因此最常用的手势不会弹出菜单。托盘构建失败只记录日志，**不会**让应用启动失败。
@@ -96,13 +96,13 @@ object-src 'none'; base-uri 'self'; frame-ancestors 'none'
 
 每次关闭都会重新从 `config.json` 读取（`daemon::close_to_tray()`），因此在 **配置 → 桌面** 里保存后，下次关闭即生效，无需重启。
 
-「打开项目」需要从 Rust 跨到 React。壳会在 webview 里执行一小段脚本：
+「添加工作区」需要从 Rust 跨到 React。壳会在 webview 里执行一小段脚本：
 
 ```js
 window.dispatchEvent(new CustomEvent('synbot:open-project', { detail: "<JSON 引号包裹的路径>" }));
 ```
 
-路径在插值前先经 `serde_json` 序列化，因此含引号的目录名无法逃出字符串字面量。React 侧 `onOpenProject(handler)` 订阅该 DOM 事件并返回退订函数；`ProjectPanel` 复用了表单提交时的同一个 `openProjectPath` 回调，于是托盘与界面共享同一条代码路径。
+路径在插值前先经 `serde_json` 序列化，因此含引号的目录名无法逃出字符串字面量。React 侧 `onOpenProject(handler)` 订阅该 DOM 事件并返回退订函数；`ChatSessionContext` 直接走同一个 `openProject`，于是托盘与界面共享同一条代码路径。
 
 ## 路由
 

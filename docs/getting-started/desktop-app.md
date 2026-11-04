@@ -139,8 +139,8 @@ SYNBOT_DESKTOP=1 SYNBOT_DESKTOP_TOKEN=<64 hex chars> cargo run -- start
 
 | Feature | Where it shows up |
 |---------|-------------------|
-| System tray | Show / Open Project… / Quit; left click restores a window parked by `desktop.closeToTray` |
-| Native folder picker | The folder button next to the workspace path in the chat workbench; tray → Open Project… |
+| System tray | Show / Add Workspace… / Quit; left click restores a window parked by `desktop.closeToTray` |
+| Native folder picker | The folder button next to the workspace path in the chat workbench; tray → Add Workspace… |
 | Notifications | “Turn finished” when a run ends while the window is in the background |
 | CSP | Strict policy for the bundled page (`connect-src` limited to itself plus loopback `http`/`ws`) |
 
@@ -155,6 +155,11 @@ history, and the sidebar lists them newest first.
   behind finishes server-side and rejoins when you come back (up to the 2048-event replay buffer).
 - **Rename / archive** — the row menu renames a conversation (the title also shows in the header) or
   archives it. Archiving only hides it; the history file stays on disk.
+- **Workspace** — each conversation binds one workspace: the folder the agent reads and writes.
+  **Add workspace…** under Workspaces in the sidebar registers a local folder (the list is shared by
+  every conversation) and binds it to the current one; without a binding the conversation runs in the
+  default workspace (`~/.synbot/workspace`). **Remove from list** in the files panel drops the
+  registration only — files stay on disk, and other conversations lose the binding too.
 - **Model chip** — the chip next to the workspace pins a `provider/model` to the current
   conversation (`PATCH /api/sessions/{chat_id}`). The pin applies from the next turn on and each
   finished turn is labelled with the model that actually answered. `Default model` drops the pin.

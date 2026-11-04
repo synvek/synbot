@@ -84,7 +84,7 @@ object-src 'none'; base-uri 'self'; frame-ancestors 'none'
 | Menu id | Action |
 |---------|--------|
 | `tray-show` | Show and focus the main window |
-| `tray-open-project` | Dispatch the open-project event to the page |
+| `tray-open-project` | Dispatch the add-workspace event to the page |
 | `tray-quit` | `app.exit(0)` |
 
 Left click restores the window as well (`show_menu_on_left_click(false)`), so the menu does not pop up on the common gesture. A tray build failure is logged and *not* fatal.

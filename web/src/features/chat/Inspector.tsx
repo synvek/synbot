@@ -7,7 +7,7 @@ interface InspectorProps {
 }
 
 /**
- * The right-hand workspace panel: fixed 320px, separated by a single rule, never a floating card.
+ * The right-hand files panel: fixed 320px, separated by a single rule, never a floating card.
  * It disappears below `lg` and in focus mode (⌘.), where the transcript takes the whole width.
  *
  * A `<section>` rather than `<aside>`: it lives inside `<main>`, and a complementary landmark

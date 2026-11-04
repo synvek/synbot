@@ -59,7 +59,7 @@ fn pick_project_folder(app: &AppHandle) {
     let app = app.clone();
     app.dialog()
         .file()
-        .set_title("Open project folder")
+        .set_title("Choose a workspace folder")
         .pick_folder(move |picked| {
             let Some(path) = picked.and_then(|file| file.into_path().ok()) else {
                 return;
@@ -72,7 +72,7 @@ fn pick_project_folder(app: &AppHandle) {
 /// gets a usable app, it just never hides its window on close.
 pub fn install(app: &AppHandle) {
     let show = MenuItem::with_id(app, MENU_SHOW, "Show Synbot", true, None::<&str>);
-    let open = MenuItem::with_id(app, MENU_OPEN_PROJECT, "Open Project…", true, None::<&str>);
+    let open = MenuItem::with_id(app, MENU_OPEN_PROJECT, "Add Workspace…", true, None::<&str>);
     let quit = MenuItem::with_id(app, MENU_QUIT, "Quit Synbot", true, None::<&str>);
     let (Ok(show), Ok(open), Ok(quit)) = (show, open, quit) else {
         eprintln!("[synbot-desktop] failed to build the tray menu");

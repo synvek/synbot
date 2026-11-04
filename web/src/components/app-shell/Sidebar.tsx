@@ -68,7 +68,7 @@ export function Sidebar() {
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [draftTitle, setDraftTitle] = useState('')
 
-  // The palette's 「打开文件夹」 just reveals this form: the picker and the error handling stay here.
+  // The palette's 「添加工作区」 just reveals this form: the picker and the error handling stay here.
   useEffect(() => {
     const onIntent = () => {
       setSidebarOpen(true)
@@ -262,7 +262,7 @@ export function Sidebar() {
                   autoFocus
                   value={openPath}
                   onChange={(event) => setOpenPath(event.target.value)}
-                  placeholder={t('project.openPathPlaceholder', '输入文件夹路径…')}
+                  placeholder={t('project.openPathPlaceholder', '工作区文件夹路径…')}
                   className="w-full rounded-control border border-line-strong bg-surface px-2 py-1 text-small text-ink placeholder:text-ink-3 focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                 />
                 <div className="flex items-center gap-1">
@@ -279,7 +279,7 @@ export function Sidebar() {
                     disabled={!openPath.trim()}
                     className="flex-1"
                   >
-                    {t('shell.openFolder')}
+                    {t('shell.addWorkspace', '添加')}
                   </Button>
                   <Button size="sm" variant="ghost" onClick={() => setOpenFolder(false)}>
                     {t('common.cancel')}
@@ -291,7 +291,7 @@ export function Sidebar() {
               <button
                 type="button"
                 onClick={() => setOpenFolder(true)}
-                title={t('shell.openFolder')}
+                title={t('shell.openFolderHint', '把本地文件夹加入工作区列表，并用于当前对话')}
                 className={cn(
                   ROW,
                   compact && 'lg:justify-center lg:px-0',

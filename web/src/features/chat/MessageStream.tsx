@@ -78,8 +78,11 @@ export function MessageStream({
       }
     : !hasProject
       ? {
-          title: t('chat.emptyNoProject', 'No workspace selected'),
-          body: t('chat.emptyNoProjectHint', 'Pick a folder in the sidebar to scope the agent.'),
+          title: t('chat.emptyNoProject', 'Using the default workspace'),
+          body: t(
+            'chat.emptyNoProjectHint',
+            'Add a folder under Workspaces in the sidebar to work inside your own project.'
+          ),
         }
       : {
           title: t('chat.emptyTitle', 'Nothing here yet'),

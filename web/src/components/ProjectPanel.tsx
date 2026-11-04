@@ -341,7 +341,10 @@ export default function ProjectPanel({
   return (
     <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-surface">
       <div className="flex items-center gap-2 px-3 py-2 border-b border-line">
-        <span className="text-sm font-semibold text-ink">{t('project.title', '工作区')}</span>
+        {/* The panel is the files view of one workspace: name it, do not repeat the concept. */}
+        <span className="min-w-0 truncate text-sm font-semibold text-ink" title={project?.path}>
+          {project?.name ?? t('shell.globalWorkspace', '默认工作区')}
+        </span>
         <button
           type="button"
           onClick={() => setReloadToken((value) => value + 1)}
@@ -372,7 +375,10 @@ export default function ProjectPanel({
                 type="button"
                 onClick={onClose}
                 className="ml-auto p-0.5 rounded hover:text-error"
-                title={t('project.close', '移除')}
+                title={t(
+                  'project.closeHint',
+                  '从工作区列表移除，不删除磁盘文件（其他对话的绑定也会解除）'
+                )}
               >
                 <X size={12} />
               </button>
@@ -567,7 +573,9 @@ export default function ProjectPanel({
             </ul>
           </>
         ) : (
-          <div className="p-3 text-xs text-ink-2">{t('project.noProject', '未打开文件夹，本轮运行在默认工作区。')}</div>
+          <div className="p-3 text-xs text-ink-2">
+            {t('project.noProject', '当前对话未绑定工作区，运行在默认工作区。')}
+          </div>
         )
       ) : tab === 'changes' ? (
         <div className="flex flex-col flex-1 min-h-0">
@@ -697,7 +705,7 @@ export default function ProjectPanel({
         <DeliverablePanel project={project} />
       ) : (
         <div className="p-3 text-xs text-ink-2">
-          {t('project.noProject', '未打开文件夹，本轮运行在默认工作区。')}
+          {t('project.noProject', '当前对话未绑定工作区，运行在默认工作区。')}
         </div>
       )}
 

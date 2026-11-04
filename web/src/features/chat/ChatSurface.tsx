@@ -108,7 +108,7 @@ export function ChatSurface({
     [subagents]
   )
 
-  // ⌘B / Ctrl+B folds the workspace panel; it is the only chord the workbench owns.
+  // ⌘B / Ctrl+B folds the files panel; it is the only chord the workbench owns.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'b') {
@@ -180,8 +180,8 @@ export function ChatSurface({
                 className="hidden lg:inline-flex"
                 label={
                   inspectorOpen
-                    ? t('chat.hideInspector', 'Hide workspace panel')
-                    : t('chat.showInspector', 'Show workspace panel')
+                    ? t('chat.hideInspector', 'Hide files panel')
+                    : t('chat.showInspector', 'Show files panel')
                 }
                 aria-pressed={inspectorOpen}
                 onClick={() => setInspectorOpen((open) => !open)}
@@ -249,7 +249,7 @@ export function ChatSurface({
       </div>
 
       {inspectorOpen && !focusMode && (
-        <Inspector label={t('chat.workspacePanel', 'Workspace panel')}>
+        <Inspector label={t('chat.workspacePanel', 'Files panel')}>
           <ProjectPanel
             project={project}
             running={running}

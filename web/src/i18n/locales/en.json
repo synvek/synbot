@@ -98,7 +98,9 @@
     "archiveChat": "Archive conversation",
     "archiveConfirm": "Archive “{{title}}”? Its history stays on disk.",
     "untitledChat": "Untitled conversation",
-    "openFolder": "Open folder"
+    "openFolder": "Add workspace…",
+    "openFolderHint": "Add a local folder to the workspace list and use it for this conversation",
+    "addWorkspace": "Add"
   },
   "sidebar": {
     "overview": "Overview",
@@ -144,7 +146,7 @@
     "info": "Info"
   },
   "chat": {
-    "workspacePanel": "Workspace panel",
+    "workspacePanel": "Files panel",
     "title": "Web Chat",
     "noMessages": "No messages yet. Start a conversation!",
     "typeMessage": "Type your message...",
@@ -206,29 +208,30 @@
     "composerHint": "Enter to send · Shift+Enter for a new line · / for commands",
     "emptyOffline": "Not connected",
     "emptyOfflineHint": "Waiting for the Synbot daemon on this host.",
-    "emptyNoProject": "No workspace selected",
-    "emptyNoProjectHint": "Pick a folder in the sidebar to scope the agent.",
+    "emptyNoProject": "Using the default workspace",
+    "emptyNoProjectHint": "Add a folder under Workspaces in the sidebar to work inside your own project.",
     "emptyTitle": "Nothing here yet",
     "emptyHint": "Ask about the workspace, or type / for the available commands.",
     "offline": "Connection lost — reconnecting to the daemon",
     "views": "Views",
-    "showInspector": "Show workspace panel",
-    "hideInspector": "Hide workspace panel"
+    "showInspector": "Show files panel",
+    "hideInspector": "Hide files panel"
   },
   "project": {
     "workspaceSelect": "Workspace",
     "title": "Workspace",
     "refresh": "Refresh",
     "globalWorkspace": "Default workspace (~/.synbot/workspace)",
-    "open": "Open folder",
-    "openPathPlaceholder": "Folder path…",
+    "open": "Add workspace…",
+    "openPathPlaceholder": "Workspace folder path…",
     "browse": "Choose folder…",
-    "close": "Remove",
+    "close": "Remove from list",
+    "closeHint": "Removes it from the workspace list; files stay on disk (other conversations lose the binding too)",
     "switchNextTurn": "Switching applies to the next turn",
     "files": "Files",
     "changes": "Changed",
     "emptyFolder": "Empty folder",
-    "noProject": "No folder open — this turn runs in the default workspace.",
+    "noProject": "This conversation has no workspace bound; it runs in the default workspace.",
     "noChanges": "The last turn changed no files",
     "ruleCount": "{{count}} project rules",
     "truncated": "truncated",

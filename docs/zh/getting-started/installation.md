@@ -184,7 +184,7 @@ SUBCOMMANDS:
 ```
 ~/.synbot/
 ├── config.json          # 主配置文件
-├── workspace/           # 代理工作空间目录
+├── workspace/           # 代理工作区目录
 │   ├── files/          # 工作文件
 │   └── logs/           # 应用程序日志
 └── logs/               # 日志文件 (如果配置了)
