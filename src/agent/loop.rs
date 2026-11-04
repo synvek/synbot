@@ -59,6 +59,16 @@ fn expand_custom_command(workspace: &std::path::Path, agent_id: &str, text: Stri
     crate::commands::expand(workspace, &text).unwrap_or(text)
 }
 
+/// Where one turn runs: the folder bound to the chat, or the agent's default workspace.
+///
+/// The project name travels with the path because the system prompt has to tell the model both the
+/// folder it works in and whether that folder is the conversation's own workspace or a fallback.
+struct TurnWorkspace {
+    path: PathBuf,
+    /// `Some` only when the chat is bound to a project folder that still exists.
+    label: Option<String>,
+}
+
 pub struct AgentLoop {
     model: Arc<dyn SynbotCompletionModel>,
     workspace: PathBuf,
@@ -243,19 +253,33 @@ impl AgentLoop {
     /// Filesystem root for one turn: the project bound to `chat_id`, else the agent workspace.
     ///
     /// The folder is re-checked on every turn, so a project that was moved or deleted falls back
-    /// to the agent workspace instead of failing the chat.
-    async fn turn_workspace(&self, agent_workspace: &std::path::Path, chat_id: &str) -> PathBuf {
+    /// to the agent workspace instead of failing the chat. The project name travels back with the
+    /// path so the system prompt can say which workspace the conversation is bound to.
+    async fn turn_workspace(
+        &self,
+        agent_workspace: &std::path::Path,
+        chat_id: &str,
+    ) -> TurnWorkspace {
         let bound = self.projects.read().await.project_for_chat(chat_id);
         match bound {
-            Some(project) if project.path.is_dir() => project.path,
+            Some(project) if project.path.is_dir() => TurnWorkspace {
+                path: project.path,
+                label: Some(project.name),
+            },
             Some(project) => {
                 warn!(
                     project = %project.path.display(),
                     "Project folder is missing; falling back to the agent workspace"
                 );
-                agent_workspace.to_path_buf()
+                TurnWorkspace {
+                    path: agent_workspace.to_path_buf(),
+                    label: None,
+                }
             }
-            None => agent_workspace.to_path_buf(),
+            None => TurnWorkspace {
+                path: agent_workspace.to_path_buf(),
+                label: None,
+            },
         }
     }
 
@@ -1190,10 +1214,10 @@ impl AgentLoop {
     /// Handle /tasks: show the task board of the project this chat works in.
     async fn handle_tasks(&self, msg: &InboundMessage) -> Result<()> {
         let workspace = self.turn_workspace(&self.workspace, &msg.chat_id).await;
-        let board = crate::tasks::TaskBoard::load(&workspace);
+        let board = crate::tasks::TaskBoard::load(&workspace.path);
         self.reply_control(
             msg,
-            format!("[Tasks] {}\n{}", workspace.display(), board.summary()),
+            format!("[Tasks] {}\n{}", workspace.path.display(), board.summary()),
         )
     }
 
@@ -1482,9 +1506,11 @@ impl AgentLoop {
             let session_key = session_id.format();
 
             // A chat bound to a project works inside that folder (tools, AGENTS.md and rules).
-            let agent_workspace = self
+            let turn = self
                 .turn_workspace(&agent_ctx.workspace_dir, &msg.chat_id)
                 .await;
+            let workspace_label = turn.label;
+            let agent_workspace = turn.path;
             let tool_ctx = ToolContext {
                 agent_id: agent_id.clone(),
                 workspace: agent_workspace.clone(),
@@ -1527,7 +1553,8 @@ impl AgentLoop {
                     config::skills_dir().as_path(),
                     self.tool_sandbox_exec_kind,
                     Some(std::sync::Arc::clone(&memory_cfg_arc)),
-                );
+                )
+                .with_workspace_label(workspace_label);
                 context_builder.build_system_prompt_with_role_prompt(
                     &agent_ctx.system_prompt,
                     Some(user_content.as_str()),
@@ -1540,7 +1567,8 @@ impl AgentLoop {
                     &agent_id,
                     config::skills_dir().as_path(),
                     self.tool_sandbox_exec_kind,
-                );
+                )
+                .with_workspace_label(workspace_label);
                 context_builder.build_system_prompt_with_role_prompt(&agent_ctx.system_prompt, None)
             };
 
@@ -1753,9 +1781,11 @@ impl AgentLoop {
             let tool_defs = self.tools.rig_definitions();
 
             // A chat bound to a project works inside that folder (tools, AGENTS.md and rules).
-            let agent_workspace = self
+            let turn = self
                 .turn_workspace(&agent_ctx.workspace_dir, &msg.chat_id)
                 .await;
+            let workspace_label = turn.label;
+            let agent_workspace = turn.path;
 
             let base_content = if agent_id == "main" {
                 directive.content.clone()
@@ -1793,7 +1823,8 @@ impl AgentLoop {
                     config::skills_dir().as_path(),
                     self.tool_sandbox_exec_kind,
                     Some(std::sync::Arc::clone(&memory_cfg_arc)),
-                );
+                )
+                .with_workspace_label(workspace_label);
                 context_builder.build_system_prompt_with_role_prompt(
                     &agent_ctx.system_prompt,
                     Some(user_content.as_str()),
@@ -1806,7 +1837,8 @@ impl AgentLoop {
                     &agent_id,
                     config::skills_dir().as_path(),
                     self.tool_sandbox_exec_kind,
-                );
+                )
+                .with_workspace_label(workspace_label);
                 context_builder.build_system_prompt_with_role_prompt(&agent_ctx.system_prompt, None)
             };
 

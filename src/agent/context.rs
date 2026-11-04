@@ -24,6 +24,9 @@ pub struct ContextBuilder {
     full_config: Option<Arc<Config>>,
     skills: CompositeSkillProvider,
     tool_sandbox_exec_kind: Option<ToolSandboxExecKind>,
+    /// Human name of the project bound to this conversation, if any. `None` means the default
+    /// workspace is in use, which is what the model has to say when the user asks where it works.
+    workspace_label: Option<String>,
 }
 
 #[cfg(feature = "memory-index")]
@@ -48,6 +51,7 @@ impl ContextBuilder {
             skills: CompositeSkillProvider::default_with_fs(skills_dir),
             agent_id,
             tool_sandbox_exec_kind,
+            workspace_label: None,
         }
     }
 }
@@ -71,11 +75,19 @@ impl ContextBuilder {
             skills: CompositeSkillProvider::default_with_fs(skills_dir),
             agent_id,
             tool_sandbox_exec_kind,
+            workspace_label: None,
         }
     }
 }
 
 impl ContextBuilder {
+    /// Name the project bound to this conversation so the prompt can say where the agent works;
+    /// `None` keeps the default-workspace wording.
+    pub fn with_workspace_label(mut self, label: Option<String>) -> Self {
+        self.workspace_label = label;
+        self
+    }
+
     /// Build the full system prompt (identity + bootstrap from workspace + memory + skills).
     pub fn build_system_prompt(&self) -> String {
         self.build_system_prompt_with_role_prompt(&self.load_bootstrap_files(), None)
@@ -151,7 +163,6 @@ impl ContextBuilder {
 
     fn identity_section(&self) -> String {
         let now = Local::now().format("%Y-%m-%d %H:%M (%A)");
-        let ws = self.workspace.display();
         let in_app_sandbox = std::env::var_os("SYNBOT_IN_APP_SANDBOX").is_some();
 
         let tool_sandbox_active = self.tool_sandbox_exec_kind.is_some();
@@ -183,21 +194,7 @@ impl ContextBuilder {
             String::new()
         };
 
-        let workspace_section = match self.tool_sandbox_exec_kind {
-            Some(ToolSandboxExecKind::Docker) => format!(
-                "## Workspace\n\
-                 - **Workspace (host, for reference):** {ws}\n\
-                 - **Workspace inside tool sandbox (use this for exec paths):** `/workspace`\n\n\
-                 When using the **exec** tool, use paths under `/workspace` (e.g. `/workspace/README.md`, `cd /workspace`).\n"
-            ),
-            Some(ToolSandboxExecKind::HostNative) => format!(
-                "## Workspace\n\
-                 **Workspace path (use for exec; same path as on the host):** {ws}\n\n\
-                 Use normal paths for this OS in **exec** (e.g. Windows: `dir`, `type file.txt`). \
-                 Do not use `/workspace` unless you are on a Docker-based tool sandbox.\n"
-            ),
-            None => format!("## Workspace\n{ws}\n"),
-        };
+        let workspace_section = self.workspace_section();
 
         format!(
             "# Synbot 🐈\n\n\
@@ -208,6 +205,72 @@ impl ContextBuilder {
             env = env_section,
             workspace = workspace_section
         )
+    }
+
+    /// The one place that tells the model where "here" is.
+    ///
+    /// Tool results are part of the transcript, so a `list_dir` from an earlier turn (or from a
+    /// chat that was bound to another folder) can outlive the binding. This section is rebuilt for
+    /// every turn and explicitly wins over those results.
+    fn workspace_section(&self) -> String {
+        let ws = self.workspace.display();
+        let mut lines = vec!["## Workspace".to_string()];
+        match self.tool_sandbox_exec_kind {
+            Some(ToolSandboxExecKind::Docker) => {
+                lines.push(format!(
+                    "- **Current working directory for this turn (host):** {ws}"
+                ));
+                lines.push(
+                    "- **The same folder inside the tool sandbox:** `/workspace` — use this path for **exec**."
+                        .to_string(),
+                );
+                lines.push(
+                    "- File tools (`list_dir`, `read_file`, `write_file`, …) run on the host and resolve \
+                     relative paths against the host path above."
+                        .to_string(),
+                );
+            }
+            Some(ToolSandboxExecKind::HostNative) => {
+                lines.push(format!(
+                    "- **Current working directory for this turn:** {ws} (the same path inside the tool \
+                     sandbox)."
+                ));
+                lines.push(
+                    "- File tools and **exec** resolve relative paths here. Use normal paths for this OS in \
+                     **exec** (e.g. Windows: `dir`, `type file.txt`). Do not use `/workspace` unless you are \
+                     on a Docker-based tool sandbox."
+                        .to_string(),
+                );
+            }
+            None => {
+                lines.push(format!(
+                    "- **Current working directory for this turn:** {ws}"
+                ));
+                lines.push(
+                    "- File tools (`list_dir`, `read_file`, `write_file`, …) and **exec** resolve relative \
+                     paths against this folder."
+                        .to_string(),
+                );
+            }
+        }
+        let origin = match self.workspace_label.as_deref() {
+            Some(label) => format!("This conversation is bound to the workspace \"{label}\"."),
+            None => "This conversation is not bound to a workspace folder; it uses the default \
+                     workspace."
+                .to_string(),
+        };
+        lines.push(format!("- {origin}"));
+        lines.push(
+            "- When the user asks where you are working, answer with the path above. An earlier tool \
+             result that named another folder is stale; this line wins."
+                .to_string(),
+        );
+        lines.push(
+            "- Tools served by an external MCP server keep the root that server was started with, so `.` \
+             there does not mean this folder. Use the built-in file tools for work in the workspace."
+                .to_string(),
+        );
+        format!("{}\n", lines.join("\n"))
     }
 
     fn load_bootstrap_files(&self) -> String {
@@ -248,6 +311,43 @@ mod tests {
         assert!(prompt.contains("Workspace"));
         assert!(prompt.contains("# Skills"));
         assert!(prompt.contains("plan_write"));
+    }
+
+    /// The model must be able to say where it works, and must distrust a tool result from an older
+    /// turn that named another folder — both halves are what the `## Workspace` section exists for.
+    #[test]
+    fn workspace_section_names_the_bound_workspace_and_wins_over_tool_results() {
+        let dir = tempfile::tempdir().unwrap();
+        let shop = dir.path().join("shop");
+        std::fs::create_dir_all(&shop).unwrap();
+        let skills_dir = dir.path().join("skills");
+        std::fs::create_dir_all(&skills_dir).unwrap();
+        #[cfg(feature = "memory-index")]
+        let ctx = ContextBuilder::new(&shop, "main", &skills_dir, None, None);
+        #[cfg(not(feature = "memory-index"))]
+        let ctx = ContextBuilder::new(&shop, "main", &skills_dir, None);
+        let prompt = ctx
+            .with_workspace_label(Some("shop".to_string()))
+            .build_system_prompt();
+
+        assert!(
+            prompt.contains("Current working directory for this turn"),
+            "{prompt}"
+        );
+        assert!(prompt.contains(&shop.display().to_string()), "{prompt}");
+        assert!(
+            prompt.contains("bound to the workspace \"shop\""),
+            "{prompt}"
+        );
+        assert!(prompt.contains("this line wins"), "{prompt}");
+
+        // An unbound chat must not claim a project name it does not have.
+        #[cfg(feature = "memory-index")]
+        let ctx = ContextBuilder::new(dir.path(), "main", &skills_dir, None, None);
+        #[cfg(not(feature = "memory-index"))]
+        let ctx = ContextBuilder::new(dir.path(), "main", &skills_dir, None);
+        let prompt = ctx.build_system_prompt();
+        assert!(prompt.contains("uses the default workspace"), "{prompt}");
     }
 
     #[test]

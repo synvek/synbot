@@ -14,7 +14,7 @@
 
   - When listing or viewing files under the memory directory, use the **list_memory** tool; do not use exec/shell to run dir on ~/.synbot\memory.
 
-  - When listing files and subdirectories under the current working directory or a given path, prefer **list_dir** (use path "." for the current workspace). **list_dir** returns both subdirectories and files with clear grouping; one call is usually enough. Do not use exec/dir unless the user explicitly needs extra info like size or modification time.
+  - When listing files and subdirectories under the current working directory or a given path, prefer **list_dir** (use path "." for the current workspace). **list_dir** answers with the absolute folder it read (`Path: …`) plus its subdirectories and files with clear grouping; one call is usually enough. Do not use exec/dir unless the user explicitly needs extra info like size or modification time.
 
   - When the user says "remember", "memorize this", or similar, you must call the **remember** tool to write the content to long-term memory (MEMORY.md).
 

@@ -372,7 +372,11 @@ impl DynTool for ListDirTool {
         }
         dirs.sort();
         files.sort();
-        let mut out = Vec::new();
+        // The absolute path is part of the answer: a listing that only shows names cannot correct
+        // a model that is still quoting a folder from an earlier turn. Components are collected so
+        // `list_dir(".")` reports `…/workspace` rather than `…/workspace/.`.
+        let shown: PathBuf = path.components().collect();
+        let mut out = vec![format!("Path: {}", shown.display())];
         if !dirs.is_empty() {
             out.push("Directories:".to_string());
             for d in &dirs {
@@ -385,7 +389,7 @@ impl DynTool for ListDirTool {
                 out.push(format!("  {}", f));
             }
         }
-        if out.is_empty() {
+        if dirs.is_empty() && files.is_empty() {
             out.push("(empty directory)".to_string());
         }
         Ok(out.join("\n"))
@@ -865,5 +869,26 @@ mod project_scope_tests {
         .await
         .expect_err("path outside the project must be rejected");
         assert!(err.to_string().contains("outside current agent scope"));
+    }
+
+    /// The listing carries the folder it actually read: a name-only listing lets the next turn keep
+    /// quoting whatever workspace an older tool result mentioned.
+    #[tokio::test]
+    async fn list_dir_reports_the_folder_it_read() {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::write(project.path().join("notes.txt"), "x").unwrap();
+        let list = ListDirTool {
+            workspace: project.path().to_path_buf(),
+            restrict: true,
+        };
+        let out = list
+            .call(json!({ "path": "." }))
+            .await
+            .expect("list the project folder");
+        assert!(
+            out.starts_with(&format!("Path: {}", project.path().display())),
+            "{out}"
+        );
+        assert!(out.contains("notes.txt"), "{out}");
     }
 }
