@@ -195,10 +195,14 @@ export class ApiClient {
     return response.data.data!;
   }
 
-  /** Create an empty conversation; the daemon mints the id the console then routes to. */
-  async createSession(title?: string): Promise<CreateSessionResponse> {
+  /**
+   * Create an empty conversation; the daemon mints the id the console then routes to. `projectId`
+   * pins the workspace for the conversation's whole life — it is never offered as a switch later.
+   */
+  async createSession(title?: string, projectId?: string | null): Promise<CreateSessionResponse> {
     const response = await this.client.post<ApiResponse<CreateSessionResponse>>('/api/sessions', {
-      title,
+      ...(title ? { title } : {}),
+      ...(projectId ? { project_id: projectId } : {}),
     });
     return response.data.data!;
   }
@@ -265,6 +269,18 @@ export class ApiClient {
 
   async closeProject(id: string): Promise<void> {
     await this.client.delete(`/api/projects/${encodeURIComponent(id)}`);
+  }
+
+  /** Rename a workspace label; the folder on disk keeps its name and path. */
+  async renameProject(id: string, name: string): Promise<Project> {
+    const response = await this.client.patch<ApiResponse<Project>>(
+      `/api/projects/${encodeURIComponent(id)}`,
+      { name }
+    );
+    if (!response.data.success || !response.data.data) {
+      throw new Error(response.data.error ?? 'Failed to rename the workspace');
+    }
+    return response.data.data;
   }
 
   async getProjectFiles(id: string, path = ''): Promise<ProjectDirectory> {

@@ -16,6 +16,15 @@ interface PopoverProps {
   triggerClassName?: string
   /** Navigation menus close after a row is picked; settings menus stay open for a second change. */
   closeOnSelect?: boolean
+  /** Icon-only triggers (a `⋯` row action) drop the caret: it would be a second glyph. */
+  chevron?: boolean
+  /**
+   * `sm` fits a 28px sidebar row, `md` is the toolbar height, and `row` is a full-width line of
+   * caption text that happens to open a menu (the workspace line under the composer).
+   */
+  size?: 'sm' | 'md' | 'row'
+  /** Shown but not offered — e.g. a picker whose socket is still connecting. */
+  disabled?: boolean
   children: ReactNode
 }
 
@@ -33,6 +42,9 @@ export function Popover({
   className,
   triggerClassName,
   closeOnSelect = false,
+  chevron = true,
+  size = 'md',
+  disabled = false,
   children,
 }: PopoverProps) {
   const [open, setOpen] = useState(false)
@@ -72,17 +84,28 @@ export function Popover({
         title={text ? undefined : label}
         aria-haspopup="menu"
         aria-expanded={open}
+        disabled={disabled}
         onClick={() => setOpen((value) => !value)}
         className={cn(
-          'inline-flex items-center gap-1.5 rounded-control text-small text-ink-2',
-          'transition-colors duration-fast hover:bg-surface-2 hover:text-ink',
-          text ? 'h-8 px-2' : 'h-8 w-8 justify-center',
+          'inline-flex items-center gap-1.5 rounded-control',
+          'transition-colors duration-fast',
+          // One font size per branch: `cn` only joins, so a later `text-small` in the base would
+          // outrank an earlier `text-micro` regardless of the order the classes are written in.
+          size === 'row'
+            ? 'h-auto w-full justify-start px-1.5 py-1 text-micro text-ink-3 hover:bg-surface-2'
+            : size === 'sm'
+              ? 'h-7 w-7 justify-center px-0 text-small text-ink-2 hover:bg-surface-2 hover:text-ink'
+              : cn(
+                  'h-8 text-small text-ink-2 hover:bg-surface-2 hover:text-ink',
+                  text ? 'px-2' : 'w-8 justify-center'
+                ),
+          disabled && 'cursor-not-allowed opacity-60',
           triggerClassName
         )}
       >
         {icon}
         {text}
-        <ChevronDown className="h-3 w-3 text-ink-3" aria-hidden="true" />
+        {chevron && <ChevronDown className="h-3 w-3 text-ink-3" aria-hidden="true" />}
       </button>
       {open && (
         <div
@@ -116,17 +139,24 @@ interface MenuItemProps {
   aside?: ReactNode
   selected?: boolean
   danger?: boolean
+  /** Shown but not offered — e.g. a desktop-only action on the web build. */
+  disabled?: boolean
 }
 
-export function MenuItem({ children, onSelect, icon, aside, selected, danger }: MenuItemProps) {
+export function MenuItem({ children, onSelect, icon, aside, selected, danger, disabled }: MenuItemProps) {
   return (
     <button
       type="button"
       role="menuitem"
+      disabled={disabled}
       onClick={onSelect}
       className={cn(
         'flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-small transition-colors duration-fast',
-        danger ? 'text-error hover:bg-surface-2' : 'text-ink hover:bg-surface-2',
+        disabled
+          ? 'cursor-not-allowed text-ink-3'
+          : danger
+            ? 'text-error hover:bg-surface-2'
+            : 'text-ink hover:bg-surface-2',
         selected && 'font-medium'
       )}
     >

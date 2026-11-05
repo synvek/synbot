@@ -68,6 +68,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::desktop_bootstrap,
             commands::desktop_pick_folder,
+            commands::desktop_open_folder,
             commands::desktop_notify,
         ])
         .setup(|app| {

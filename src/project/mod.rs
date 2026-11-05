@@ -99,7 +99,16 @@ impl ProjectStore {
 
         let project = match self.data.projects.iter_mut().find(|p| p.id == id) {
             Some(existing) => {
-                existing.name = name;
+                // A name the user chose survives re-opening the same folder; a folder renamed on
+                // disk still picks up its new name, because then the two match.
+                let previous_folder = existing
+                    .path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| existing.path.display().to_string());
+                if existing.name == previous_folder {
+                    existing.name = name;
+                }
                 existing.path = canonical;
                 existing.rules = rules;
                 existing.git_head = git_head;
@@ -118,6 +127,28 @@ impl ProjectStore {
                 project
             }
         };
+        self.persist()?;
+        Ok(project)
+    }
+
+    /// Give a project a display name. The folder on disk is untouched, and the name survives
+    /// re-opening the same folder.
+    pub fn rename(&mut self, id: &str, name: &str) -> Result<Project> {
+        let name = name.trim();
+        if name.is_empty() {
+            anyhow::bail!("Project name cannot be empty");
+        }
+        if name.chars().count() > 80 {
+            anyhow::bail!("Project name is too long (max 80 characters)");
+        }
+        let index = self
+            .data
+            .projects
+            .iter()
+            .position(|p| p.id == id)
+            .ok_or_else(|| anyhow::anyhow!("Unknown project id: {id}"))?;
+        self.data.projects[index].name = name.to_string();
+        let project = self.data.projects[index].clone();
         self.persist()?;
         Ok(project)
     }
@@ -154,6 +185,11 @@ impl ProjectStore {
                 Ok(None)
             }
         }
+    }
+
+    /// `chat_id` → project id, for callers that group conversations by workspace.
+    pub fn bindings(&self) -> &HashMap<String, String> {
+        &self.data.bindings
     }
 
     /// Project currently bound to `chat_id`, if any.
@@ -364,6 +400,56 @@ mod tests {
         std::fs::remove_dir_all(&root).unwrap();
         assert!(store.project_for_chat("chat").is_some());
         assert!(store.workspace_for_chat("chat").is_none());
+    }
+
+    #[test]
+    fn rename_sets_the_label_and_survives_reopening() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("repo");
+        std::fs::create_dir_all(&root).unwrap();
+        let mut store = store(tmp.path());
+        let project = store.open(&root).unwrap();
+
+        let renamed = store.rename(&project.id, "  My Repo  ").unwrap();
+        assert_eq!(renamed.name, "My Repo");
+        assert_eq!(store.get(&project.id).unwrap().name, "My Repo");
+        // The folder on disk is untouched, and re-opening the same path keeps the chosen name.
+        assert_eq!(store.open(&root).unwrap().name, "My Repo");
+        assert_eq!(store.list().len(), 1);
+
+        let reloaded = ProjectStore::load(tmp.path().join("projects.json"));
+        assert_eq!(reloaded.get(&project.id).unwrap().name, "My Repo");
+    }
+
+    #[test]
+    fn rename_rejects_blank_names_and_unknown_ids() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("repo");
+        std::fs::create_dir_all(&root).unwrap();
+        let mut store = store(tmp.path());
+        let project = store.open(&root).unwrap();
+
+        assert!(store.rename(&project.id, "   ").is_err());
+        assert!(store.rename(&project.id, &"x".repeat(81)).is_err());
+        assert!(store.rename("missing", "Name").is_err());
+        assert_eq!(store.get(&project.id).unwrap().name, "repo");
+    }
+
+    #[test]
+    fn bindings_expose_the_chat_to_project_map() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("repo");
+        std::fs::create_dir_all(&root).unwrap();
+        let mut store = store(tmp.path());
+        let project = store.open(&root).unwrap();
+        store.bind("chat-a", Some(&project.id)).unwrap();
+        store.bind("chat-b", Some(&project.id)).unwrap();
+
+        assert_eq!(store.bindings().len(), 2);
+        assert_eq!(store.bindings().get("chat-a"), Some(&project.id));
+
+        store.bind("chat-a", None).unwrap();
+        assert_eq!(store.bindings().get("chat-a"), None);
     }
 
     #[test]

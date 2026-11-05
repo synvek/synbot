@@ -199,12 +199,14 @@ invent a fifth size.
 ## Layout
 
 The app opens on the conversation. A 264px sidebar (56px collapsed, state in
-`localStorage: shell-rail`) holds the conversation's context — new chat, workspaces, history — and
-`<main>` holds the work. There is no global top bar: the shell has no room above the transcript,
-so each page owns its header and the chat's is a 48px row carrying the view switch, the workspace
-chip, the run state and the inspector toggle. Every route except the workbench scrolls with 24px
-padding (16px at or below 768px); the chat route is `h-full overflow-hidden` and keeps the whole
-viewport for the transcript.
+`localStorage: shell-rail`) holds the conversation's context — new chat, and every workspace with
+its conversations nested underneath — and `<main>` holds the work. There is no global top bar:
+the shell has no room above the transcript, so each page owns its header and the chat's is a 48px
+row carrying the view switch, the run state and the inspector toggle. The conversation's folder is
+not a control in that bar: it sits under the composer, where it is the picker that chooses the
+folder while the transcript is still empty, and disappears once the transcript exists. Every
+route except the workbench scrolls with 24px padding (16px at or below 768px); the
+chat route is `h-full overflow-hidden` and keeps the whole viewport for the transcript.
 
 The transcript column is capped at 760px and centred; the workspace inspector is a fixed 320px
 and folds with ⌘B. Detail pages that pair a list with a panel use `minmax(0, 30rem)` for the list
@@ -272,16 +274,19 @@ rule, not a frame, marking consent.
 - **Error:** `danger` text under the field plus a 10% danger tint on the border; the label stays.
 
 ### Navigation
-- **Sidebar:** the conversation's context, not a product map — `新对话`, the workspace list (the
-  bound folder marked with an accent check), the eight most recent sessions, and a footer with
-  「更多」, the account menu and the daemon dot. 28px rows, 13px labels, `surface-2` on the current
-  row; collapsed to 56px it keeps the icons and moves every label into a tooltip.
+- **Sidebar:** the conversation's context, not a product map — `新对话`, then one foldable group per
+  workspace (the default workspace first) with its conversations nested inside. The workspace row
+  carries `+` (new conversation pinned to that folder) and `⋯` (open folder, rename, remove); a
+  conversation's workspace is fixed once its first message goes out — until then the line under the
+  composer is a picker, so no row offers a switch. A footer holds 「更多」,
+  the account menu and the daemon dot. 28px rows, 13px labels, `surface-2` on the current row;
+  collapsed to 56px it keeps the workspace icons and moves every label into a tooltip.
 - **More menu / account menu:** the eleven admin pages, grouped as Workspace / Automation /
   Extensions / System, open upward from the sidebar footer; appearance, accent, language, focus
   mode and sign-out sit beside them in the account menu. Both are `Popover` menus, so they close
   on Esc, on an outside click, and return focus to their trigger.
-- **Chat header:** the only bar in the app. 48px, view switch on the left, workspace chip, run
-  state and panel toggle on the right; the offline rule sits beneath it, not across the shell.
+- **Chat header:** the only bar in the app. 48px, view switch on the left, run state and panel
+  toggle on the right; the offline rule sits beneath it, not across the shell.
 - **Command palette:** ⌘K/Ctrl+K, listbox semantics, ↑↓/↵/Esc, Tab trapped inside, focus returned
   to where it came from. It reaches all thirteen routes, `新对话`, `打开文件夹`, the six accents,
   the three appearance modes, focus mode and sign-out.

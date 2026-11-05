@@ -17,19 +17,28 @@ import type { CommandInfo, ModelOverride, Project, SessionSummary } from '../../
 import type { PendingPlan, ProjectInfo, SubagentInfo } from '../../types/agentEvents'
 import type { ChatMessage } from '../../types/websocket'
 
-/** How many past conversations the sidebar lists. */
-const RECENT_LIMIT = 20
+/** How many past conversations the sidebar lists (grouped by workspace). */
+const RECENT_LIMIT = 50
 
 interface ChatSessionValue {
   /** Chat the socket is bound to (`null` until the first conversation resolves). */
   activeChatId: string | null
-  /** Recent web conversations, newest first — the sidebar's history column. */
+  /** Recent web conversations, newest first — the sidebar nests them under their workspace. */
   sessions: SessionSummary[]
   connected: boolean
   running: boolean
   messages: ChatMessage[]
-  /** Folder the agent works in right now (`null` = the global workspace). */
+  /**
+   * Folder this conversation works in (`null` = the default workspace). Chosen when the
+   * conversation is created and fixed for its whole life: there is no switch to offer.
+   */
   project: ProjectInfo | null
+  /**
+   * Workspace id of the open conversation (`null` = the default workspace). This is what 「新对话」
+   * inherits, and what the sidebar highlights; it falls back to the listing so a fresh connection
+   * does not point at the wrong folder for a frame.
+   */
+  workspaceId: string | null
   planVersion: number
   subagents: SubagentInfo[]
   /** Workspace slash commands for the composer picker. */
@@ -53,21 +62,34 @@ interface ChatSessionValue {
   send: (content: string) => void
   cancel: () => void
   approve: (requestId: string, approved: boolean) => void
-  selectProject: (projectId: string | null) => void
-  /** Register a folder (if needed) and bind the conversation to it. */
-  openProject: (path: string) => Promise<Project>
-  closeProject: (projectId: string) => Promise<void>
+  /** Register a folder in the workspace list; no conversation is bound by it. */
+  addWorkspace: (path: string) => Promise<Project>
+  /** Rename a workspace label; the folder on disk is untouched. */
+  renameWorkspace: (projectId: string, name: string) => Promise<void>
+  /** Forget a workspace; its conversations fall back to the default workspace. */
+  removeWorkspace: (projectId: string) => Promise<void>
+  /**
+   * Point the open conversation at another workspace. Only the composer's picker calls this, and
+   * only while the conversation is empty: once a message exists the folder is part of its record.
+   */
+  selectWorkspace: (projectId: string | null) => void
   refreshProjects: () => Promise<void>
   refreshSessions: () => Promise<void>
   /** Switch to another conversation; the socket reconnects and replays its history. */
   selectSession: (chatId: string) => void
-  /** Mint a conversation, then navigate to it. Resolves with the new chat id. */
-  createSession: (title?: string) => Promise<string>
+  /**
+   * Mint a conversation, then navigate to it. Resolves with the new chat id. `projectId` pins the
+   * workspace for good; omit it for the default workspace.
+   */
+  createSession: (title?: string, projectId?: string | null) => Promise<string>
   renameSession: (chatId: string, title: string) => Promise<void>
   /** Hide a conversation from the lists; its history stays on disk. */
   archiveSession: (chatId: string) => Promise<void>
-  /** Start over in a brand-new conversation. */
-  newConversation: () => void
+  /**
+   * Start over in a brand-new conversation. Without an argument it inherits the open
+   * conversation's workspace; pass an id (or `null`) to pick one explicitly.
+   */
+  newConversation: (projectId?: string | null) => void
 }
 
 const ChatSessionContext = createContext<ChatSessionValue | undefined>(undefined)
@@ -89,10 +111,14 @@ function chatIdFromPath(pathname: string): string | null {
  * that ties them together.
  *
  * It lives in the shell rather than on the chat page for two reasons: the sidebar issues
- * conversation commands (new conversation, switch chat, switch workspace) on every route, and a
- * turn that finishes while the operator is reading a log still has to raise its desktop
- * notification. The route is the source of truth for *which* chat is open, but the id is kept in
- * state so leaving `/chat` for an admin page does not tear the socket down mid-turn.
+ * conversation commands (new conversation, switch chat, new conversation inside a workspace) on
+ * every route, and a turn that finishes while the operator is reading a log still has to raise
+ * its desktop notification. The route is the source of truth for *which* chat is open, but the
+ * id is kept in state so leaving `/chat` for an admin page does not tear the socket down
+ * mid-turn.
+ *
+ * A conversation's workspace is decided when it is created and never changes: the sidebar groups
+ * conversations under the folder they belong to, so there is no 「switch workspace」 here at all.
  */
 export function ChatSessionProvider({ children }: { children: ReactNode }) {
   const { t } = useI18n()
@@ -149,6 +175,10 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
   const storedModel = sessions.find((item) => item.chat_id === activeChatId)?.model_override ?? null
   const modelOverride = pendingPin && pendingPin.chatId === activeChatId ? pendingPin.model : storedModel
 
+  /** Workspace of the open conversation: the socket knows it, the listing is the fallback. */
+  const workspaceId =
+    project?.id ?? sessions.find((item) => item.chat_id === activeChatId)?.project_id ?? null
+
   /**
    * Plan mode is a per-conversation switch the daemon owns (it clears it once a plan is proposed),
    * so the pill shows a local pin, then the listing, and never a stale `true` next to a plan card.
@@ -196,8 +226,8 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const createSession = useCallback(
-    async (title?: string) => {
-      const created = await apiClient.createSession(title)
+    async (title?: string, projectId?: string | null) => {
+      const created = await apiClient.createSession(title, projectId)
       setActiveChatId(created.chat_id)
       navigate(`/chat/${encodeURIComponent(created.chat_id)}`)
       await refreshSessions()
@@ -266,11 +296,11 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
         // The open conversation just disappeared from the list: land on the next one instead of
         // leaving the transcript bound to a chat the sidebar no longer shows.
         if (remaining.length > 0) selectSession(remaining[0].chat_id)
-        else await createSession()
+        else await createSession(undefined, workspaceId)
       }
       await refreshSessions()
     },
-    [activeChatId, createSession, refreshSessions, selectSession, sessions]
+    [activeChatId, createSession, refreshSessions, selectSession, sessions, workspaceId]
   )
 
   // Landing on `/chat` without an id resolves to the most recent conversation, minting one on a
@@ -331,37 +361,84 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
     wasRunning.current = running
   }, [running, messages, t])
 
-  const openProject = useCallback(
-    async (rawPath: string) => {
-      const opened = await apiClient.openProject(rawPath.trim())
-      await refreshProjects()
-      selectProject(opened.id)
-      return opened
+  const selectWorkspace = useCallback(
+    (projectId: string | null) => {
+      // The picker only exists before the first message, and the daemon writes the binding — so a
+      // conversation that already started (or a socket that is not up yet) is left untouched.
+      if (!activeChatId || !connected || messages.length > 0) return
+      selectProject(projectId)
+      // Regroup the sidebar on the spot: waiting for the next listing makes the row jump folders a
+      // beat after the caption already showed the new one.
+      setSessions((prev) =>
+        prev.map((item) =>
+          item.chat_id === activeChatId ? { ...item, project_id: projectId } : item
+        )
+      )
     },
-    [refreshProjects, selectProject]
+    [activeChatId, connected, messages.length, selectProject]
   )
 
-  const closeProject = useCallback(
+  const addWorkspace = useCallback(
+    async (rawPath: string) => {
+      // Registering a folder is not the same act as binding a conversation to it: the new
+      // workspace appears in the sidebar with a 「+」 that mints a conversation inside it.
+      const opened = await apiClient.openProject(rawPath.trim())
+      await refreshProjects()
+      return opened
+    },
+    [refreshProjects]
+  )
+
+  const renameWorkspace = useCallback(
+    async (projectId: string, name: string) => {
+      const trimmed = name.trim()
+      if (!trimmed) return
+      // The row updates on the spot; the refetch below only confirms it.
+      setProjects((prev) =>
+        prev.map((item) => (item.id === projectId ? { ...item, name: trimmed } : item))
+      )
+      try {
+        await apiClient.renameProject(projectId, trimmed)
+      } finally {
+        await refreshProjects()
+      }
+    },
+    [refreshProjects]
+  )
+
+  const removeWorkspace = useCallback(
     async (projectId: string) => {
       await apiClient.closeProject(projectId)
       await refreshProjects()
-      selectProject(null)
+      // The daemon drops every binding to the folder; the open socket still holds it in memory,
+      // so clear it there too. Conversations keep their history and fall back to the default
+      // workspace on their next turn.
+      if (workspaceId === projectId) selectProject(null)
+      await refreshSessions()
     },
-    [refreshProjects, selectProject]
+    [refreshProjects, refreshSessions, selectProject, workspaceId]
   )
 
   // A new conversation is a new chat id, so nothing has to be cleared on the daemon: the old one
-  // keeps its history and stays one click away in the sidebar.
-  const newConversation = useCallback(() => {
-    if (messages.length > 0 && !window.confirm(t('shell.newChatConfirm'))) return
-    // The transcript belongs to the chat being left; dropping it now avoids a frame of the old
-    // conversation under the new URL while the socket reconnects.
-    resetMessages()
-    void createSession().catch((error) => console.error('Failed to create a conversation:', error))
-  }, [createSession, messages.length, resetMessages, t])
+  // keeps its history and stays one click away in the sidebar. That is also why there is no
+  // "this clears your history" prompt: the transcript being left is never lost.
+  const newConversation = useCallback(
+    (projectId?: string | null) => {
+      // The transcript belongs to the chat being left; dropping it now avoids a frame of the old
+      // conversation under the new URL while the socket reconnects.
+      resetMessages()
+      // `undefined` inherits the open conversation's workspace — that is the sidebar's primary
+      // 「新对话」; a workspace row passes its own id, the default group passes `null`.
+      const target = projectId === undefined ? workspaceId : projectId
+      void createSession(undefined, target).catch((error) =>
+        console.error('Failed to create a conversation:', error)
+      )
+    },
+    [createSession, resetMessages, workspaceId]
+  )
 
   // The desktop tray's "Add Workspace…" sends the folder it picked as a DOM event.
-  useEffect(() => onOpenProject((path) => void openProject(path)), [openProject])
+  useEffect(() => onOpenProject((path) => void addWorkspace(path)), [addWorkspace])
 
   // The pin rides along on the message, so a switch made mid-conversation applies to the very
   // next turn without waiting for the session list to catch up.
@@ -378,6 +455,7 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
       running,
       messages,
       project,
+      workspaceId,
       planVersion,
       subagents,
       commands,
@@ -392,9 +470,10 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
       send: sendWithModel,
       cancel,
       approve: sendApprovalResponse,
-      selectProject,
-      openProject,
-      closeProject,
+      selectWorkspace,
+      addWorkspace,
+      renameWorkspace,
+      removeWorkspace,
       refreshProjects,
       refreshSessions,
       selectSession,
@@ -410,6 +489,7 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
       running,
       messages,
       project,
+      workspaceId,
       planVersion,
       subagents,
       commands,
@@ -424,9 +504,10 @@ export function ChatSessionProvider({ children }: { children: ReactNode }) {
       sendWithModel,
       cancel,
       sendApprovalResponse,
-      selectProject,
-      openProject,
-      closeProject,
+      selectWorkspace,
+      addWorkspace,
+      renameWorkspace,
+      removeWorkspace,
       refreshProjects,
       refreshSessions,
       selectSession,

@@ -68,7 +68,6 @@ const renderPanel = (turnId: string | null) =>
         changedFiles={[]}
         turnId={turnId}
         focusFile={null}
-        onClose={() => {}}
       />
     </I18nProvider>
   );
@@ -129,7 +128,6 @@ describe('ProjectPanel checkpoint view', () => {
           turnId="turn-1"
           focusFile={null}
           onUndone={onUndone}
-          onClose={() => {}}
         />
       </I18nProvider>
     );
@@ -152,7 +150,6 @@ describe('ProjectPanel checkpoint view', () => {
           changedFiles={[{ path: 'src/lib.rs', kind: 'modified' }]}
           turnId="turn-2"
           focusFile={null}
-          onClose={() => {}}
         />
       </I18nProvider>
     );
@@ -244,7 +241,6 @@ describe('ProjectPanel checkpoint view', () => {
           changedFiles={[]}
           turnId={null}
           focusFile={null}
-          onClose={() => {}}
         />
       </I18nProvider>
     );
@@ -293,7 +289,6 @@ describe('ProjectPanel checkpoint view', () => {
           changedFiles={[]}
           turnId={null}
           focusFile={null}
-          onClose={() => {}}
         />
       </I18nProvider>
     );

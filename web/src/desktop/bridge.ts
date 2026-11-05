@@ -62,6 +62,20 @@ export async function pickFolder(): Promise<string | null> {
 }
 
 /**
+ * Opens a folder in the OS file manager. Returns `false` on the web build, where there is no
+ * native window to hand the path to.
+ */
+export async function openFolderInOs(path: string): Promise<boolean> {
+  if (!isDesktop()) return false;
+  try {
+    await invoke('desktop_open_folder', { path });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * System notification for a finished turn. Failures are swallowed on purpose: a missing
  * notification permission must never break the chat.
  */

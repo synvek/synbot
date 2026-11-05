@@ -10,7 +10,6 @@ import { useShell } from '../../components/app-shell/ShellContext'
 import { Composer } from './Composer'
 import { MessageStream } from './MessageStream'
 import { Inspector } from './Inspector'
-import { WorkspaceChip } from './WorkspaceChip'
 import { ModelChip } from './ModelChip'
 
 // xterm is ~340KB: load it only when the terminal tab is opened for the first time.
@@ -24,7 +23,9 @@ interface ChatSurfaceProps {
   running: boolean
   messages: ChatMessage[]
   project: ProjectInfo | null
-  /** Registered folders, for the workspace chip in the header. */
+  /** Workspace id of the open conversation (`null` = the default workspace). */
+  workspaceId: string | null
+  /** Registered folders, so a renamed workspace shows its new label. */
   projects: Project[]
   /** Model pinned to this conversation, for the chip next to the workspace. */
   model: ModelOverride | null
@@ -42,22 +43,24 @@ interface ChatSurfaceProps {
   onApprove: (requestId: string, approved: boolean) => void
   onDecidePlan: (approve: boolean) => void
   onTogglePlanMode: (enabled: boolean) => void
-  onSelectProject: (projectId: string | null) => void
   onSelectModel: (model: ModelOverride | null) => void
-  onCloseProject: () => void
+  /** Re-pin the conversation's workspace; the composer only offers it while it is empty. */
+  onSelectWorkspace: (projectId: string | null) => void
 }
 
 /**
  * The workbench: transcript in the middle, tabs for the shell the agent is running in, and one
  * panel on the right that owns everything file-shaped. Its header is now the app's only bar —
- * the workspace chip, the view switch, and the panel toggle all live here. Nothing here knows the
- * WebSocket protocol; it renders what the page hands it.
+ * the view switch and the panel toggle live there. The conversation's workspace is not a control
+ * in that bar: it lives under the composer, where it is a picker until the first message and a
+ * caption after that. Nothing here knows the WebSocket protocol; it renders what the page hands it.
  */
 export function ChatSurface({
   connected,
   running,
   messages,
   project,
+  workspaceId,
   projects,
   model,
   pendingPlan,
@@ -71,9 +74,8 @@ export function ChatSurface({
   onApprove,
   onDecidePlan,
   onTogglePlanMode,
-  onSelectProject,
   onSelectModel,
-  onCloseProject,
+  onSelectWorkspace,
 }: ChatSurfaceProps) {
   const { t } = useI18n()
   const { focusMode, setSidebarOpen } = useShell()
@@ -107,6 +109,20 @@ export function ChatSurface({
     () => subagents.filter((agent) => agent.state === 'running').length,
     [subagents]
   )
+
+  /**
+   * Current workspace, resolved through the registered list so a rename shows up without a
+   * reconnect — and through the id rather than the socket's echo, so a pick in the composer is
+   * reflected the moment it is made.
+   */
+  const workspace = useMemo(() => {
+    if (!workspaceId) return null
+    const registered = projects.find((item) => item.id === workspaceId)
+    if (registered) return { name: registered.name, path: registered.path }
+    return project && project.id === workspaceId
+      ? { name: project.name, path: project.path }
+      : null
+  }, [workspaceId, project, projects])
 
   // ⌘B / Ctrl+B folds the files panel; it is the only chord the workbench owns.
   useEffect(() => {
@@ -167,12 +183,6 @@ export function ChatSurface({
               </span>
             )}
             <ModelChip value={model} running={running} onChange={onSelectModel} />
-            <WorkspaceChip
-              project={project}
-              projects={projects}
-              running={running}
-              onSelect={onSelectProject}
-            />
             {!focusMode && (
               <IconButton
                 size="sm"
@@ -203,7 +213,7 @@ export function ChatSurface({
           <MessageStream
             messages={messages}
             connected={connected}
-            hasProject={!!project}
+            hasProject={workspaceId !== null}
             pendingPlan={pendingPlan}
             planApproved={planApproved}
             onApprove={(requestId) => onApprove(requestId, true)}
@@ -219,6 +229,11 @@ export function ChatSurface({
             onTogglePlanMode={onTogglePlanMode}
             onSend={onSend}
             onStop={onStop}
+            workspace={workspace}
+            workspaceId={workspaceId}
+            workspaces={projects}
+            showWorkspace={messages.length === 0}
+            onSelectWorkspace={onSelectWorkspace}
           />
         </div>
 
@@ -257,7 +272,6 @@ export function ChatSurface({
             turnId={lastTurnId}
             focusFile={focusFile}
             planVersion={planVersion}
-            onClose={onCloseProject}
             onUndone={() => setFocusFile(null)}
           />
         </Inspector>

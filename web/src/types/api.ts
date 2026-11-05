@@ -68,6 +68,11 @@ export interface SessionSummary {
   plan_mode: boolean;
   /** Model pinned to this conversation; `null` means the configured default. */
   model_override: ModelOverride | null;
+  /**
+   * Workspace the conversation works in (a project id), fixed when it was created; `null` means
+   * the default workspace. The sidebar groups conversations by it.
+   */
+  project_id: string | null;
   message_count: number;
   created_at: string;
   updated_at: string;

@@ -37,6 +37,12 @@ pub struct OpenProjectRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct RenameProjectRequest {
+    /// New display name (trimmed; the folder on disk keeps its path).
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct PathQuery {
     #[serde(default)]
     pub path: String,
@@ -77,6 +83,21 @@ pub async fn open_project(
     let mut store = state.projects.write().await;
     let project = store
         .open(&path)
+        .map_err(|e| ApiError::BadRequest(format!("{e:#}")))?;
+    Ok(HttpResponse::Ok().json(ApiResponse::success(project)))
+}
+
+/// PATCH /api/projects/{id} — rename a workspace. Only the label changes; the folder is untouched
+/// and every conversation bound to it keeps working.
+pub async fn rename_project(
+    state: web::Data<AppState>,
+    path: web::Path<String>,
+    body: web::Json<RenameProjectRequest>,
+) -> Result<HttpResponse> {
+    let id = path.into_inner();
+    let mut store = state.projects.write().await;
+    let project = store
+        .rename(&id, &body.name)
         .map_err(|e| ApiError::BadRequest(format!("{e:#}")))?;
     Ok(HttpResponse::Ok().json(ApiResponse::success(project)))
 }

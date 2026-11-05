@@ -31,7 +31,7 @@ export interface ChangedFile {
 interface ProjectPanelProps {
   /** Folder the agent works in right now (`null` = global workspace). */
   project: Project | null;
-  /** A turn is running: switching folders only affects the next turn. */
+  /** A turn is running: the undo button waits for it to finish. */
   running: boolean;
   /** Files touched by the most recent turn. */
   changedFiles: ChangedFile[];
@@ -43,8 +43,6 @@ interface ProjectPanelProps {
   onUndone?: (turnId: string) => void;
   /** Bumped by the socket on `plan_updated`, so the board reflects agent-written plans. */
   planVersion?: number;
-  /** Drop the folder binding; the sidebar picks the next workspace. */
-  onClose: () => void;
 }
 
 function formatBytes(size: number) {
@@ -66,7 +64,6 @@ export default function ProjectPanel({
   focusFile,
   onUndone,
   planVersion = 0,
-  onClose,
 }: ProjectPanelProps) {
   const { t } = useI18n();
   const [dirPath, setDirPath] = useState('');
@@ -371,23 +368,7 @@ export default function ProjectPanel({
               {project.rules.length > 0 && (
                 <span>{t('project.ruleCount', { count: project.rules.length })}</span>
               )}
-              <button
-                type="button"
-                onClick={onClose}
-                className="ml-auto p-0.5 rounded hover:text-error"
-                title={t(
-                  'project.closeHint',
-                  '从工作区列表移除，不删除磁盘文件（其他对话的绑定也会解除）'
-                )}
-              >
-                <X size={12} />
-              </button>
             </div>
-            {running && (
-              <div className="text-[11px] text-ink-2">
-                {t('project.switchNextTurn', '切换将在下一轮生效')}
-              </div>
-            )}
             {git?.is_repo && (
               <button
                 type="button"

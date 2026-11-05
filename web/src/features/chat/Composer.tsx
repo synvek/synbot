@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, ListChecks, Square } from 'lucide-react'
+import { ArrowUp, Check, Folder, FolderPlus, Home, ListChecks, Square } from 'lucide-react'
+import { requestOpenFolder } from '../../components/app-shell/intents'
 import { useI18n } from '../../i18n/I18nContext'
-import { Button } from '../../ui'
-import type { CommandInfo } from '../../types/api'
+import { Button, MenuItem, MenuLabel, MenuSeparator, Popover } from '../../ui'
+import type { CommandInfo, Project } from '../../types/api'
 
 interface ComposerProps {
   connected: boolean
@@ -14,6 +15,15 @@ interface ComposerProps {
   onTogglePlanMode: (enabled: boolean) => void
   onSend: (text: string) => void
   onStop: () => void
+  /** Folder this conversation is pinned to (`null` = the default workspace). */
+  workspace: { name: string; path: string } | null
+  /** Workspace id of the open conversation, for the picker's check mark. */
+  workspaceId: string | null
+  /** Registered folders, so a new conversation can start in any of them. */
+  workspaces: Project[]
+  /** Show the workspace line: only worth the space before the first message exists. */
+  showWorkspace: boolean
+  onSelectWorkspace: (projectId: string | null) => void
 }
 
 /** Five lines of text plus the padding: past this the textarea scrolls instead of growing. */
@@ -32,6 +42,11 @@ export function Composer({
   onTogglePlanMode,
   onSend,
   onStop,
+  workspace,
+  workspaceId,
+  workspaces,
+  showWorkspace,
+  onSelectWorkspace,
 }: ComposerProps) {
   const { t } = useI18n()
   const [value, setValue] = useState('')
@@ -139,7 +154,7 @@ export function Composer({
             </div>
           )}
 
-          <div className="rounded-panel border border-line-strong bg-surface-2 transition-colors duration-fast focus-within:border-accent">
+          <div className="overflow-hidden rounded-panel border border-line-strong bg-surface-2 transition-colors duration-fast focus-within:border-accent">
             <label className="sr-only" htmlFor="composer-input">
               {t('chat.typeMessage', 'Message')}
             </label>
@@ -203,6 +218,78 @@ export function Composer({
               </div>
             </div>
           </div>
+
+          {/* The conversation's workspace, named where the work starts. Until the first message
+              exists it is a picker — the folder is decided here, not in the header — and after
+              that it is a caption that would only repeat what the work already says. It sits
+              outside the bordered box: the menu has to escape that overflow. */}
+          {showWorkspace && (
+            <Popover
+              label={t('chat.selectWorkspace', '选择工作区')}
+              side="top"
+              align="start"
+              size="row"
+              closeOnSelect
+              disabled={!connected}
+              triggerClassName="mt-1"
+              icon={<Folder className="h-3 w-3 shrink-0" aria-hidden="true" />}
+              text={
+                <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                  {workspace ? (
+                    <>
+                      <span className="shrink-0 font-medium text-ink-2">{workspace.name}</span>
+                      <span className="min-w-0 truncate font-mono">{workspace.path}</span>
+                    </>
+                  ) : (
+                    <span className="min-w-0 truncate">
+                      {t('chat.workspaceDefaultHint', '默认工作区 · 点击选择工作目录')}
+                    </span>
+                  )}
+                </span>
+              }
+            >
+              <MenuLabel>{t('chat.selectWorkspace', '选择工作区')}</MenuLabel>
+              <p className="px-2.5 pb-1 text-micro text-ink-3">
+                {t('chat.workspaceFixed', '发出首条消息后不可更改')}
+              </p>
+              <MenuItem
+                icon={<Home className="h-3.5 w-3.5" />}
+                selected={workspaceId === null}
+                onSelect={() => onSelectWorkspace(null)}
+                aside={
+                  workspaceId === null ? (
+                    <Check className="h-3 w-3 text-accent" aria-hidden="true" />
+                  ) : undefined
+                }
+              >
+                {t('shell.globalWorkspace', '默认工作区')}
+              </MenuItem>
+              {workspaces.map((item) => (
+                <MenuItem
+                  key={item.id}
+                  icon={<Folder className="h-3.5 w-3.5" />}
+                  selected={item.id === workspaceId}
+                  onSelect={() => onSelectWorkspace(item.id)}
+                  aside={
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      {item.id === workspaceId && (
+                        <Check className="h-3 w-3 shrink-0 text-accent" aria-hidden="true" />
+                      )}
+                      <span className="max-w-[45%] truncate font-mono text-micro text-ink-3">
+                        {item.path}
+                      </span>
+                    </span>
+                  }
+                >
+                  {item.name}
+                </MenuItem>
+              ))}
+              <MenuSeparator />
+              <MenuItem icon={<FolderPlus className="h-3.5 w-3.5" />} onSelect={requestOpenFolder}>
+                {t('shell.openFolder', '添加工作区…')}
+              </MenuItem>
+            </Popover>
+          )}
         </div>
       </div>
     </div>

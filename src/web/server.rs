@@ -48,6 +48,7 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig, state: AppState, auth: Bas
                 .route("/projects", web::get().to(projects::get_projects))
                 .route("/projects", web::post().to(projects::open_project))
                 .route("/projects/{id}", web::delete().to(projects::delete_project))
+                .route("/projects/{id}", web::patch().to(projects::rename_project))
                 .route(
                     "/projects/{id}/files",
                     web::get().to(projects::get_project_files),

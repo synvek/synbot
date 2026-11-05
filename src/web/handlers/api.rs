@@ -188,6 +188,9 @@ pub struct SessionSummary {
     pub plan_mode: bool,
     /// Model pinned to this conversation; `null` means the configured default.
     pub model_override: Option<crate::agent::session_manager::ModelOverride>,
+    /// Workspace this conversation belongs to (`null` = the default workspace). The sidebar groups
+    /// conversations by it; it is fixed at creation and not editable afterwards.
+    pub project_id: Option<String>,
     pub message_count: usize,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -220,6 +223,17 @@ pub async fn get_sessions(
     state: web::Data<AppState>,
     query: web::Query<SessionQuery>,
 ) -> Result<HttpResponse> {
+    // Which workspace each conversation belongs to. Read before the session manager: the project
+    // store is locked first everywhere else, and reversing that order here would invite a deadlock.
+    let bindings: std::collections::HashMap<String, String> = {
+        let store = state.projects.read().await;
+        let mut map = std::collections::HashMap::new();
+        for (chat_id, project_id) in store.bindings() {
+            map.insert(chat_id.clone(), project_id.clone());
+        }
+        map
+    };
+
     let sm = state.session_manager.read().await;
 
     // Get all sessions from SessionManager
@@ -269,6 +283,7 @@ pub async fn get_sessions(
             };
 
             let identifier = meta.id.identifier.clone().unwrap_or_default();
+            let project_id = bindings.get(&identifier).cloned();
 
             Some(SessionSummary {
                 chat_id: identifier.clone(),
@@ -281,6 +296,7 @@ pub async fn get_sessions(
                 pending_plan_id: meta.pending_plan.as_ref().map(|plan| plan.id.clone()),
                 plan_mode: meta.plan_mode,
                 model_override: meta.model_override.clone(),
+                project_id,
                 message_count,
                 created_at: meta.created_at,
                 updated_at: meta.updated_at,
@@ -450,6 +466,10 @@ pub(crate) async fn persist_session_meta(
 pub struct CreateSessionRequest {
     #[serde(default)]
     pub title: Option<String>,
+    /// Workspace the conversation belongs to (a project id). Fixed for the conversation's lifetime,
+    /// so it is decided at creation and never offered as a switch afterwards.
+    #[serde(default)]
+    pub project_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -468,7 +488,8 @@ pub async fn create_session(
 ) -> Result<HttpResponse> {
     use crate::web::handlers::ws_agent::{is_valid_chat_id, new_chat_id};
 
-    let title = body.and_then(|body| body.into_inner().title);
+    let body = body.map(|body| body.into_inner()).unwrap_or_default();
+    let title = body.title;
     let mut chat_id = new_chat_id();
     for _ in 0..5 {
         if !is_valid_chat_id(&chat_id) {
@@ -485,6 +506,14 @@ pub async fn create_session(
             break;
         }
         chat_id = new_chat_id();
+    }
+    // Bind before the session exists: an unknown workspace id is a 400 with nothing half-made,
+    // and the binding is what makes every later turn work in that folder.
+    if let Some(project_id) = body.project_id {
+        let mut store = state.projects.write().await;
+        store
+            .bind(&chat_id, Some(&project_id))
+            .map_err(|e| ApiError::BadRequest(format!("{e:#}")))?;
     }
     let session_id = web_session_id(&chat_id);
     {

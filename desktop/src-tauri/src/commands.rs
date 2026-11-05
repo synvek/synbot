@@ -110,6 +110,31 @@ pub async fn desktop_pick_folder(app: AppHandle) -> Result<Option<String>, Strin
         .map(|path| path.to_string_lossy().into_owned()))
 }
 
+/// Reveals a workspace folder in the OS file manager (the workspace menu's 「打开文件夹」).
+///
+/// The shell has no opener plugin: one `spawn` on the platform's default handler is all this
+/// needs, and it keeps the bundle free of another dependency.
+#[tauri::command]
+pub fn desktop_open_folder(path: String) -> Result<(), String> {
+    let target = std::path::Path::new(&path);
+    if !target.is_dir() {
+        return Err(format!("Folder no longer exists: {path}"));
+    }
+
+    #[cfg(target_os = "macos")]
+    let mut command = std::process::Command::new("open");
+    #[cfg(target_os = "windows")]
+    let mut command = std::process::Command::new("explorer");
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = std::process::Command::new("xdg-open");
+
+    command
+        .arg(target)
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("Failed to open the folder: {error}"))
+}
+
 /// System notification, used when a turn finishes while the window is in the background.
 #[tauri::command]
 pub fn desktop_notify(app: AppHandle, title: String, body: String) -> Result<(), String> {
